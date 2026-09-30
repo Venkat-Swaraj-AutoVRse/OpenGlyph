@@ -1238,7 +1238,7 @@ namespace LightSide
             var requiredLength = cpCount + 1;
             buf.breakOpportunities.EnsureCount(requiredLength);
 
-            SharedPipelineComponents.LineBreakAlgorithm.GetBreakOpportunities(
+            SharedPipelineComponents.LineBreakAlgorithm.GetBreakOpportunitiesWithSegmentation(
                 buf.codepoints.Span,
                 buf.breakOpportunities.data);
         }
