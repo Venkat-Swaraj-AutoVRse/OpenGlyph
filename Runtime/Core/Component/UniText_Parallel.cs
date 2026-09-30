@@ -43,10 +43,43 @@ namespace LightSide
             public float lossyScale;
             /// <summary>Whether the canvas has a world camera.</summary>
             public bool hasWorldCamera;
+            /// <summary>
+            /// Device pixels per local text-mesh unit, for pixel-perfect snapping. Captured on the
+            /// main thread (reads Canvas + transform). 0 disables snapping (World Space canvases, or
+            /// no canvas). See <see cref="ComputePixelSnapDeviceScale"/>.
+            /// </summary>
+            public float pixelSnapDeviceScale;
         }
 
         /// <summary>Cached transform data captured before parallel processing.</summary>
         public CachedTransformData cachedTransformData;
+
+        /// <summary>
+        /// Computes device pixels per local text-mesh unit for pixel-perfect snapping.
+        /// </summary>
+        /// <remarks>
+        /// For a ScreenSpace (Overlay or Camera) canvas the root canvas GameObject is scaled by its
+        /// <c>scaleFactor</c>, so a UI child's <c>lossyScale</c> already folds scaleFactor together
+        /// with any nested Canvas / RectTransform scaling — one local unit maps to <c>lossyScale</c>
+        /// device pixels. That single value is therefore the correct device scale and it stays
+        /// correct when the CanvasScaler changes scaleFactor (lossyScale tracks it). For a World Space
+        /// canvas there is no fixed device-pixel grid (it depends on camera distance/viewport), so
+        /// snapping is disabled (returns 0) — documented as "no snapping in world space".
+        /// </remarks>
+        private float ComputePixelSnapDeviceScale()
+        {
+            var c = canvas;
+            if (c == null) return 0f;
+
+            var root = c.rootCanvas != null ? c.rootCanvas : c;
+            if (root.renderMode == RenderMode.WorldSpace)
+                return 0f; // no device pixel grid in world space
+
+            var scale = transform.lossyScale.x;
+            if (scale <= 0f || float.IsNaN(scale) || float.IsInfinity(scale))
+                return 0f;
+            return scale;
+        }
 
         private void PrepareForParallel()
         {
@@ -60,7 +93,8 @@ namespace LightSide
                 rectTransform = rectTransform,
                 rect = rectTransform.rect,
                 lossyScale = scale,
-                hasWorldCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+                hasWorldCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay,
+                pixelSnapDeviceScale = ComputePixelSnapDeviceScale()
             };
 
             PrepareModifiersForParallel();
@@ -503,6 +537,7 @@ namespace LightSide
             meshGenerator.FontSize = effectiveFontSize;
             meshGenerator.defaultColor = color;
             meshGenerator.SetCanvasParametersCached(cached.lossyScale, cached.hasWorldCamera);
+            meshGenerator.PixelSnapDeviceScale = cached.pixelSnapDeviceScale;
             meshGenerator.SetRectOffset(cached.rect);
             meshGenerator.SetHorizontalAlignment(horizontalAlignment);
 
