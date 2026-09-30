@@ -81,6 +81,18 @@ namespace LightSide
         [Tooltip("Glyph rendering mode (SDF, bitmap, etc.).")]
         internal UniTextRenderMode atlasRenderMode = UniTextRenderMode.SDF;
 
+        [SerializeField]
+        [Tooltip("Pixel-perfect rendering: render Mono at the font's native pixel size (or an integer multiple), point-filter the atlas with no mipmaps, and snap glyph quads to the device pixel grid. Intended for pixel/bitmap fonts. Has no effect on SDF/MSDF/Smooth atlases.")]
+        internal bool pixelPerfect = false;
+
+        [SerializeField]
+        [Tooltip("Cached result of pixel-font analysis (outline grid + bitmap strikes). Populated by DetectPixelFont(); serialized so it survives without re-probing the native outline export.")]
+        internal PixelFontInfo pixelFontInfo;
+
+        [SerializeField]
+        [Tooltip("True once DetectPixelFont() has run and pixelFontInfo is authoritative.")]
+        internal bool pixelFontInfoResolved = false;
+
         [NonSerialized]
         protected List<GlyphRect> usedGlyphRects;
 
@@ -338,6 +350,124 @@ namespace LightSide
             freeGlyphRects?.Clear();
             shelfX = shelfY = shelfHeight = 0;
         }
+
+        #region Pixel Font (Phase 1c)
+
+        /// <summary>
+        /// Whether pixel-perfect rendering is requested for this font. Only meaningful when the font
+        /// is actually a pixel/bitmap font (see <see cref="PixelFont"/>.<c>IsPixelFont</c>); the
+        /// renderer treats it as off for SDF/MSDF/Smooth atlases.
+        /// </summary>
+        public bool PixelPerfect
+        {
+            get => pixelPerfect;
+            internal set => pixelPerfect = value;
+        }
+
+        /// <summary>
+        /// The cached pixel-font analysis (outline grid + embedded bitmap strikes). Lazily computed
+        /// via <see cref="DetectPixelFont"/> on first access. Read-only for callers.
+        /// </summary>
+        public PixelFontInfo PixelFont
+        {
+            get
+            {
+                if (!pixelFontInfoResolved)
+                    DetectPixelFont();
+                return pixelFontInfo;
+            }
+        }
+
+        /// <summary>
+        /// True when pixel-perfect rendering is BOTH requested and applicable (the font is a pixel or
+        /// bitmap font). This is the flag the mesh generator / atlas path should gate on.
+        /// </summary>
+        public bool PixelPerfectActive => pixelPerfect && PixelFont.IsPixelFont;
+
+        // Test hook: lets EditMode tests supply a managed outline provider (e.g. a TrueType glyf
+        // reader) so grid detection is exercised without depending on the native outline export.
+        [NonSerialized] private IPixelGridOutlineProvider injectedGridProvider;
+
+        /// <summary>
+        /// TEST HOOK: injects an outline provider for pixel-grid detection and forces re-analysis on
+        /// next <see cref="PixelFont"/> access. Does not touch render mode or atlases.
+        /// </summary>
+        internal void SetGridProviderForTesting(IPixelGridOutlineProvider provider)
+        {
+            injectedGridProvider = provider;
+            pixelFontInfoResolved = false;
+        }
+
+        /// <summary>
+        /// Analyses this font for pixel-font characteristics and caches the result in
+        /// <see cref="pixelFontInfo"/>. Reads embedded bitmap-strike sizes from the face, then probes
+        /// the outline grid via the native outline export (or an injected managed provider in tests).
+        /// Degrades gracefully when the outline export is unavailable — grid detection is simply
+        /// skipped and <see cref="PixelFontInfo.outlineDataAvailable"/> is false. Never renders and
+        /// never mutates the atlas or render mode.
+        /// </summary>
+        /// <returns>The freshly computed <see cref="PixelFontInfo"/>.</returns>
+        public PixelFontInfo DetectPixelFont()
+        {
+            int[] strikeSizes = Array.Empty<int>();
+            IPixelGridOutlineProvider provider = injectedGridProvider;
+
+            if (provider == null && HasFontData)
+            {
+                var face = EnsureFTFace();
+                if (face != IntPtr.Zero)
+                {
+                    var fi = FT.GetFaceInfo(face);
+                    if (fi.numFixedSizes > 0)
+                        strikeSizes = FT.GetAllFixedSizes(face) ?? Array.Empty<int>();
+
+                    int upem = unitsPerEm > 0 ? unitsPerEm : (fi.unitsPerEm > 0 ? fi.unitsPerEm : 1000);
+                    provider = new FreeTypeOutlineGridProvider(face, upem);
+                }
+            }
+
+            pixelFontInfo = PixelFontDetection.Analyze(provider, strikeSizes);
+            pixelFontInfoResolved = true;
+            return pixelFontInfo;
+        }
+
+        /// <summary>
+        /// Chooses the integer atlas sampling ppem for pixel-perfect Mono rendering, given a desired
+        /// ppem. Returns the nearest integer MULTIPLE of the native pixels-per-em that is ≥ the
+        /// native size. When the font has bitmap strikes but no detected grid, snaps to the nearest
+        /// available strike. Fallback (documented): if neither applies, rounds the request up to the
+        /// nearest whole pixel. Never returns less than 1.
+        /// </summary>
+        /// <param name="desiredPpem">Requested sampling size in pixels-per-em.</param>
+        /// <returns>An integer ppem suitable for a crisp, aliasing-free Mono atlas.</returns>
+        public int ChoosePixelPerfectPpem(float desiredPpem)
+        {
+            var info = PixelFont;
+
+            if (info.isPixelGrid && info.nativePixelsPerEm > 0)
+            {
+                int native = info.nativePixelsPerEm;
+                int mult = Mathf.Max(1, Mathf.RoundToInt(desiredPpem / native));
+                return native * mult;
+            }
+
+            if (info.hasBitmapStrikes && info.bitmapStrikeSizes is { Length: > 0 })
+            {
+                int best = info.bitmapStrikeSizes[0];
+                int bestDiff = Mathf.Abs(best - Mathf.RoundToInt(desiredPpem));
+                for (int i = 1; i < info.bitmapStrikeSizes.Length; i++)
+                {
+                    int diff = Mathf.Abs(info.bitmapStrikeSizes[i] - Mathf.RoundToInt(desiredPpem));
+                    if (diff < bestDiff) { bestDiff = diff; best = info.bitmapStrikeSizes[i]; }
+                }
+                return Mathf.Max(1, best);
+            }
+
+            // Documented fallback for a non-pixel font asked to render pixel-perfect: whole-pixel ppem.
+            return Mathf.Max(1, Mathf.CeilToInt(desiredPpem));
+        }
+
+        #endregion
 
         /// <summary>Gets the glyph lookup table (glyph index → Glyph).</summary>
         public Dictionary<uint, Glyph> GlyphLookupTable
@@ -681,6 +811,8 @@ namespace LightSide
             public int pointSize;
             public int spread;
             public float metricsConversion;
+            /// <summary>True when this batch must be rendered pixel-perfect (Mono, 0/255, no spread).</summary>
+            public bool pixelPerfect;
         }
 
         /// <summary>
@@ -706,6 +838,17 @@ namespace LightSide
 
             var pointSize = faceInfo.pointSize > 0 ? faceInfo.pointSize : 90;
             var spread = AtlasPadding;
+
+            // Pixel-perfect: sample at an integer multiple of the font's native pixels-per-em and
+            // disable the SDF spread entirely (Mono coverage has no distance field). Only engages
+            // when the font is genuinely a pixel/bitmap font, so other fonts are unaffected.
+            bool pixelPerfect = PixelPerfectActive;
+            if (pixelPerfect)
+            {
+                pointSize = ChoosePixelPerfectPpem(pointSize);
+                spread = 0;
+            }
+
             var metricsConversion = pointSize > 0 && pointSize != unitsPerEm
                 ? (float)unitsPerEm / pointSize
                 : 1f;
@@ -728,7 +871,8 @@ namespace LightSide
                 filteredGlyphs = owned,
                 pointSize = pointSize,
                 spread = spread,
-                metricsConversion = metricsConversion
+                metricsConversion = metricsConversion,
+                pixelPerfect = pixelPerfect
             };
         }
 
@@ -739,6 +883,20 @@ namespace LightSide
         /// <returns>Rendered glyph data (SdfRenderedGlyph[] for SDF fonts). Null on failure.</returns>
         public virtual object RenderPreparedBatch(PreparedBatch batch)
         {
+            // Pixel-perfect Mono path: render 1-bit coverage (0/255) at the integer ppem chosen in
+            // PrepareGlyphBatch. Rendered sequentially on the shared face — pixel-font batches are
+            // small and this avoids sharing a mono render state across pool threads. Bypasses the
+            // SDF/MSDF paths entirely, so those modes are byte-for-byte unaffected.
+            if (batch.pixelPerfect)
+            {
+                var face = EnsureFTFace();
+                if (face == IntPtr.Zero) return null;
+                var mono = new SdfRenderedGlyph[batch.filteredGlyphs.Count];
+                for (int i = 0; i < batch.filteredGlyphs.Count; i++)
+                    MonoGlyphRenderer.TryRender(face, batch.filteredGlyphs[i], batch.pointSize, out mono[i]);
+                return mono;
+            }
+
             // Resolve the effective mode up front (probes the export exactly once). This is what the
             // atlas format follows, so MSDF is only ever attempted when it can actually be produced.
             if (EffectiveRenderMode == UniTextRenderMode.Msdf)
@@ -1034,7 +1192,19 @@ namespace LightSide
             var texFormat = mode == UniTextRenderMode.SDF ? TextureFormat.Alpha8
                 : mode == UniTextRenderMode.Msdf ? TextureFormat.RGB24
                 : TextureFormat.RGBA32;
+
+            // Pixel-perfect Mono coverage is single-channel 0/255 — store it in Alpha8 so the
+            // channel-coherence guard in PackRenderedBatch accepts it and the atlas holds no AA.
+            if (PixelPerfectActive)
+                texFormat = TextureFormat.Alpha8;
+
             var texture = new Texture2D(atlasSize, atlasSize, texFormat, false);
+
+            // Pixel-perfect fonts require a point-filtered, mip-free atlas so integer-scaled glyphs
+            // stay crisp with no bilinear blur. Every other mode keeps the historical Bilinear
+            // default, so existing SDF/MSDF/Smooth atlases are byte-for-byte unaffected.
+            if (PixelPerfectActive)
+                texture.filterMode = FilterMode.Point;
 
             var rawData = texture.GetRawTextureData<byte>();
             Unity.Collections.LowLevel.Unsafe.UnsafeUtility.MemClear(

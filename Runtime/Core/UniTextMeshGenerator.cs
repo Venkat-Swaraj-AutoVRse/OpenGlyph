@@ -425,6 +425,32 @@ namespace LightSide
         }
 
         /// <summary>
+        /// Device pixels per local text-mesh unit, used ONLY for pixel-perfect snapping. For a
+        /// ScreenSpace canvas this is the canvas <c>scaleFactor</c> (1 reference px = scaleFactor
+        /// device px); for world-space it is the lossy scale. Set by the component before mesh
+        /// generation. A value ≤ 0 disables snapping (treated as "unknown grid").
+        /// </summary>
+        /// <remarks>
+        /// When the active font is a pixel font with <see cref="UniTextFont.PixelPerfectActive"/>,
+        /// each glyph quad corner is rounded to the nearest device pixel so text origins and glyph
+        /// edges land exactly on the physical grid, eliminating half-pixel blur under point
+        /// filtering. Non-pixel fonts ignore this entirely, so ordinary text is unaffected.
+        /// </remarks>
+        public float PixelSnapDeviceScale { get; set; } = 1f;
+
+        /// <summary>
+        /// Snaps a local-unit coordinate to the device pixel grid given
+        /// <see cref="PixelSnapDeviceScale"/> device pixels per local unit. Rounds to the nearest
+        /// device pixel and converts back to local units. No-op when the scale is non-positive.
+        /// </summary>
+        internal static float SnapToDevicePixel(float localValue, float deviceScale)
+        {
+            if (deviceScale <= 0f || float.IsNaN(deviceScale) || float.IsInfinity(deviceScale))
+                return localValue;
+            return Mathf.Round(localValue * deviceScale) / deviceScale;
+        }
+
+        /// <summary>
         /// Sets the layout rectangle for text positioning.
         /// </summary>
         /// <param name="rect">The rect defining the text layout bounds.</param>
@@ -704,6 +730,12 @@ namespace LightSide
                 ? new Color32(255, 255, 255, defaultColor.a)
                 : defaultColor;
 
+            // Pixel-perfect snapping engages only for pixel/bitmap fonts that requested it. The snap
+            // step is one device pixel expressed in local units (1 / deviceScale). Ordinary fonts
+            // leave snapDevScale at 0 so the corner math below is a pure no-op for them.
+            var pixelSnap = font.PixelPerfectActive;
+            var snapDevScale = pixelSnap ? PixelSnapDeviceScale : 0f;
+
             OnBeforeMesh?.Invoke();
 
             var glyphLookup = font.GlyphLookupTable;
@@ -774,6 +806,17 @@ namespace LightSide
                 var tlY = offY - glyph.y + bearingYScaled;
                 var blY = tlY - heightScaled;
                 var trX = tlX + widthScaled;
+
+                // Pixel-perfect: snap all four quad edges to the device pixel grid so both the glyph
+                // origin and its extents are integral device pixels. Snapping each edge independently
+                // (rather than origin + size) keeps adjacent glyph seams aligned to the grid.
+                if (pixelSnap)
+                {
+                    tlX = SnapToDevicePixel(tlX, snapDevScale);
+                    trX = SnapToDevicePixel(trX, snapDevScale);
+                    tlY = SnapToDevicePixel(tlY, snapDevScale);
+                    blY = SnapToDevicePixel(blY, snapDevScale);
+                }
 
                 var uvBLx = (cachedData.rectX - paddingPixels) * invAtlasSize;
                 var uvBLy = (cachedData.rectY - paddingPixels) * invAtlasSize;
