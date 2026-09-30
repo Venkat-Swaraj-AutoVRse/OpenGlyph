@@ -204,21 +204,15 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
     if (sz > 0 && b->buffer) {
         unsigned char* copy = (unsigned char*)malloc(sz);
         if (!copy) return 1;
-        /* FreeType's SDF raster emits the buffer Y-flipped vs the original's EDT (top-down).
-         * Also, FreeType maps distance to bytes as 128+(dist/spread)*127 (slope ~127/spread),
-         * but the original uses a STEEPER distance->byte curve (measured slope ~190/spread), so
-         * FreeType text renders softer. Correct the slope by remapping around the 128 midpoint:
-         * v -> clamp(128 + (v-128)*k). Default k ~= 190/127; env-overridable for tuning. */
-        double k = 1.4961; const char* e = getenv("OPENGLYPH_SDF_SLOPE"); if (e) k = atof(e);
-        for (unsigned r = 0; r < b->rows; ++r) {
-            const unsigned char* src = (const unsigned char*)b->buffer + (size_t)(b->rows-1-r)*pitch;
-            unsigned char* dst = copy + (size_t)r*pitch;
-            for (int c = 0; c < pitch; ++c) {
-                double v = 128.0 + (src[c]-128.0)*k;
-                if (v<0) v=0; if (v>255) v=255;
-                dst[c] = (unsigned char)(v+0.5);
-            }
-        }
+        /* FreeType's SDF raster emits the buffer Y-flipped vs the original's EDT (top-down);
+         * flip rows back. The distance->byte mapping is left as FreeType's standard linear
+         * 128+(dist/spread)*127: the original was verified to be the SAME linear field (outside
+         * profile e.g. 123,111,96,80,64,48,32,16,0 = ~127/spread reaching 0 at +-spread px). An
+         * earlier k=1.4961 "slope steepen" was WRONG -- it matched a misleading peak crossing
+         * step but shortened the reach ~1.5x (clipping outlines/glows/underlays); removed. */
+        for (unsigned r = 0; r < b->rows; ++r)
+            memcpy(copy + (size_t)r*pitch,
+                   (const unsigned char*)b->buffer + (size_t)(b->rows-1-r)*pitch, pitch);
         out->bmpBuffer = copy;
     }
     out->success = 1;
