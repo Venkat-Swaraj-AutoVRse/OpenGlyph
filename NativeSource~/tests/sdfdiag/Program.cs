@@ -74,6 +74,16 @@ unsafe class SdfDiag
                     so.Sort(); sn.Sort(); double mo=so.Count>0?so[so.Count/2]:0, mn=sn.Count>0?sn[sn.Count/2]:0;
                     // byte value 3px inside/outside the first crossing on the center row
                     Console.WriteLine($"   MEASURED slope@128 (median |dByte/px|): orig={mo:F1} new={mn:F1} ratio new/orig={(mo>0?mn/mo:0):F3}");
+                    // STRADDLE JUMP: |v[x+1]-v[x]| for the pair straddling 128, median over all H+V crossings.
+                    var jO=new System.Collections.Generic.List<double>(); var jN=new System.Collections.Generic.List<double>();
+                    for(int y=0;y<ors.bh;y++)for(int x=0;x<ors.bw-1;x++){
+                        int a1=ob[y*pitchO+x],a2=ob[y*pitchO+x+1]; if((a1-128)*(a2-128)<0) jO.Add(Math.Abs(a2-a1));
+                        int b1=nb[y*pitchN+x],b2=nb[y*pitchN+x+1]; if((b1-128)*(b2-128)<0) jN.Add(Math.Abs(b2-b1)); }
+                    for(int x=0;x<ors.bw;x++)for(int y=0;y<ors.bh-1;y++){
+                        int a1=ob[y*pitchO+x],a2=ob[(y+1)*pitchO+x]; if((a1-128)*(a2-128)<0) jO.Add(Math.Abs(a2-a1));
+                        int b1=nb[y*pitchN+x],b2=nb[(y+1)*pitchN+x]; if((b1-128)*(b2-128)<0) jN.Add(Math.Abs(b2-b1)); }
+                    jO.Sort(); jN.Sort(); double sjo=jO.Count>0?jO[jO.Count/2]:0, sjn=jN.Count>0?jN[jN.Count/2]:0;
+                    Console.WriteLine($"   STRADDLE jump@128 (median |dByte| across crossing pair): orig={sjo:F1} new={sjn:F1} ratio={(sjo>0?sjn/sjo:0):F3}");
                     // REACH/SATURATION: on the center row, from the leftmost 128-crossing walk
                     // outward (decreasing) to the first 0, and inward (increasing) to the first 255;
                     // report px distance. Do it for orig and new.
