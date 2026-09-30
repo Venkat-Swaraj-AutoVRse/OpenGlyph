@@ -128,18 +128,22 @@ UT_API void ut_blGradientApplyTransform(void* g, double m00, double m01, double 
 }
 
 /* ---- FreeType outline -> BLPath ------------------------------------------- */
+/* Emit RAW FreeType outline coordinates (FT_Vector units) with NO scaling. This matches the
+ * original's contract: the C# caller (Runtime/EmojiCore/COLRv1Renderer.cs) loads the glyph with
+ * FT_LOAD_NO_SCALE (points are font units) and applies the units->pixel scale in the Blend2D
+ * context transform. Dividing here by 64 would double-shrink the path. */
 struct DecomposeCtx { BLPath* path; };
 static int mv(const FT_Vector* to, void* u) {
-    ((DecomposeCtx*)u)->path->moveTo(to->x / 64.0, to->y / 64.0); return 0;
+    ((DecomposeCtx*)u)->path->moveTo((double)to->x, (double)to->y); return 0;
 }
 static int ln(const FT_Vector* to, void* u) {
-    ((DecomposeCtx*)u)->path->lineTo(to->x / 64.0, to->y / 64.0); return 0;
+    ((DecomposeCtx*)u)->path->lineTo((double)to->x, (double)to->y); return 0;
 }
 static int cn(const FT_Vector* c, const FT_Vector* to, void* u) {
-    ((DecomposeCtx*)u)->path->quadTo(c->x / 64.0, c->y / 64.0, to->x / 64.0, to->y / 64.0); return 0;
+    ((DecomposeCtx*)u)->path->quadTo((double)c->x, (double)c->y, (double)to->x, (double)to->y); return 0;
 }
 static int cu(const FT_Vector* c1, const FT_Vector* c2, const FT_Vector* to, void* u) {
-    ((DecomposeCtx*)u)->path->cubicTo(c1->x/64.0, c1->y/64.0, c2->x/64.0, c2->y/64.0, to->x/64.0, to->y/64.0); return 0;
+    ((DecomposeCtx*)u)->path->cubicTo((double)c1->x, (double)c1->y, (double)c2->x, (double)c2->y, (double)to->x, (double)to->y); return 0;
 }
 UT_API int ut_ft_outline_to_blpath(void* face_, void* blPath) {
     FT_Face face = (FT_Face)face_;
