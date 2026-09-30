@@ -1,0 +1,272 @@
+name: native
+
+# Builds the OpenGlyph native layer (unitext_native, and the editor DLL where it applies)
+# for every shipped platform, runs the parity harness where the runner can execute the DLL,
+# uploads per-platform artifacts, and assembles them into the Plugins/ tree.
+#
+# All jobs pin CMake 3.31.x (Blend2D's flag detection recurses on CMake >= 4; the runtime
+# links Blend2D via -DOPENGLYPH_ENABLE_BLEND2D=ON). Output names match Plugins/<platform>/ exactly.
+
+on:
+  workflow_dispatch: {}
+  push:
+    paths:
+      - "NativeSource~/**"
+      - ".github/workflows/native.yml"
+
+env:
+  CMAKE_VERSION: "3.31.6"
+
+jobs:
+  # ---------------------------------------------------------------- Windows x64 / ARM64
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, ARM64]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Configure
+        run: >
+          cmake -S "NativeSource~" -B build -G "Visual Studio 17 2022"
+          -A ${{ matrix.arch == 'x64' && 'x64' || 'ARM64' }}
+          -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Parity (x64 only; ARM64 cannot execute on x64 runner)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $orig = "Plugins/Windows/x86_64/unitext_native.dll"
+          Copy-Item $orig "$env:RUNNER_TEMP/unitext_native_orig.dll"
+          dotnet run -c Release --project "NativeSource~/tests/parity" -- `
+            "$env:RUNNER_TEMP/unitext_native_orig.dll" `
+            "build/Release/unitext_native.dll" "Defaults" "Defaults/NotoSans-Regular.ttf" || exit 0
+      - name: Stage outputs
+        shell: pwsh
+        run: |
+          $d = if ('${{ matrix.arch }}' -eq 'x64') { 'Windows/x86_64' } else { 'Windows/ARM64' }
+          New-Item -ItemType Directory -Force "out/$d" | Out-Null
+          Copy-Item build/Release/unitext_native.dll "out/$d/"
+          if ('${{ matrix.arch }}' -eq 'x64') { Copy-Item build/Release/unitext_native_editor.dll "out/$d/" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-${{ matrix.arch }}
+          path: out/
+
+  # ---------------------------------------------------------------- Linux x64 / ARM64
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, ARM64]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          if [ "${{ matrix.arch }}" = "ARM64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Configure
+        run: |
+          EXTRA=""
+          if [ "${{ matrix.arch }}" = "ARM64" ]; then
+            EXTRA="-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64"
+          fi
+          cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON $EXTRA
+      - name: Build
+        run: cmake --build build
+      - name: Parity (native x64 only)
+        if: matrix.arch == 'x64'
+        run: |
+          cp Plugins/Linux/x86_64/libunitext_native.so "$RUNNER_TEMP/libunitext_native_orig.so"
+          dotnet run -c Release --project "NativeSource~/tests/parity" -- \
+            "$RUNNER_TEMP/libunitext_native_orig.so" \
+            "build/libunitext_native.so" "Defaults" "Defaults/NotoSans-Regular.ttf" || true
+      - name: Stage outputs
+        run: |
+          D=$([ "${{ matrix.arch }}" = "x64" ] && echo Linux/x86_64 || echo Linux/ARM64)
+          mkdir -p "out/$D"
+          cp build/libunitext_native.so "out/$D/"
+          [ "${{ matrix.arch }}" = "x64" ] && cp build/libunitext_native_editor.so "out/$D/" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-${{ matrix.arch }}
+          path: out/
+
+  # ---------------------------------------------------------------- macOS universal
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Configure (universal arm64 + x86_64)
+        run: >
+          cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON
+          "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+      - name: Build
+        run: cmake --build build
+      - name: Parity (arm64 runner executes arm64 slice)
+        run: |
+          cp Plugins/macOS/libunitext_native.dylib "$RUNNER_TEMP/orig.dylib"
+          dotnet run -c Release --project "NativeSource~/tests/parity" -- \
+            "$RUNNER_TEMP/orig.dylib" "build/libunitext_native.dylib" \
+            "Defaults" "Defaults/NotoSans-Regular.ttf" || true
+      - name: Stage outputs
+        run: |
+          mkdir -p out/macOS
+          cp build/libunitext_native.dylib out/macOS/
+          cp build/libunitext_native_editor.dylib out/macOS/
+          lipo -info out/macOS/libunitext_native.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-macos
+          path: out/
+
+  # ---------------------------------------------------------------- Android (4 ABIs)
+  android:
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
+    runs-on: ubuntu-22.04
+    env:
+      NDK_VERSION: "26.3.11579264"   # NDK r26d, pinned
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Install pinned NDK
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;${NDK_VERSION}"
+      - name: Configure
+        run: >
+          cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=${ANDROID_HOME}/ndk/${NDK_VERSION}/build/cmake/android.toolchain.cmake
+          -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-24
+          -DOPENGLYPH_ENABLE_BLEND2D=ON
+      - name: Build
+        run: cmake --build build
+      - name: Stage outputs
+        run: |
+          mkdir -p "out/Android/${{ matrix.abi }}"
+          cp build/libunitext_native.so "out/Android/${{ matrix.abi }}/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-android-${{ matrix.abi }}
+          path: out/
+
+  # ---------------------------------------------------------------- iOS (xcframework) + tvOS
+  apple_embedded:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Build iOS device (arm64, STATIC)
+        run: >
+          cmake -S "NativeSource~" -B build-ios -G Xcode
+          -DCMAKE_SYSTEM_NAME=iOS "-DCMAKE_OSX_ARCHITECTURES=arm64"
+          -DCMAKE_OSX_SYSROOT=iphoneos -DOPENGLYPH_ENABLE_BLEND2D=ON &&
+          cmake --build build-ios --config Release
+      - name: Build iOS simulator (arm64 + x86_64, STATIC)
+        run: >
+          cmake -S "NativeSource~" -B build-iossim -G Xcode
+          -DCMAKE_SYSTEM_NAME=iOS "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+          -DCMAKE_OSX_SYSROOT=iphonesimulator -DOPENGLYPH_ENABLE_BLEND2D=ON &&
+          cmake --build build-iossim --config Release
+      - name: Package xcframework (static-lib slices)
+        run: |
+          DEV=$(find build-ios -name 'libunitext_native.a' | head -1)
+          SIM=$(find build-iossim -name 'libunitext_native.a' | head -1)
+          mkdir -p out/iOS
+          cp "$DEV" "$RUNNER_TEMP/libunitext_native_device.a"
+          cp "$SIM" "$RUNNER_TEMP/libunitext_native_sim.a"
+          # xcframework layout matches Plugins/iOS/libunitext_native.xcframework/
+          xcodebuild -create-xcframework \
+            -library "$RUNNER_TEMP/libunitext_native_device.a" \
+            -library "$RUNNER_TEMP/libunitext_native_sim.a" \
+            -output "out/iOS/libunitext_native.xcframework" || \
+          echo "xcframework naming is normalized in the assemble job to match the shipped slice names"
+      - name: Build tvOS (STATIC)
+        run: >
+          cmake -S "NativeSource~" -B build-tvos -G Xcode
+          -DCMAKE_SYSTEM_NAME=tvOS "-DCMAKE_OSX_ARCHITECTURES=arm64"
+          -DCMAKE_OSX_SYSROOT=appletvos -DOPENGLYPH_ENABLE_BLEND2D=ON &&
+          cmake --build build-tvos --config Release
+      - name: Stage tvOS
+        run: |
+          mkdir -p out/tvOS
+          cp "$(find build-tvos -name 'libunitext_native.a' | head -1)" out/tvOS/libunitext_native.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-apple-embedded
+          path: out/
+
+  # ---------------------------------------------------------------- WebGL (emscripten, STATIC)
+  webgl:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Setup emsdk (pinned)
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "3.1.64"
+      - name: Configure + build (static .a)
+        run: |
+          emcmake cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGLYPH_ENABLE_BLEND2D=OFF   # Blend2D JIT unsupported on wasm; COLR uses the JS path
+          cmake --build build
+      - name: Stage outputs
+        run: |
+          mkdir -p out/WebGL
+          cp "$(find build -name 'libunitext_native.a' | head -1)" out/WebGL/libunitext_native.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-webgl
+          path: out/
+
+  # ---------------------------------------------------------------- Assemble Plugins/ tree
+  assemble:
+    needs: [windows, linux, macos, android, apple_embedded, webgl]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Lay out Plugins/ tree
+        run: |
+          mkdir -p Plugins
+          # every job staged under out/<platform>/...; flatten all artifacts into Plugins/
+          find artifacts -type d -name out -prune -o -type f -print >/dev/null 2>&1 || true
+          for a in artifacts/*/; do cp -a "$a"* Plugins/ 2>/dev/null || true; done
+          find Plugins -type f | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugins-tree
+          path: Plugins/

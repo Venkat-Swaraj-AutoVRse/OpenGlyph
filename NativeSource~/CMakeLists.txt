@@ -155,14 +155,41 @@ else()
   set(OPENGLYPH_BL_SRC src/ut_bl_stub.c)
 endif()
 
-add_library(unitext_native SHARED
+# ---- Platform / packaging model ----------------------------------------------
+# iOS, tvOS and WebGL(emscripten) ship STATIC libs (linked into the app / __Internal);
+# Windows, Linux, macOS and Android ship SHARED libs. Detect and pick.
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "tvOS" OR EMSCRIPTEN)
+  set(OPENGLYPH_LIBTYPE STATIC)
+else()
+  set(OPENGLYPH_LIBTYPE SHARED)
+endif()
+
+# Default-hidden visibility on non-Windows; the ut_* symbols carry
+# __attribute__((visibility("default"))) via UT_API in ut_native.h. A GNU version script
+# (Linux/Android) or a macho exported-symbols list (macOS/iOS/tvOS) additionally restricts
+# the dynamic symbol table to exactly the ut_* / editor exports.
+if(NOT MSVC)
+  set(CMAKE_C_VISIBILITY_PRESET hidden)
+  set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+  set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+endif()
+
+# Windows uses the .def; other platforms must drop it from the source list.
+set(OPENGLYPH_RT_EXPORTS "")
+set(OPENGLYPH_ED_EXPORTS "")
+if(WIN32)
+  set(OPENGLYPH_RT_EXPORTS src/ut_exports.def)
+  set(OPENGLYPH_ED_EXPORTS src/editor/ut_editor_exports.def)
+endif()
+
+add_library(unitext_native ${OPENGLYPH_LIBTYPE}
   src/ut_ft.c
   src/ut_ft_variations.c
   src/ut_hb.c
   src/ut_colr.c
   ${OPENGLYPH_BL_SRC}
   src/ut_version.c
-  src/ut_exports.def)
+  ${OPENGLYPH_RT_EXPORTS})
 target_link_libraries(unitext_native PRIVATE freetype harfbuzz)
 # FreeType references zlib + libpng symbols (sbix/CBDT PNG strikes); pull the statics in.
 if(TARGET zlibstatic)
@@ -176,15 +203,38 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   target_compile_definitions(unitext_native PRIVATE OPENGLYPH_HAVE_BLEND2D=1)
 endif()
 target_include_directories(unitext_native PRIVATE include)
-set_target_properties(unitext_native PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native")
+# Output name to match Plugins/<platform>/: Windows 'unitext_native.dll'; ELF/Mach-O get the
+# 'lib' prefix (libunitext_native.so/.dylib/.a) which CMake adds by default on those platforms.
+if(WIN32)
+  set_target_properties(unitext_native PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native")
+else()
+  set_target_properties(unitext_native PROPERTIES OUTPUT_NAME "unitext_native")
+endif()
+# Restrict exported symbols on shared ELF/Mach-O builds to the ut_* set.
+if(OPENGLYPH_LIBTYPE STREQUAL "SHARED" AND NOT WIN32)
+  if(APPLE)
+    target_link_options(unitext_native PRIVATE
+      "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/exports/ut_symbols.macho.txt")
+  elseif(NOT EMSCRIPTEN)
+    target_link_options(unitext_native PRIVATE
+      "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports/ut_symbols.map")
+  endif()
+endif()
 
-# ---- Editor library: unitext_native_editor (milestone 2) ---------------------
-option(OPENGLYPH_BUILD_EDITOR_DLL "Build unitext_native_editor (milestone 2)" ON)
+# ---- Editor library: unitext_native_editor (desktop only: Win/Linux/macOS) --------
+# Not shipped for Android/iOS/tvOS/WebGL (no editor tooling there). dialog_win32.c has a
+# non-Windows stub for the two dialog exports so subset+shape still build everywhere.
+if(WIN32 OR (UNIX AND NOT ANDROID AND NOT IOS AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS"))
+  set(OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT ON)
+else()
+  set(OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT OFF)
+endif()
+option(OPENGLYPH_BUILD_EDITOR_DLL "Build unitext_native_editor (desktop)" ${OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT})
 if(OPENGLYPH_BUILD_EDITOR_DLL)
   add_library(unitext_native_editor SHARED
     src/editor/subset.c
     src/editor/dialog_win32.c
-    src/editor/ut_editor_exports.def)
+    ${OPENGLYPH_ED_EXPORTS})
   target_link_libraries(unitext_native_editor PRIVATE harfbuzz-subset harfbuzz)
   # harfbuzz + harfbuzz-subset are separate static libs that both embed the same CFF/number
   # translation units, so MSVC sees duplicate (byte-identical) symbols. Allow multiple
@@ -193,8 +243,17 @@ if(OPENGLYPH_BUILD_EDITOR_DLL)
     target_link_options(unitext_native_editor PRIVATE /FORCE:MULTIPLE /IGNORE:4088)
   endif()
   target_include_directories(unitext_native_editor PRIVATE include)
-  set_target_properties(unitext_native_editor PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native_editor")
   if(WIN32)
+    set_target_properties(unitext_native_editor PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native_editor")
     target_link_libraries(unitext_native_editor PRIVATE comdlg32)
+  else()
+    set_target_properties(unitext_native_editor PROPERTIES OUTPUT_NAME "unitext_native_editor")
+    if(APPLE)
+      target_link_options(unitext_native_editor PRIVATE
+        "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/exports/ut_editor_symbols.macho.txt")
+    else()
+      target_link_options(unitext_native_editor PRIVATE
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports/ut_editor_symbols.map")
+    endif()
   endif()
 endif()
