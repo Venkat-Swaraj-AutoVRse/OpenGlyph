@@ -121,6 +121,18 @@ namespace LightSide
         [NonSerialized] private bool msdfFallbackWarned;
         [NonSerialized] private IntPtr msdfFace;
 
+        // Effective render mode, resolved from the SERIALIZED atlasRenderMode by probing the native
+        // outline export up front. When atlasRenderMode == Msdf but the export is missing, this
+        // resolves to SDF so the atlas format, padding, and shader selection are all coherent.
+        // UniTextRenderMode has no sentinel, so a separate "resolved" flag guards it.
+        [NonSerialized] private bool msdfModeResolved;
+        [NonSerialized] private UniTextRenderMode effectiveRenderMode;
+
+        // Optional injected outline source (tests). When set, the native probe is bypassed and this
+        // source's IsAvailable decides MSDF vs SDF, so both branches are testable deterministically
+        // regardless of which native binary is installed.
+        [NonSerialized] private Msdf.IGlyphOutlineSource injectedOutlineSource;
+
         [ThreadStatic] private static List<uint> toAddList;
 
         internal event Action Changed;
@@ -235,7 +247,8 @@ namespace LightSide
         {
             get
             {
-                if (atlasRenderMode != UniTextRenderMode.SDF && atlasRenderMode != UniTextRenderMode.Msdf)
+                var mode = EffectiveRenderMode;
+                if (mode != UniTextRenderMode.SDF && mode != UniTextRenderMode.Msdf)
                     return 1;
                 return Mathf.Max(1, Mathf.RoundToInt(faceInfo.pointSize * spreadStrength));
             }
@@ -243,10 +256,73 @@ namespace LightSide
 
         /// <summary>True when the atlas stores a distance field (SDF or MSDF) rather than a bitmap.</summary>
         internal bool IsDistanceFieldMode =>
-            atlasRenderMode == UniTextRenderMode.SDF || atlasRenderMode == UniTextRenderMode.Msdf;
+            EffectiveRenderMode == UniTextRenderMode.SDF || EffectiveRenderMode == UniTextRenderMode.Msdf;
 
-        /// <summary>Gets the glyph render mode (SDF, bitmap, etc.).</summary>
-        public UniTextRenderMode AtlasRenderMode => atlasRenderMode;
+        /// <summary>
+        /// Gets the glyph render mode ACTUALLY in effect. Equal to the configured mode except that
+        /// <see cref="UniTextRenderMode.Msdf"/> degrades to <see cref="UniTextRenderMode.SDF"/> when
+        /// the native outline export (or an injected source) is unavailable. This is what the atlas
+        /// format, padding, and shader selection follow, so a missing export can never leave the
+        /// font in a half-MSDF state.
+        /// </summary>
+        public UniTextRenderMode AtlasRenderMode => EffectiveRenderMode;
+
+        /// <summary>The configured (serialized) render mode, before MSDF availability resolution.</summary>
+        public UniTextRenderMode ConfiguredRenderMode => atlasRenderMode;
+
+        /// <summary>
+        /// Resolves and caches the effective render mode. For Msdf, probes the native outline export
+        /// (or the injected source) exactly once; if unavailable, degrades to SDF and warns once.
+        /// </summary>
+        internal UniTextRenderMode EffectiveRenderMode
+        {
+            get
+            {
+                if (msdfModeResolved) return effectiveRenderMode;
+
+                if (atlasRenderMode != UniTextRenderMode.Msdf)
+                {
+                    effectiveRenderMode = atlasRenderMode;
+                    msdfModeResolved = true;
+                    return effectiveRenderMode;
+                }
+
+                bool available;
+                if (injectedOutlineSource != null)
+                {
+                    available = injectedOutlineSource.IsAvailable;
+                }
+                else
+                {
+                    var face = EnsureMsdfFace();
+                    available = face != IntPtr.Zero && Msdf.MsdfNative.Probe(face);
+                }
+
+                effectiveRenderMode = available ? UniTextRenderMode.Msdf : UniTextRenderMode.SDF;
+                msdfModeResolved = true;
+                msdfOutlineUnavailable = !available;
+
+                if (!available && !msdfFallbackWarned)
+                {
+                    msdfFallbackWarned = true;
+                    Cat.MeowWarnFormat("[MSDF] {0}: native outline export 'ut_ft_get_outline_data' unavailable; using SDF (Alpha8) atlas instead.", name);
+                }
+                return effectiveRenderMode;
+            }
+        }
+
+        /// <summary>
+        /// TEST HOOK: injects an <see cref="Msdf.IGlyphOutlineSource"/> so the MSDF/SDF-fallback
+        /// decision and the RGB24 render path can be exercised deterministically without depending
+        /// on which native binary is installed. Resets any prior mode resolution.
+        /// </summary>
+        internal void SetOutlineSourceForTesting(Msdf.IGlyphOutlineSource source)
+        {
+            injectedOutlineSource = source;
+            msdfModeResolved = false;
+            msdfOutlineUnavailable = false;
+            msdfFallbackWarned = false;
+        }
 
         /// <summary>Gets the glyph lookup table (glyph index → Glyph).</summary>
         public Dictionary<uint, Glyph> GlyphLookupTable
@@ -461,6 +537,14 @@ namespace LightSide
                 FT.UnloadFace(msdfFace);
                 msdfFace = IntPtr.Zero;
             }
+            // Force re-resolution of the effective render mode on next use (unless a test source
+            // is injected, which owns availability itself).
+            if (injectedOutlineSource == null)
+            {
+                msdfModeResolved = false;
+                msdfOutlineUnavailable = false;
+                msdfFallbackWarned = false;
+            }
         }
 
         /// <summary>
@@ -640,19 +724,21 @@ namespace LightSide
         /// <returns>Rendered glyph data (SdfRenderedGlyph[] for SDF fonts). Null on failure.</returns>
         public virtual object RenderPreparedBatch(PreparedBatch batch)
         {
-            // MSDF path: render multi-channel SDF from FreeType outlines. Falls back to SDF when
-            // the native outline export is unavailable.
-            if (atlasRenderMode == UniTextRenderMode.Msdf && !msdfOutlineUnavailable)
+            // Resolve the effective mode up front (probes the export exactly once). This is what the
+            // atlas format follows, so MSDF is only ever attempted when it can actually be produced.
+            if (EffectiveRenderMode == UniTextRenderMode.Msdf)
             {
                 var msdf = RenderMsdfBatch(batch);
                 if (msdf != null)
                     return msdf;
-                // Fallback: export missing -> warn once and render SDF instead.
+                // Should not happen after a successful probe, but stay safe: degrade permanently.
                 if (!msdfFallbackWarned)
                 {
                     msdfFallbackWarned = true;
-                    Cat.MeowWarnFormat("[MSDF] {0}: native outline export 'ut_ft_get_outline_data' unavailable; falling back to SDF rendering.", name);
+                    Cat.MeowWarnFormat("[MSDF] {0}: outline rendering failed after a positive probe; falling back to SDF.", name);
                 }
+                effectiveRenderMode = UniTextRenderMode.SDF;
+                msdfOutlineUnavailable = true;
             }
 
 #if !UNITY_WEBGL || UNITY_EDITOR
@@ -670,31 +756,29 @@ namespace LightSide
         }
 
         /// <summary>
-        /// Renders a batch as MSDF using a dedicated FreeType face and the native outline export.
-        /// Returns null (and latches <c>msdfOutlineUnavailable</c>) when the export is missing so
-        /// the caller can fall back to SDF. Rendered sequentially to bound memory on tight hosts.
+        /// Renders a batch as MSDF using the injected source (tests) or a dedicated FreeType face
+        /// via the native outline export. Returns null only on a hard failure after the up-front
+        /// probe already reported the source available. Rendered sequentially to bound memory.
         /// </summary>
         private SdfRenderedGlyph[] RenderMsdfBatch(PreparedBatch batch)
         {
-            var face = EnsureMsdfFace();
-            if (face == IntPtr.Zero)
-            {
-                msdfOutlineUnavailable = true;
-                return null;
-            }
+            Msdf.IGlyphOutlineSource source = injectedOutlineSource;
+            IntPtr face = IntPtr.Zero;
 
-            var source = new Msdf.FreeTypeOutlineSource(face,
-                (gi, ppem) =>
-                {
-                    if (!FT.SetPixelSize(face, ppem)) return false;
-                    return FT.LoadGlyph(face, gi, FT.LOAD_DEFAULT | FT.LOAD_NO_HINTING);
-                });
+            if (source == null)
+            {
+                face = EnsureMsdfFace();
+                if (face == IntPtr.Zero) return null;
+                source = new Msdf.FreeTypeOutlineSource(face,
+                    (gi, ppem) =>
+                    {
+                        if (!FT.SetPixelSize(face, ppem)) return false;
+                        return FT.LoadGlyph(face, gi, FT.LOAD_DEFAULT | FT.LOAD_NO_HINTING);
+                    });
+            }
 
             if (!source.IsAvailable)
-            {
-                msdfOutlineUnavailable = true;
                 return null;
-            }
 
             var list = batch.filteredGlyphs;
             var results = new SdfRenderedGlyph[list.Count];
@@ -705,7 +789,6 @@ namespace LightSide
                 {
                     if (unavailable)
                     {
-                        msdfOutlineUnavailable = true;
                         // Return already-rendered pixels to the pool before bailing.
                         for (int j = 0; j <= i; j++)
                             if (results[j].sdfPixels != null)
@@ -807,7 +890,20 @@ namespace LightSide
                     var raw = curAtlas.GetRawTextureData<byte>();
                     cachedAtlasPtr = (byte*)Unity.Collections.LowLevel.Unsafe.NativeArrayUnsafeUtility.GetUnsafePtr(raw);
                 }
-                CopySdfBitmapToAtlas(r.sdfPixels, r.bmpWidth, r.bmpHeight, packRect.x, packRect.y, cachedAtlasW, cachedAtlasPtr, r.channels > 0 ? r.channels : 1);
+                int glyphChannels = r.channels > 0 ? r.channels : 1;
+                int atlasChannels = curAtlas.format == TextureFormat.RGB24 ? 3
+                    : curAtlas.format == TextureFormat.RGBA32 ? 4 : 1;
+                if (glyphChannels != atlasChannels)
+                {
+                    // Coherence guard: a glyph's channel count must match the atlas format. If they
+                    // ever disagree (e.g. an SDF-fallback glyph reaching an RGB atlas), skip it
+                    // rather than write mis-strided bytes that masquerade as multi-channel data.
+                    Cat.MeowWarnFormat("[PackRenderedBatch] {0}: glyph {1} channels ({2}) != atlas channels ({3}); skipped.",
+                        name, glyphIndex, glyphChannels, atlasChannels);
+                    ReturnSdfPixels(ref r);
+                    continue;
+                }
+                CopySdfBitmapToAtlas(r.sdfPixels, r.bmpWidth, r.bmpHeight, packRect.x, packRect.y, cachedAtlasW, cachedAtlasPtr, glyphChannels);
                 ReturnSdfPixels(ref r);
 
                 int outlineW = r.bmpWidth - 2 * spread;
@@ -919,8 +1015,9 @@ namespace LightSide
 
         protected unsafe void CreateNewAtlasTexture()
         {
-            var texFormat = atlasRenderMode == UniTextRenderMode.SDF ? TextureFormat.Alpha8
-                : atlasRenderMode == UniTextRenderMode.Msdf ? TextureFormat.RGB24
+            var mode = EffectiveRenderMode;
+            var texFormat = mode == UniTextRenderMode.SDF ? TextureFormat.Alpha8
+                : mode == UniTextRenderMode.Msdf ? TextureFormat.RGB24
                 : TextureFormat.RGBA32;
             var texture = new Texture2D(atlasSize, atlasSize, texFormat, false);
 
