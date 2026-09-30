@@ -25,6 +25,7 @@ Thumbs.db
 NativeSource~/build/
 NativeSource~/build-bl/
 NativeSource~/tools/
+NativeSource~/tests/renders/
 NativeSource~/out/
 NativeSource~/**/_deps/
 NativeSource~/tests/**/bin/
