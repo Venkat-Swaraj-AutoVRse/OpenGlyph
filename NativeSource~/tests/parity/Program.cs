@@ -356,11 +356,11 @@ unsafe class Program
                 int nGlyphs = Math.Min(20, nng);
                 int compared = 0, dimMismatch = 0, overallMax = 0; double sumMean = 0;
                 int dbgShown = 0;
-                const int LOAD_NO_HINTING = 1 << 1; // SDF from unhinted outline -> dims independent of autohinter version
+                const int SDF_LOAD = 0; // default flags; wrapper force-autohints both DLLs identically
                 for (uint g = 1; g <= (uint)nng && compared < nGlyphs; g++)
                 {
-                    int or = oS(of, g, LOAD_NO_HINTING, 8, out var ores);
-                    int nr = nS(nf, g, LOAD_NO_HINTING, 8, out var nres);
+                    int or = oS(of, g, SDF_LOAD, 8, out var ores);
+                    int nr = nS(nf, g, SDF_LOAD, 8, out var nres);
                     if (or == 0 && nr == 0 && ores.buf != IntPtr.Zero && nres.buf != IntPtr.Zero)
                     {
                         if (ores.bw == nres.bw && ores.bh == nres.bh && ores.bp == nres.bp)
@@ -379,13 +379,10 @@ unsafe class Program
                 }
                 double meanOfMeans = compared > 0 ? sumMean / compared : 0;
                 Console.WriteLine($"    SDF {compared} glyphs: maxAbsDiff={overallMax}, meanAbsDiff={meanOfMeans:F3}, dimMismatch={dimMismatch}");
-                // Dimensions + value range match; the residual per-pixel difference is the
-                // original's custom bitmap-EDT vs FreeType's bsdf (both same shape/range).
-                // Fail only on DIMENSION mismatch (a real ABI/geometry bug); report value diff.
-                Check($"{name} sdf dims ({compared} glyphs)", dimMismatch == 0,
-                      $"dimMismatch={dimMismatch}");
-                Check($"{name} sdf values (informational, EDT-algo diff)", true,
-                      $"maxAbsDiff={overallMax} meanAbsDiff={meanOfMeans:F2}");
+                // Thresholds (per request): mean <= 2, max <= 16, dims must match.
+                Check($"{name} sdf parity (mean<=2 max<=16)",
+                      dimMismatch == 0 && meanOfMeans <= 2.0 && overallMax <= 16,
+                      $"maxAbsDiff={overallMax} meanAbsDiff={meanOfMeans:F3} dimMismatch={dimMismatch}");
             }
 
             // Bitmap hinting-drift analysis (gap c): 10+ glyphs x 3 sizes, default vs NO_HINTING.
@@ -489,6 +486,30 @@ unsafe class Program
             // proving the drift is autohinter-version, not a wrapper bug.
             if (fi == 1) Check($"{name} bmp NO_HINTING drift", diffCount == 0,
                               $"{diffCount}/{total} differ even unhinted (maxDelta={maxDelta})");
+        }
+
+        // Strict hinted-bitmap parity (default flags): FAIL on ANY dimension OR pixel difference.
+        {
+            int glyphsChecked = 0, dimDiff = 0, pixDiff = 0, maxPix = 0;
+            foreach (int sz in sizes)
+            {
+                oSet(of, (uint)sz, (uint)sz); nSet(nf, (uint)sz, (uint)sz);
+                for (uint g = 1; g <= (uint)nGlyphs; g++)
+                {
+                    oLoad(of, g, 0); nLoad(nf, g, 0);
+                    oRen(oSlot(of), 0); nRen(nSlot(nf), 0);
+                    oBmp(of, out var ow, out var oh, out _, out _, out IntPtr obuf);
+                    nBmp(nf, out var nw, out var nh, out _, out _, out IntPtr nbuf);
+                    glyphsChecked++;
+                    if (ow != nw || oh != nh) { dimDiff++; continue; }
+                    if (obuf == IntPtr.Zero || nbuf == IntPtr.Zero || ow <= 0 || oh <= 0) continue;
+                    byte* ob = (byte*)obuf, nb = (byte*)nbuf;
+                    for (int i = 0; i < ow * oh; i++) { int d = Math.Abs(ob[i] - nb[i]); if (d > 0) { pixDiff++; if (d > maxPix) maxPix = d; break; } }
+                }
+            }
+            Console.WriteLine($"    hinted bitmap parity: {glyphsChecked} glyphs, dimDiff={dimDiff}, pixDiff(glyphs)={pixDiff}, maxPix={maxPix}");
+            Check($"{name} hinted bitmap exact", dimDiff == 0 && pixDiff == 0,
+                  $"dimDiff={dimDiff} pixDiffGlyphs={pixDiff} maxPix={maxPix}");
         }
     }
 
