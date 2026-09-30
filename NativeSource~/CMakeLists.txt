@@ -38,9 +38,11 @@ set(OPENGLYPH_HARFBUZZ_TAG   "12.2.0")
 # (the C# side reads PIXEL_MODE_BGRA / LOAD_COLOR / sbix — see FT.cs, EmojiFont.cs).
 set(OPENGLYPH_ZLIB_TAG       "v1.3.1")
 set(OPENGLYPH_LIBPNG_TAG     "v1.6.44")
-# Blend2D (M2): commit-versioned. Pinned to specific commits (verified via git ls-remote).
-set(OPENGLYPH_BLEND2D_TAG    "58ca9460b4138af6e793184682e9324e0a8053b2")
-set(OPENGLYPH_ASMJIT_TAG     "0d7f01052f2d3f6d6b9bb6714ef32bd7b80177eb")
+# Blend2D (M2): commit-versioned. Pinned to a Sept-2024 commit whose CMake flag-detection
+# builds cleanly (blend2d master's newer blend2d_detect_cflags recurses in
+# Check*CompilerFlag on flags like '-Zc:arm64-aliased-neon-types-' on CMake 3.31 AND 4.2).
+set(OPENGLYPH_BLEND2D_TAG    "ca5403c1d02b2bc9d2de581e4cb13e5e80f33860")
+set(OPENGLYPH_ASMJIT_TAG     "2e93826348d6cd1325a8b1f7629e193c58332da9")
 
 include(FetchContent)
 
@@ -122,18 +124,25 @@ FetchContent_MakeAvailable(freetype harfbuzz)
 # DLL builds; turn ON with a compatible CMake (<= 3.31): -DOPENGLYPH_ENABLE_BLEND2D=ON.
 option(OPENGLYPH_ENABLE_BLEND2D "Fetch and link Blend2D (needs CMake <= 3.31)" OFF)
 if(OPENGLYPH_ENABLE_BLEND2D)
+  # This Blend2D commit embeds asmjit by include()-ing ASMJIT_DIR/CMakeLists.txt itself,
+  # so fetch asmjit SOURCE only (no separate target) and point ASMJIT_DIR at it.
   FetchContent_Declare(asmjit
     GIT_REPOSITORY https://github.com/asmjit/asmjit.git
     GIT_TAG        ${OPENGLYPH_ASMJIT_TAG})
+  FetchContent_MakeAvailable(freetype)  # no-op if already available; keeps order explicit
+  FetchContent_GetProperties(asmjit)
+  if(NOT asmjit_POPULATED)
+    FetchContent_Populate(asmjit)
+  endif()
   set(ASMJIT_STATIC ON CACHE BOOL "" FORCE)
-  set(ASMJIT_NO_INSTALL ON CACHE BOOL "" FORCE)   # avoid GNUInstallDirs (CMake 4.2 recursion bug)
+  set(ASMJIT_EMBED  ON CACHE BOOL "" FORCE)
+  set(ASMJIT_DIR "${asmjit_SOURCE_DIR}" CACHE PATH "" FORCE)
   FetchContent_Declare(blend2d
     GIT_REPOSITORY https://github.com/blend2d/blend2d.git
     GIT_TAG        ${OPENGLYPH_BLEND2D_TAG})
   set(BLEND2D_STATIC ON CACHE BOOL "" FORCE)
-  set(BLEND2D_NO_INSTALL ON CACHE BOOL "" FORCE)  # avoid GNUInstallDirs (CMake 4.2 recursion bug)
-  set(ASMJIT_DIR ${asmjit_SOURCE_DIR} CACHE PATH "" FORCE)
-  FetchContent_MakeAvailable(asmjit blend2d)
+  set(BLEND2D_NO_INSTALL ON CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(blend2d)
 endif()
 
 # ---- Runtime library: unitext_native -----------------------------------------
