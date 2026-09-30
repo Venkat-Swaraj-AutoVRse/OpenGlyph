@@ -125,5 +125,47 @@ namespace LightSide.Msdf
             float med = MsdfGenerator.Median(field[i], field[i + 1], field[i + 2]);
             return (float)((med - 0.5) * range);
         }
+
+        /// <summary>
+        /// Builds a TRUE single-channel SDF for the same outline with identical framing to
+        /// <see cref="Build"/> (same width/height/spread/range and sign convention), returning the
+        /// bottom-up scalar field (value = dist/range + 0.5). This is the honest SDF baseline for
+        /// corner-sharpness comparisons — same generator distance math, one channel instead of three.
+        /// </summary>
+        public static float[] BuildSdf(GlyphOutline outline, int spread, out int width, out int height, out double range)
+        {
+            width = height = 0; range = 2.0 * spread;
+            if (outline == null || outline.IsEmpty || spread < 1) return null;
+            Shape shape = Shape.FromOutline(outline);
+            if (shape.EdgeCount == 0) return null;
+
+            int windingSum = 0;
+            foreach (var c in shape.Contours) windingSum += c.Winding();
+            bool flipSign = windingSum < 0;
+
+            shape.Bounds(out double l, out double b, out double r, out double t);
+            int gx0 = (int)Math.Floor(l), gy0 = (int)Math.Floor(b);
+            int gx1 = (int)Math.Ceiling(r), gy1 = (int)Math.Ceiling(t);
+            int glyphW = Math.Max(1, gx1 - gx0), glyphH = Math.Max(1, gy1 - gy0);
+            int w = glyphW + 2 * spread, h = glyphH + 2 * spread;
+
+            var cfg = new MsdfConfig
+            {
+                Width = w, Height = h, Range = 2.0 * spread,
+                ScaleX = 1.0, ScaleY = 1.0,
+                TranslateX = spread - gx0, TranslateY = spread - gy0,
+                ErrorCorrection = false,
+            };
+            float[] field = MsdfGenerator.GenerateSdf(shape, in cfg);
+            if (flipSign)
+                for (int i = 0; i < field.Length; i++) field[i] = 1f - field[i];
+
+            width = w; height = h; range = cfg.Range;
+            return field;
+        }
+
+        /// <summary>Signed value (in pixels) of a single-channel field at a bottom-up pixel. Positive = inside.</summary>
+        public static float SampleSdfSigned(float[] field, int w, int x, int y, double range) =>
+            (float)((field[y * w + x] - 0.5) * range);
     }
 }

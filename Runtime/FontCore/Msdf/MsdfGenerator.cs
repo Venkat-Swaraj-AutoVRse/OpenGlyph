@@ -161,6 +161,43 @@ namespace LightSide.Msdf
             Math.Max(Math.Min(a, b), Math.Min(Math.Max(a, b), c));
 
         /// <summary>
+        /// Generates a TRUE single-channel signed distance field from a shape: at each pixel the
+        /// nearest edge distance across ALL edges (ignoring colour), signed by the shape's fill.
+        /// This is the honest SDF baseline for comparing corner reconstruction against MSDF — it is
+        /// exactly what a one-channel atlas can represent, and it rounds corners because a single
+        /// scalar cannot encode two independent edges meeting at a point. Output layout matches
+        /// <see cref="Generate"/> (row-major, bottom-up, value = dist/range + 0.5).
+        /// </summary>
+        public static float[] GenerateSdf(Shape shape, in MsdfConfig cfg)
+        {
+            int w = cfg.Width, h = cfg.Height;
+            var output = new float[w * h];
+            if (w <= 0 || h <= 0) return output;
+            double range = cfg.Range <= 0 ? 1 : cfg.Range;
+
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    double px = (x + 0.5) / cfg.ScaleX - cfg.TranslateX;
+                    double py = (y + 0.5) / cfg.ScaleY - cfg.TranslateY;
+                    var p = new Vector2D(px, py);
+
+                    SignedDistance min = SignedDistance.Infinite;
+                    foreach (var contour in shape.Contours)
+                        foreach (var edge in contour.Edges)
+                        {
+                            SignedDistance d = edge.MinSignedDistance(p, out _);
+                            if (d < min) min = d;
+                        }
+
+                    output[y * w + x] = (float)(min.Distance / range + 0.5);
+                }
+            }
+            return output;
+        }
+
+        /// <summary>
         /// Encodes a float MSDF field (channels ~[0,1] after range mapping) into an 8-bit
         /// RGB24 byte buffer (3 bytes/pixel), clamped to [0,255]. Layout matches the float
         /// buffer (row-major, bottom-up).

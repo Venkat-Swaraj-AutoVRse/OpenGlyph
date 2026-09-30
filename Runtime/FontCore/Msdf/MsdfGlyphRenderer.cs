@@ -26,23 +26,28 @@ namespace LightSide.Msdf
             result.glyphIndex = glyphIndex;
             outlineUnavailable = false;
 
-            if (face == IntPtr.Zero || outlineSource == null || !outlineSource.IsAvailable)
+            if (outlineSource == null || !outlineSource.IsAvailable)
             {
                 outlineUnavailable = true;
                 return false;
             }
 
-            // Metrics (26.6) from FreeType — load the glyph unhinted, no bitmap.
-            FT.SetPixelSize(face, pixelSize);
-            if (!FT.LoadGlyph(face, glyphIndex, FT.LOAD_DEFAULT | FT.LOAD_NO_HINTING))
-                return false;
+            bool haveFace = face != IntPtr.Zero;
 
-            var m = FT.GetGlyphMetrics(face);
-            result.metricWidth = m.width;
-            result.metricHeight = m.height;
-            result.metricBearingX = m.bearingX;
-            result.metricBearingY = m.bearingY;
-            result.metricAdvanceX26_6 = m.advanceX;
+            if (haveFace)
+            {
+                // Metrics (26.6) from FreeType — load the glyph unhinted, no bitmap.
+                FT.SetPixelSize(face, pixelSize);
+                if (!FT.LoadGlyph(face, glyphIndex, FT.LOAD_DEFAULT | FT.LOAD_NO_HINTING))
+                    return false;
+
+                var m = FT.GetGlyphMetrics(face);
+                result.metricWidth = m.width;
+                result.metricHeight = m.height;
+                result.metricBearingX = m.bearingX;
+                result.metricBearingY = m.bearingY;
+                result.metricAdvanceX26_6 = m.advanceX;
+            }
 
             GlyphOutline outline = outlineSource.GetOutline(glyphIndex, pixelSize);
             if (outline == null)
@@ -55,6 +60,20 @@ namespace LightSide.Msdf
                 // Empty glyph (whitespace): metrics-only, no bitmap. Valid.
                 result.isValid = true;
                 return true;
+            }
+
+            if (!haveFace)
+            {
+                // No FreeType face (e.g. injected outline source in tests): derive metrics from the
+                // outline bounds, in 26.6 pixel units, so the pack path has coherent values.
+                if (outline.TryGetBounds(out double bl, out double bb, out double br, out double bt))
+                {
+                    result.metricWidth = (int)Math.Round((br - bl) * 64);
+                    result.metricHeight = (int)Math.Round((bt - bb) * 64);
+                    result.metricBearingX = (int)Math.Round(bl * 64);
+                    result.metricBearingY = (int)Math.Round(bt * 64);
+                    result.metricAdvanceX26_6 = (int)Math.Round((br - bl) * 64);
+                }
             }
 
             MsdfGlyphResult msdf = MsdfBuilder.Build(outline, spread);

@@ -322,6 +322,21 @@ namespace LightSide
             msdfModeResolved = false;
             msdfOutlineUnavailable = false;
             msdfFallbackWarned = false;
+
+            // Discard any atlas already created under the previous (possibly SDF-fallback) mode so
+            // the next glyph batch re-derives the format from the freshly resolved effective mode.
+            if (atlasTextures != null)
+            {
+                foreach (var tex in atlasTextures)
+                    ObjectUtils.SafeDestroy(tex);
+                atlasTextures.Clear();
+            }
+            glyphTable?.Clear();
+            glyphLookupDictionary?.Clear();
+            glyphIndexList?.Clear();
+            usedGlyphRects?.Clear();
+            freeGlyphRects?.Clear();
+            shelfX = shelfY = shelfHeight = 0;
         }
 
         /// <summary>Gets the glyph lookup table (glyph index → Glyph).</summary>
