@@ -18,3 +18,20 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Native build outputs (Phase 0 — NativeSource~ CMake project)
+# Never commit build dirs or FetchContent'd upstream sources; only the rebuilt
+# Plugins/**/unitext_native* binaries (added explicitly) are tracked.
+NativeSource~/build/
+NativeSource~/build-bl/
+NativeSource~/tools/
+NativeSource~/tests/renders/
+NativeSource~/out/
+NativeSource~/**/_deps/
+NativeSource~/tests/**/bin/
+NativeSource~/tests/**/obj/
+NativeSource~/tests/bin/
+NativeSource~/tests/obj/
+NativeSource~/tests/fonts/*.ttf
+NativeSource~/tests/fonts/*.otf
+!NativeSource~/tests/fonts/OFL.txt
