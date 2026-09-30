@@ -2,6 +2,16 @@
 float4 _FaceTex_ST;
 float4 _OutlineTex_ST;
 
+#ifndef UNITEXT_DF_SAMPLE_DEFINED
+#define UNITEXT_DF_SAMPLE_DEFINED
+half UniTextMedian3_(half3 rgb) { return max(min(rgb.r, rgb.g), min(max(rgb.r, rgb.g), rgb.b)); }
+#ifdef UNITEXT_MSDF
+    #define UNITEXT_SAMPLE_DF(tex, uv) UniTextMedian3_(tex2D(tex, uv).rgb)
+#else
+    #define UNITEXT_SAMPLE_DF(tex, uv) (tex2D(tex, uv).a)
+#endif
+#endif // UNITEXT_DF_SAMPLE_DEFINED
+
 void VertShader(inout appdata_full v, out Input data)
 {
 	v.vertex.x += _VertexOffsetX;
@@ -69,7 +79,7 @@ void PixShader(Input input, inout SurfaceOutput o)
 #endif
 
 	// Sample SDF
-	half d = tex2D(_MainTex, input.uv_MainTex).a * scale;
+	half d = UNITEXT_SAMPLE_DF(_MainTex, input.uv_MainTex) * scale;
 
 	// Face bias with dilate applied via normFactor (independent of atlas settings)
 	float normalizedFaceEffect = (baseWeight + _FaceDilate * _ScaleRatioA * 0.5) * normFactor;
@@ -103,7 +113,7 @@ void PixShader(Input input, inout SurfaceOutput o)
 	result = BlendOver(result, faceResult);
 
 	// Calculate sd for bevel/glow (using normFactor for independence from atlas settings)
-	float sd = (0.5 - normalizedFaceEffect + 0.5 / scale - tex2D(_MainTex, input.uv_MainTex).a) * scale;
+	float sd = (0.5 - normalizedFaceEffect + 0.5 / scale - UNITEXT_SAMPLE_DF(_MainTex, input.uv_MainTex)) * scale;
 	float outlineRange = _OutlineWidth * _ScaleRatioA * 0.5 * normFactor * scale;
 
 	// Convert from premultiplied alpha for surface shader output
@@ -113,10 +123,10 @@ void PixShader(Input input, inout SurfaceOutput o)
 	// _MainTex_TexelSize.xy = (1/width, 1/height)
 	float3 delta = float3(_MainTex_TexelSize.x, _MainTex_TexelSize.y, 0.0);
 
-	float4 smp4x = {tex2D(_MainTex, input.uv_MainTex - delta.xz).a,
-					tex2D(_MainTex, input.uv_MainTex + delta.xz).a,
-					tex2D(_MainTex, input.uv_MainTex - delta.zy).a,
-					tex2D(_MainTex, input.uv_MainTex + delta.zy).a };
+	float4 smp4x = {UNITEXT_SAMPLE_DF(_MainTex, input.uv_MainTex - delta.xz),
+					UNITEXT_SAMPLE_DF(_MainTex, input.uv_MainTex + delta.xz),
+					UNITEXT_SAMPLE_DF(_MainTex, input.uv_MainTex - delta.zy),
+					UNITEXT_SAMPLE_DF(_MainTex, input.uv_MainTex + delta.zy) };
 
 #if USE_DERIVATIVE
 	// Face Normal using gradientScale
