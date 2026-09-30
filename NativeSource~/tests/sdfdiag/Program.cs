@@ -49,6 +49,8 @@ unsafe class SdfDiag
                 if (ors.buf!=IntPtr.Zero && nrs.buf!=IntPtr.Zero && ors.bw==nrs.bw && ors.bh==nrs.bh)
                 {
                     byte* ob=(byte*)ors.buf, nb=(byte*)nrs.buf;
+                    int pO=Math.Abs(ors.bp), pN=Math.Abs(nrs.bp);
+                    if (ch=='o'||ch=='A') CrossEdgeProfile(ob,nb,ors.bw,ors.bh,pO,pN,spread,ch);
                     // center row samples
                     int row = ors.bh/2, pitchO=Math.Abs(ors.bp), pitchN=Math.Abs(nrs.bp);
                     Console.Write("   orig row: "); for(int x=0;x<Math.Min(ors.bw,16);x++) Console.Write($"{ob[row*pitchO+x],4}"); Console.WriteLine();
@@ -99,6 +101,43 @@ unsafe class SdfDiag
             }
         }
         return 0;
+    }
+
+    static double Bil(byte* b,int w,int h,int pit,double fx,double fy){
+        int x0=(int)Math.Floor(fx),y0=(int)Math.Floor(fy); double tx=fx-x0,ty=fy-y0;
+        int x1=x0+1,y1=y0+1; int cx0=x0<0?0:(x0>=w?w-1:x0),cx1=x1<0?0:(x1>=w?w-1:x1),cy0=y0<0?0:(y0>=h?h-1:y0),cy1=y1<0?0:(y1>=h?h-1:y1);
+        double v00=b[cy0*pit+cx0],v10=b[cy0*pit+cx1],v01=b[cy1*pit+cx0],v11=b[cy1*pit+cx1];
+        double aa=v00+(v10-v00)*tx,bb=v01+(v11-v01)*tx; return aa+(bb-aa)*ty; }
+    // Sample orig+new along the outward normal at 20+ edge points, -spread..+spread @0.25px.
+    // Print the averaged profile (t=distance px, negative=inside) and where they diverge.
+    static void CrossEdgeProfile(byte* ob, byte* nb, int w, int h, int pO, int pN, int spread, char ch)
+    {
+        int N=(int)(spread/0.25); // samples each side
+        int steps=2*N+1; var profO=new double[steps]; var profN=new double[steps]; int npts=0;
+        // find edge points: pixels where the byte is near 128 and gradient is strong
+        for (int y=2;y<h-2 && npts<40;y++) for (int x=2;x<w-2 && npts<40;x++){
+            int c=ob[y*pO+x]; if (Math.Abs(c-128)>20) continue;
+            double gx=(ob[y*pO+x+1]-ob[y*pO+x-1])/2.0, gy=(ob[(y+1)*pO+x]-ob[(y-1)*pO+x])/2.0;
+            double gl=Math.Sqrt(gx*gx+gy*gy); if (gl<8) continue; // strong edge only
+            double nx=gx/gl, ny=gy/gl; // gradient points toward inside (higher byte); normal outward = -grad
+            for (int i=0;i<steps;i++){ double t=(i-N)*0.25; // t>0 outside (subtract along +grad = inside, so outside is -grad*t)
+                double sx=x - nx*t, sy=y - ny*t; // move opposite gradient for +t outside
+                profO[i]+=Bil(ob,w,h,pO,sx,sy); profN[i]+=Bil(nb,w,h,pN,sx,sy); }
+            npts++;
+        }
+        if (npts==0){ Console.WriteLine($"   '{ch}': no strong edge points"); return; }
+        for (int i=0;i<steps;i++){ profO[i]/=npts; profN[i]/=npts; }
+        Console.WriteLine($"   '{ch}' cross-edge profile ({npts} pts), t=px (neg=inside):");
+        Console.Write("     t   :"); for(int i=0;i<steps;i+=2) Console.Write($"{((i-N)*0.25),6:F1}"); Console.WriteLine();
+        Console.Write("     orig:"); for(int i=0;i<steps;i+=2) Console.Write($"{profO[i],6:F0}"); Console.WriteLine();
+        Console.Write("     new :"); for(int i=0;i<steps;i+=2) Console.Write($"{profN[i],6:F0}"); Console.WriteLine();
+        // divergence: first |orig-new|>10 moving out from the edge center
+        double firstDiv=999; for(int i=0;i<steps;i++){ if(Math.Abs(profO[i]-profN[i])>10){ firstDiv=Math.Abs((i-N)*0.25); break; } }
+        // near-edge slope: median |dByte/px| within +-1.5px (samples i where |t|<=1.5)
+        var so=new System.Collections.Generic.List<double>(); var sn=new System.Collections.Generic.List<double>();
+        for(int i=0;i<steps-1;i++){ double t=(i-N)*0.25; if(Math.Abs(t)<=1.5){ so.Add(Math.Abs(profO[i+1]-profO[i])/0.25); sn.Add(Math.Abs(profN[i+1]-profN[i])/0.25);} }
+        so.Sort(); sn.Sort(); double mo=so.Count>0?so[so.Count/2]:0, mn=sn.Count>0?sn[sn.Count/2]:0;
+        Console.WriteLine($"   '{ch}' near-edge slope(+-1.5px) median |dByte/px|: orig={mo:F1} new={mn:F1} ratio={(mo>0?mn/mo:0):F3}; first divergence(|d|>10) at t~{firstDiv:F2}px");
     }
 
     static void Dump(string dir, string name, Sdf s)
