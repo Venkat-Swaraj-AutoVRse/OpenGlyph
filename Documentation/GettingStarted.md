@@ -71,6 +71,34 @@ Select a UniTextFont asset to configure in the Inspector:
 
 After changing settings, click **Apply** to rebuild the atlas.
 
+### 2.3 Pixel-Perfect Rendering (pixel & bitmap fonts)
+
+Pixel fonts (e.g. Silkscreen, Press Start 2P) and bitmap-strike fonts look crisp only when every
+glyph edge lands exactly on a device pixel. Enabling **Pixel Perfect** on a font asset makes
+OpenGlyph render them with no blur and no half-pixel misalignment:
+
+- **Detection.** OpenGlyph analyses the font on load (`UniTextFont.PixelFont`). It reports a
+  *pixel grid* when the glyph outlines lie on a regular lattice — the coarsest lattice gives the
+  font's **native pixels-per-em** — and/or *bitmap strikes* (EBDT/CBDT/sbix) with their fixed
+  sizes. A normal vector font (e.g. NotoSans) is never classified as a pixel font, so it is
+  unaffected. Detection uses the native outline export when present and degrades gracefully (no
+  grid claim) when it is not.
+- **Rendering.** When Pixel Perfect is on *and* the font is actually a pixel/bitmap font
+  (`PixelPerfectActive`), glyphs are rasterised in **Mono** (1-bit, texels only 0 or 255 — no
+  anti-aliasing) at the native size or an **integer multiple** of it, into a **point-filtered atlas
+  with no mipmaps**. Glyph quad corners and the text origin are **snapped to the device pixel grid**,
+  accounting for the canvas `scaleFactor`.
+- **Integer scales only.** The sampling size is chosen as the nearest integer multiple of the
+  native pixels-per-em (`ChoosePixelPerfectPpem`). At canvas scale factors 1 and 2 (and any integer),
+  edges are exactly on device pixels.
+- **Non-integer scale factor (e.g. 1.5) — documented fallback.** Corners are still snapped to the
+  nearest **device** pixel (`round(local * scaleFactor) / scaleFactor`), so the result stays crisp on
+  the physical grid; the trade-off is a coarser local-space snap step (1 / scaleFactor local units).
+  Crispness is preserved; only local quantisation is coarser than at integer scales.
+
+SDF, MSDF and Smooth modes are completely unaffected — Pixel Perfect only engages for a font that is
+both flagged and detected as a pixel/bitmap font.
+
 The Inspector also shows:
 - **Font Data Status** — whether font bytes are embedded
 - **Runtime Data** — glyph count, character count, atlas memory
