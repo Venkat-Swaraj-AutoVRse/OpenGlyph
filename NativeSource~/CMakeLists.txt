@@ -130,7 +130,7 @@ add_library(unitext_native SHARED
   src/ut_ft.c
   src/ut_ft_variations.c
   src/ut_hb.c
-  src/ut_colr_stub.c
+  src/ut_colr.c
   src/ut_bl_stub.c
   src/ut_version.c
   src/ut_exports.def)
