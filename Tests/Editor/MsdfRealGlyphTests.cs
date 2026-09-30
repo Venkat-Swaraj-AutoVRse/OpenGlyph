@@ -342,11 +342,6 @@ namespace LightSide.Tests
             int y0 = Math.Max(0, Math.Min((int)Math.Floor(fy), h - 1));
             int x1 = Math.Min(x0 + 1, w - 1), y1 = Math.Min(y0 + 1, h - 1);
             double tx = fx - x0, ty = fy - y0;
-            float M(int x, int y)
-            {
-                int i = (y * w + x) * 3;
-                return MsdfGenerator.Median(field[i], field[i + 1], field[i + 2]);
-            }
             // Median-of-three of the bilinearly-upscaled channels (corner-preserving).
             float R = Lerp2(field, w, 0, x0, y0, x1, y1, tx, ty);
             float G = Lerp2(field, w, 1, x0, y0, x1, y1, tx, ty);
