@@ -256,26 +256,28 @@ unsafe class Render
         W=(int)(px*1.6); H=px*2; var outp=new byte[W*H*4];
         lib.Fn<D_init>("ut_ft_init")(out var l);
         fixed(byte* p=font){ lib.Fn<D_newface>("ut_ft_new_memory_face")(l,p,(IntPtr)font.Length,IntPtr.Zero,out var f);
-            lib.Fn<D_setpx>("ut_ft_set_pixel_sizes")(f,(uint)px,(uint)px);
-            if(lib.Fn<D_loadglyph>("ut_ft_load_glyph")(f,gid,1<<3 /*NO_BITMAP*/)!=0)return null;
+            // Contract from Runtime/EmojiCore/COLRv1Renderer.cs: load NO_SCALE|NO_BITMAP (outline in
+            // FONT UNITS), then the context scales font-units -> px by px/unitsPerEm with Y flipped.
+            var fi=lib.Fn<D_faceinfo>("ut_ft_get_face_info");
+            const int LOAD_NO_SCALE=1<<0, LOAD_NO_BITMAP=1<<3;
+            if(lib.Fn<D_loadglyph>("ut_ft_load_glyph")(f,gid,LOAD_NO_SCALE|LOAD_NO_BITMAP)!=0)return null;
+            fi(f,out _,out _,out int upem,out _,out _,out _,out _,out _,out _); if(upem<=0)upem=2048;
             var img=lib.Fn<D_blimgcreate>("ut_blImageCreate")(W,H,1); if(img==IntPtr.Zero)return null;
             var ctx=lib.Fn<D_blctxcreate>("ut_blContextCreate")(img); var path=lib.Fn<D_blpathcreate>("ut_blPathCreate")();
             if(lib.Fn<D_outlinetobl>("ut_ft_outline_to_blpath")(f,path)==0){ lib.Fn<D_blctxv>("ut_blContextDestroy")(ctx); lib.Fn<D_blimgdestroy>("ut_blImageDestroy")(img); return null; }
-            // ut_ft_outline_to_blpath emits FreeType units/64, Y UP from the baseline. Transform
-            // matrix is applied to points as translate * scale (Blend2D post-multiplies), so set
-            // translate(margin, baseline) first then scale(1,-1): a Y-up glyph maps below the
-            // baseline, landing inside the 2*px frame.
             lib.Fn<D_blctxrgba>("ut_blContextSetFillStyleRgba32")(ctx,0xFF000000);
             lib.Fn<D_blctxfillall>("ut_blContextFillAll")(ctx);
             lib.Fn<D_blctxrgba>("ut_blContextSetFillStyleRgba32")(ctx,0xFFFFFFFF);
+            // place baseline near frame bottom, flip Y, scale font-units -> px
+            double s=(double)px/upem;
             lib.Fn<D_blctxtranslate>("ut_blContextTranslate")(ctx, px*0.3, px*1.55);
-            lib.Fn<D_blctxscale>("ut_blContextScale")(ctx, 1.0, -1.0);
+            lib.Fn<D_blctxscale>("ut_blContextScale")(ctx, s, -s);
             lib.Fn<D_blctxfillpath>("ut_blContextFillPath")(ctx,path);
             lib.Fn<D_blctxv>("ut_blContextEnd")(ctx);
             IntPtr pd=lib.Fn<D_blimgdata>("ut_blImageGetData")(img,out int stride);
             var raw=new byte[H*stride]; Marshal.Copy(pd,raw,0,raw.Length);
-            for(int y=0;y<H;y++)for(int x=0;x<W;x++){int s=y*stride+x*4,d=(y*W+x)*4; // PRGB32 BGRA
-                outp[d]=raw[s+2];outp[d+1]=raw[s+1];outp[d+2]=raw[s+0];outp[d+3]=255;}
+            for(int y=0;y<H;y++)for(int x=0;x<W;x++){int sidx=y*stride+x*4,d=(y*W+x)*4; // PRGB32 BGRA
+                outp[d]=raw[sidx+2];outp[d+1]=raw[sidx+1];outp[d+2]=raw[sidx+0];outp[d+3]=255;}
             lib.Fn<D_blctxv>("ut_blContextDestroy")(ctx); lib.Fn<D_blimgdestroy>("ut_blImageDestroy")(img);
             return outp;
         }
@@ -289,11 +291,14 @@ unsafe class Render
     }
 
     // ---------- compositors ----------
+    static byte[] FlipGray(byte[] g,int w,int h){var o=new byte[w*h];for(int y=0;y<h;y++)Array.Copy(g,(h-1-y)*w,o,y*w,w);return o;}
+    static byte[] FlipRGBA(byte[] g,int w,int h){var o=new byte[w*h*4];for(int y=0;y<h;y++)Array.Copy(g,(h-1-y)*w*4,o,y*w*4,w*4);return o;}
     static void Composite(List<(string cap,byte[] o,byte[] n,int w,int h)> rows, string path, string title)
     {
-        // convert grayscale rows to RGBA + diff
+        // convert grayscale rows to RGBA + diff; flip vertically for upright display
         var rr=new List<(string,byte[],byte[],byte[],int,int)>();
-        foreach(var r in rows){ var oR=GrayToRGBA(r.o,r.w,r.h); var nR=GrayToRGBA(r.n,r.w,r.h); var d=DiffHeat(r.o,r.n,r.w,r.h,4); rr.Add((r.cap,oR,nR,d,r.w,r.h)); }
+        foreach(var r in rows){ var of=FlipGray(r.o,r.w,r.h); var nf=FlipGray(r.n,r.w,r.h);
+            var oR=GrayToRGBA(of,r.w,r.h); var nR=GrayToRGBA(nf,r.w,r.h); var d=DiffHeat(of,nf,r.w,r.h,4); rr.Add((r.cap,oR,nR,d,r.w,r.h)); }
         DrawSheet(rr,path,title);
     }
     static void CompositeRGBA(List<(string cap,byte[] o,byte[] n,int w,int h)> rows, string path, string title)

@@ -141,6 +141,9 @@ unsafe class Program
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr D_blpathcreate();
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_outlinetobl(IntPtr face, IntPtr path);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void D_blimgdestroy(IntPtr img);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void D_blctxfillall(IntPtr ctx);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void D_blctxtranslate(IntPtr ctx,double x,double y);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void D_blctxscale(IntPtr ctx,double x,double y);
 
     // Blend2D rasterization parity: fill the same glyph outline in both DLLs, diff pixels.
     // Runs only when ut_ft_outline_to_blpath is functional in BOTH DLLs (Blend2D enabled).
@@ -165,7 +168,7 @@ unsafe class Program
             foreach (var lib in new[]{orig,neu})
             {
                 var face = lib==orig?of:nf;
-                lib.Fn<D_loadglyph>("ut_ft_load_glyph")(face, g, 1<<3 /*NO_BITMAP*/);
+                lib.Fn<D_loadglyph>("ut_ft_load_glyph")(face, g, (1<<0)|(1<<3) /*NO_SCALE|NO_BITMAP*/);
                 var path2 = lib.Fn<D_blpathcreate>("ut_blPathCreate")();
                 if (lib.Fn<D_outlinetobl>("ut_ft_outline_to_blpath")(face, path2) == 0) { ok = false; break; }
             }
@@ -173,13 +176,22 @@ unsafe class Program
 
             byte[] Raster(Lib lib, IntPtr face)
             {
-                const int W=96,H=96;
+                const int W=96,H=96,PX=64;
+                var fi=lib.Fn<D_faceinfo>("ut_ft_get_face_info");
+                fi(face, out _, out _, out int upem, out _, out _, out _, out _, out _, out _); if(upem<=0)upem=2048;
                 var img = lib.Fn<D_blimgcreate>("ut_blImageCreate")(W,H,1/*PRGB32*/);
                 var ctx = lib.Fn<D_blctxcreate>("ut_blContextCreate")(img);
                 var pathH = lib.Fn<D_blpathcreate>("ut_blPathCreate")();
-                lib.Fn<D_loadglyph>("ut_ft_load_glyph")(face, g, 1<<3);
+                // C# contract (COLRv1Renderer): LOAD_NO_SCALE|NO_BITMAP -> path in font units,
+                // scaled to px in the Blend2D context (px/upem), Y flipped.
+                lib.Fn<D_loadglyph>("ut_ft_load_glyph")(face, g, (1<<0)|(1<<3));
                 lib.Fn<D_outlinetobl>("ut_ft_outline_to_blpath")(face, pathH);
+                lib.Fn<D_blctxrgba>("ut_blContextSetFillStyleRgba32")(ctx, 0xFF000000);
+                lib.Fn<D_blctxfillall>("ut_blContextFillAll")(ctx);
                 lib.Fn<D_blctxrgba>("ut_blContextSetFillStyleRgba32")(ctx, 0xFFFFFFFF);
+                double s=(double)PX/upem;
+                lib.Fn<D_blctxtranslate>("ut_blContextTranslate")(ctx, PX*0.2, PX*1.2);
+                lib.Fn<D_blctxscale>("ut_blContextScale")(ctx, s, -s);
                 lib.Fn<D_blctxfillpath>("ut_blContextFillPath")(ctx, pathH);
                 lib.Fn<D_blctxvoid>("ut_blContextEnd")(ctx);
                 IntPtr pd = lib.Fn<D_blimgdata>("ut_blImageGetData")(img, out int stride);
@@ -489,6 +501,7 @@ unsafe class Program
                 int compared = 0, dimMismatch = 0, overallMax = 0; double sumMean = 0;
                 // perceptual accumulators
                 double edgeMeanSum1=0, edgeMax1=0, covSum1=0; double edgeMeanSum4=0, edgeMax4=0, covSum4=0; int pc=0;
+                var slopesO=new System.Collections.Generic.List<double>(); var slopesN=new System.Collections.Generic.List<double>();
                 const int SDF_LOAD = 0, SPREAD = 8;
                 for (uint g = 1; g <= (uint)nng && compared < nGlyphs; g++)
                 {
@@ -502,6 +515,11 @@ unsafe class Program
                         for (int i = 0; i < len; i++) { int d = Math.Abs(ob[i] - nb[i]); if (d > maxDiff) maxDiff = d; sum += d; }
                         if (maxDiff > overallMax) overallMax = maxDiff;
                         sumMean += (len > 0 ? (double)sum / len : 0);
+                        // slope@128 crossings (horizontal): |v[x+1]-v[x]| across each sign change
+                        int pit=Math.Abs(ores.bp);
+                        for(int y=0;y<ores.bh;y++)for(int x=0;x<ores.bw-1;x++){
+                            int va=ob[y*pit+x],vb=ob[y*pit+x+1]; if((va-128)*(vb-128)<0) slopesO.Add(Math.Abs(vb-va));
+                            int vc=nb[y*pit+x],vd=nb[y*pit+x+1]; if((vc-128)*(vd-128)<0) slopesN.Add(Math.Abs(vd-vc)); }
                         compared++;
                         // perceptual: threshold at 128 (shader edge=0.5), 1x and 4x bilinear.
                         Perceptual(ob, nb, ores.bw, ores.bh, Math.Abs(ores.bp), SPREAD, 1, out double em1, out double ex1, out double cov1);
@@ -520,6 +538,11 @@ unsafe class Program
                 Console.WriteLine($"    SDF {compared}g byte(info): meanAbs={meanOfMeans:F2} maxAbs={overallMax} dimMism={dimMismatch}");
                 Console.WriteLine($"    SDF perceptual 1x: edgeMean={em1a:F3}px edgeMax={edgeMax1:F3}px covDiff={cov1a:P2}");
                 Console.WriteLine($"    SDF perceptual 4x: edgeMean={em4a:F3}px edgeMax={edgeMax4:F3}px covDiff={cov4a:P2}");
+                slopesO.Sort(); slopesN.Sort();
+                double mo=slopesO.Count>0?slopesO[slopesO.Count/2]:0, mnn=slopesN.Count>0?slopesN[slopesN.Count/2]:0;
+                double slopeRatio = mo>0? mnn/mo : 0;
+                Console.WriteLine($"    SDF slope@128 median: orig={mo:F1} new={mnn:F1} ratio={slopeRatio:F3} (gate 0.95-1.05)");
+                Check($"{name} sdf slope ratio 0.95-1.05", slopeRatio>=0.95 && slopeRatio<=1.05, $"ratio={slopeRatio:F3} orig={mo} new={mnn}");
                 // Perceptual gate is the pass/fail criterion: edgeMean<=0.10px, edgeMax<=0.50px, cov<=1%.
                 bool gate = dimMismatch==0
                     && em1a<=0.10 && edgeMax1<=0.50 && cov1a<=0.01
