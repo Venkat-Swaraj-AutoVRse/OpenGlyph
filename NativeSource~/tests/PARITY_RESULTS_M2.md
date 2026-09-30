@@ -45,26 +45,35 @@ Pinned rest: FreeType `VER-2-13-3`, HarfBuzz `12.2.0`, zlib `v1.3.1`, libpng `v1
 only 0.35–0.76 byte ≈ **0.02–0.05 px**. A source-level midpoint/spread correction does not
 apply to the edge *position* — it is localized, not a constant shift.
 
-### SDF gradient / saturation — investigated, remap REVERTED (was wrong)
-An earlier round added a byte remap `v → clamp(128 + (v-128)*1.4961)` to steepen a "shallow
-slope" (peak `|dByte/px|` at the crossing measured orig ~23 vs new ~15). **That was a
-measurement artifact and the remap was a defect**: clamping at 128±127 cut the field's REACH
-~1.5× — at spread 8 the original reaches 0 (fully outside) at ~8–9 px but the remapped build
-saturated at ~5–6 px (spread 22: orig ~22–24 px, remapped ~15–19 px). That clips
-outlines/glows/underlays that sample distance beyond the shortened reach.
+### SDF field — fully resolved: the "softness" was a render-tool bug, not a DLL defect
+Two rounds chased an apparent 4× softness. Sequence: (1) a `v→clamp(128+(v-128)*1.4961)` remap
+steepened a "shallow slope" but clipped REACH ~1.5× (reverted); (2) the revert restored reach
+but the render still looked soft. The **root cause was the render tool**, not the field: it
+upscaled the *thresholded 1× shader preview* to 4× (blurring both columns) instead of upscaling
+the SDF *field* and applying `smoothstep` at target resolution the way the GPU samples. Fixed in
+the render tool (upscale field → smoothstep); at 4× ORIG and NEW are now equally crisp.
 
-The original's outside profile is in fact **linear** — e.g. `123,111,96,80,64,48,32,16,0` = a
-standard `127/spread` field reaching 0 at ±spread px — exactly what FreeType's `bsdf` produces.
-So no remap is needed. **Fix: reverted the remap** (keep only the Y-flip). Reach then matches:
-the SDF bitmap **dimensions are identical** on both (the reach envelope is equal by
-construction), and the median edge→0 reach matches on Latin/Hebrew/Devanagari/Thai/RobotoFlex.
-The prior "Devanagari 0.88 slope" was that discarded peak-step metric — Devanagari reach now
-matches 10/10.
+**Full cross-edge profile** (sdfdiag, normal-sampled −spread..+spread @0.25 px, 40 edge points,
+spread 8): orig and new track within ~2–4 bytes across the whole range, no divergence >10. The
+original's outside profile is linear (`123,111,96,80,64,48,32,16,0` = `127/spread`, reaching 0
+at ±spread) — the same field FreeType produces.
 
-**Gate (replaces the peak-slope gate): SDF reach within ±1 px** of the original (median edge→0
-px). Result: **5/6 pass** — NotoSans 8/9, Devanagari 10/10, Hebrew 9/9, Thai 9/9, RobotoFlex
-11/11; **Arabic 8 vs 11** (new over-reaches ~3 px on rare Arabic glyphs — same
-autohinter/EDT class as the Arabic hinting/perceptual diffs).
+**Near-edge slope** measured correctly (median `|dByte/px|` over edge ±1.5 px, NOT the
+single-sample peak that read 23): matches. Renderer variant results (both gates):
+
+| Variant | near-edge slope ratio | reach ±1px | dims | verdict |
+|---|---|---|---|---|
+| bsdf (render NORMAL → SDF) — **chosen** | 0.979–1.047 | 5/6 (Arabic 8v11) | equal | passes; accepted baseline |
+| outline `sdf` (SDF on outline) | 0.958–1.047 | 5/6 (Arabic 8v12) | equal | also passes; not needed |
+| remap k=1.4961 (prior) | ~1.0 (peak) | FAILS (reach ~0.66×) | equal | rejected — clipped reach |
+
+Chosen: **bsdf** (the accepted baseline; matches dims, reach ±1px, and near-edge slope, and was
+validated across all M2 parity). `OPENGLYPH_SDF_MODE=outline` keeps the A/B path.
+
+**Gates (both kept, next to each other):** near-edge slope ratio ∈ [0.95,1.05] (median |dByte/px|
+over ±1.5 px) — **6/6 pass** (0.979–1.047); reach ±1 px — **5/6 pass** (Arabic new over-reaches
+~3 px, same rare-Arabic autohinter/EDT class as the hinting/perceptual diffs). dims equal;
+edgeMean ≤ 0.10 px (see perceptual gate).
 
 ### Perceptual gate (B.2/B.3 — the pass/fail criterion)
 Each SDF thresholded at the shader edge (byte 128 = 0.5, per `Shaders/UniText.cginc` `SDFLayer`)
@@ -129,14 +138,14 @@ raster maxPix (measured in the CMake-3.31 Blend2D build).
 Fixed this round: SDF Y-flip, force-autohint, **SDF slope** (softness — slope ratio 5/6 pass),
 Blend2D linking, and the **Blend2D call-sequence/contract** (raster now meanPix 0.005 / maxPix 8
 vs the earlier invalid 0.226/64). Remaining over threshold:
-- SDF **edgeMax** 1.2–2.0 px > 0.50 px (edgeMean 0.04 px, coverage <0.25 %, slope now matched —
-  the residual is isolated feature-tip crossings where FT bsdf vs the original EDT differ ~2px).
-- SDF **slope ratio** on Devanagari 0.880 (< 0.95) — its original slope is 25 vs our 22 (byte
-  quantization at small integers); the other 5 fonts pass 0.957–1.048.
+- SDF **edgeMax** 1.2–2.0 px > 0.50 px (edgeMean 0.04 px, coverage <0.25 %; near-edge slope now
+  matches 6/6 — the residual is isolated feature-tip crossings where FT bsdf vs the original EDT
+  differ ~2px). SDF field softness is resolved (was a render-tool bug); slope + reach gates in.
+- SDF **reach** on Arabic 8 vs 11 px (>±1; rare-Arabic autohinter/EDT class); 5/6 fonts pass.
 - Arabic hinted bitmaps: rare extended glyphs differ 2–3 px (> 1 px); common letters identical.
 - Blend2D raster maxPix 8 > 2 (a few edge-AA pixels; mean 0.005 — visually identical).
 Remaining needs the original's exact EDT/autohinter/Blend2D version or sign-off on the max-edge,
-Devanagari-slope, and Arabic-rare-glyph tolerances.
+Arabic-reach, and Arabic-rare-glyph tolerances.
 
 ## Reproduce
 ```
