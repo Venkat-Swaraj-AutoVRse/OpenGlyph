@@ -43,7 +43,19 @@ Pinned rest: FreeType `VER-2-13-3`, HarfBuzz `12.2.0`, zlib `v1.3.1`, libpng `v1
 ### Signed-bias finding (B.1)
 **No uniform edge bias**: overall signed mean 0.7–1.7 byte, but the *edge-band* signed mean is
 only 0.35–0.76 byte ≈ **0.02–0.05 px**. A source-level midpoint/spread correction does not
-apply — the residual is localized, not a constant shift (masking it would be a fudge; rejected).
+apply to the edge *position* — it is localized, not a constant shift.
+
+### SDF gradient (slope) fix — a real DLL defect
+The rendered NEW text was visibly softer/blurrier at 4× with an even DIFF ring on BOTH sides of
+every edge: edge *position* matched but the distance *gradient* was shallower. Measured median
+`|dByte/px|` at the 128 crossing (spread 8): **orig ~20–25, new ~15** (ratio 0.65–0.75). Cause:
+FreeType maps distance→byte as `128 + (dist/spread)*127` (slope ~127/spread) but the original
+uses a steeper curve (~190/spread). A shallower gradient means softer text and wrong
+outline/glow/underlay extents in the shaders. **Fix** (in `ut_ft_render_sdf_glyph`, at the
+mapping, keeping dims): remap around the midpoint `v → clamp(128 + (v-128)*k)`, `k = 1.4961`
+(≈190/127); symmetric so the 0.5 edge position is unchanged. **Gate** (new): median slope ratio
+new/orig ∈ [0.95, 1.05]. After: **5/6 fonts pass** — NotoSans 0.957, Arabic 1.048, Hebrew 1.000,
+Thai 0.957, RobotoFlex 1.048; **Devanagari 0.880** (its orig slope 25 vs 22, byte quantization).
 
 ### Perceptual gate (B.2/B.3 — the pass/fail criterion)
 Each SDF thresholded at the shader edge (byte 128 = 0.5, per `Shaders/UniText.cginc` `SDFLayer`)
@@ -87,25 +99,35 @@ match), but the max-edge gate is not met with FreeType's bsdf.
   detail on complex/extended Arabic). Common Arabic letters match.
 
 ## Blend2D rasterization parity (M2.4 part 2)
-Fill the same 'A' outline via `ut_ft_outline_to_blpath` in both DLLs, diff the PRGB32 raster:
-**meanPix = 0.226, maxPix = 64** (threshold ≤ 2). Near-identical fill; residual is edge
-anti-aliasing between the original's bundled Blend2D and the pinned Sept-2024 Blend2D.
+The earlier test was invalid: it drove the original with the wrong sequence (LOAD_NO_BITMAP,
+no scale), so the original filled a trapezoid and meanPix=0.226 was meaningless.
+**Corrected to the C# contract** (`Runtime/EmojiCore/COLRv1Renderer.cs`): `FT_LOAD_NO_SCALE |
+FT_LOAD_NO_BITMAP` → `ut_ft_outline_to_blpath` (which now emits RAW font units, no /64) →
+context clear → `translate` → `scale(px/upem, -px/upem)` → `fillPath`. Both DLLs now draw the
+correct glyph (A/g/&/Arabic at 64 & 160px). Real parity: **meanPix = 0.005, maxPix = 8**
+(a few edge-AA pixels; over the ≤2 max, but the fill is essentially identical). Contract fix:
+`ut_ft_outline_to_blpath` emitted `/64`-scaled coords, wrong for the NO_SCALE path the C# uses —
+now emits raw units to match the original.
 
-## Full parity table — 133 passed, 8 failed (perceptual/strict thresholds)
+## Full parity table — 139 passed, 10 failed (perceptual/strict thresholds)
 PASS: face info, char index, metrics, outline, outline_data, HarfBuzz shaping (5 scripts),
 variable-font axes+determinism, COLRv1 paint-tree (40/40) + palette, editor DLL (glyph counts,
 valid subset, same glyph set), hinted bitmaps on 4/5 fonts.
 FAIL: SDF perceptual gate ×6 (edgeMax), Arabic hinted bitmap (2–3 px on rare glyphs); Blend2D
 raster maxPix (measured in the CMake-3.31 Blend2D build).
 
-## Swap criteria — NOT MET YET
-Do not replace the shipped `unitext_native.dll`:
-- SDF **edgeMax** 1.2–2.0 px > 0.50 px (edgeMean 0.04 px and coverage <0.25 % pass — fields are
-  visually very close, but max-edge fails).
-- Arabic hinted bitmaps: rare extended glyphs differ 2–3 px (> 1 px acceptance).
-- Blend2D raster maxPix 64 > 2 (edge AA).
-The Y-flip, force-autohint, and Blend2D-linking fixes are real and large; the remainder needs
-the original's exact EDT/autohinter/Blend2D version or explicit sign-off on max-edge tolerances.
+## Swap criteria — NOT MET YET (but much closer)
+Fixed this round: SDF Y-flip, force-autohint, **SDF slope** (softness — slope ratio 5/6 pass),
+Blend2D linking, and the **Blend2D call-sequence/contract** (raster now meanPix 0.005 / maxPix 8
+vs the earlier invalid 0.226/64). Remaining over threshold:
+- SDF **edgeMax** 1.2–2.0 px > 0.50 px (edgeMean 0.04 px, coverage <0.25 %, slope now matched —
+  the residual is isolated feature-tip crossings where FT bsdf vs the original EDT differ ~2px).
+- SDF **slope ratio** on Devanagari 0.880 (< 0.95) — its original slope is 25 vs our 22 (byte
+  quantization at small integers); the other 5 fonts pass 0.957–1.048.
+- Arabic hinted bitmaps: rare extended glyphs differ 2–3 px (> 1 px); common letters identical.
+- Blend2D raster maxPix 8 > 2 (a few edge-AA pixels; mean 0.005 — visually identical).
+Remaining needs the original's exact EDT/autohinter/Blend2D version or sign-off on the max-edge,
+Devanagari-slope, and Arabic-rare-glyph tolerances.
 
 ## Reproduce
 ```
