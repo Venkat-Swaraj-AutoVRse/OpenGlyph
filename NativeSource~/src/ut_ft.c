@@ -20,17 +20,7 @@
 
 UT_API int ut_ft_init(FT_Library* out_lib) {
     if (!out_lib) return 1;
-    FT_Error e = FT_Init_FreeType(out_lib);
-    if (!e) {
-        /* TrueType hinting parity: the original's bytecode-interpreter version affects hinted
-         * bitmap dimensions. A/B via OPENGLYPH_TT_INTERP (35 or 40); default leaves FreeType's. */
-        const char* iv = getenv("OPENGLYPH_TT_INTERP");
-        if (iv) {
-            FT_UInt v = (iv[0]=='3') ? 35 : 40;
-            FT_Property_Set(*out_lib, "truetype", "interpreter-version", &v);
-        }
-    }
-    return (int)e;
+    return (int)FT_Init_FreeType(out_lib);
 }
 
 UT_API int ut_ft_done(FT_Library lib) {
@@ -178,6 +168,8 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
         FT_Property_Set(face->glyph->library, "bsdf", "spread", &s);
     }
 
+    /* The original forces the autohinter for SDF too (native/no-hint cause large dim
+     * mismatches vs the original: 296-436 glyphs). Force it to match. */
     FT_Error err = FT_Load_Glyph(face, gid, load_flags | FT_LOAD_FORCE_AUTOHINT);
     if (err) return (int)err;
 

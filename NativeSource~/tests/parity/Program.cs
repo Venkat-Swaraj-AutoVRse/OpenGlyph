@@ -103,6 +103,13 @@ unsafe class Program
             CompareColr(orig, neu, colrFont);
         }
 
+        // Blend2D rasterization parity (M2). Runs only when both DLLs have a functional
+        // ut_ft_outline_to_blpath (Blend2D enabled); with the stub build it reports skipped.
+        {
+            var f = Directory.GetFiles(fontsDir, "*.ttf");
+            if (f.Length > 0) { Console.WriteLine("\n== Blend2D raster =="); CompareBlend2D(orig, neu, f[0]); }
+        }
+
         // Editor DLL subset parity (M2): opt-in via env vars so positional args stay stable.
         string edOrig = Environment.GetEnvironmentVariable("PARITY_EDITOR_ORIG");
         string edNew  = Environment.GetEnvironmentVariable("PARITY_EDITOR_NEW");
@@ -124,6 +131,77 @@ unsafe class Program
 
     // COLR delegates
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_glyphpaint(IntPtr face, uint bg, int root, out IntPtr pP, out int pIns);
+    // Blend2D delegates
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr D_blimgcreate(int w, int h, uint fmt);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr D_blimgdata(IntPtr img, out int stride);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr D_blctxcreate(IntPtr img);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void D_blctxvoid(IntPtr ctx);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void D_blctxrgba(IntPtr ctx, uint rgba);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void D_blctxfillpath(IntPtr ctx, IntPtr path);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr D_blpathcreate();
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_outlinetobl(IntPtr face, IntPtr path);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void D_blimgdestroy(IntPtr img);
+
+    // Blend2D rasterization parity: fill the same glyph outline in both DLLs, diff pixels.
+    // Runs only when ut_ft_outline_to_blpath is functional in BOTH DLLs (Blend2D enabled).
+    static void CompareBlend2D(Lib orig, Lib neu, string path)
+    {
+        byte[] data = File.ReadAllBytes(path);
+        string name = Path.GetFileName(path);
+        if (!orig.Has("ut_blImageCreate") || !neu.Has("ut_blImageCreate")) return;
+        var oi = orig.Fn<D_init>("ut_ft_init"); var ni = neu.Fn<D_init>("ut_ft_init");
+        oi(out var oLib); ni(out var nLib);
+        var pin = GCHandle.Alloc(data, GCHandleType.Pinned);
+        try
+        {
+            byte* p = (byte*)pin.AddrOfPinnedObject();
+            orig.Fn<D_newface>("ut_ft_new_memory_face")(oLib, p, (IntPtr)data.Length, IntPtr.Zero, out var of);
+            neu .Fn<D_newface>("ut_ft_new_memory_face")(nLib, p, (IntPtr)data.Length, IntPtr.Zero, out var nf);
+            orig.Fn<D_setpx>("ut_ft_set_pixel_sizes")(of, 64, 64);
+            neu .Fn<D_setpx>("ut_ft_set_pixel_sizes")(nf, 64, 64);
+            uint g = neu.Fn<D_charindex>("ut_ft_get_char_index")(nf, (UIntPtr)'A'); if (g==0) g=1;
+
+            int maxPix = 0; long sum = 0; int len = 0; bool ok = true;
+            foreach (var lib in new[]{orig,neu})
+            {
+                var face = lib==orig?of:nf;
+                lib.Fn<D_loadglyph>("ut_ft_load_glyph")(face, g, 1<<3 /*NO_BITMAP*/);
+                var path2 = lib.Fn<D_blpathcreate>("ut_blPathCreate")();
+                if (lib.Fn<D_outlinetobl>("ut_ft_outline_to_blpath")(face, path2) == 0) { ok = false; break; }
+            }
+            if (!ok) { Console.WriteLine($"    Blend2D {name}: ut_ft_outline_to_blpath returned 0 (Blend2D disabled/stub) — SKIPPED (deferred; needs -DOPENGLYPH_ENABLE_BLEND2D=ON on CMake<=3.31)"); return; }
+
+            byte[] Raster(Lib lib, IntPtr face)
+            {
+                const int W=96,H=96;
+                var img = lib.Fn<D_blimgcreate>("ut_blImageCreate")(W,H,1/*PRGB32*/);
+                var ctx = lib.Fn<D_blctxcreate>("ut_blContextCreate")(img);
+                var pathH = lib.Fn<D_blpathcreate>("ut_blPathCreate")();
+                lib.Fn<D_loadglyph>("ut_ft_load_glyph")(face, g, 1<<3);
+                lib.Fn<D_outlinetobl>("ut_ft_outline_to_blpath")(face, pathH);
+                lib.Fn<D_blctxrgba>("ut_blContextSetFillStyleRgba32")(ctx, 0xFFFFFFFF);
+                lib.Fn<D_blctxfillpath>("ut_blContextFillPath")(ctx, pathH);
+                lib.Fn<D_blctxvoid>("ut_blContextEnd")(ctx);
+                IntPtr pd = lib.Fn<D_blimgdata>("ut_blImageGetData")(img, out int stride);
+                var buf = new byte[H*stride];
+                Marshal.Copy(pd, buf, 0, buf.Length);
+                lib.Fn<D_blctxvoid>("ut_blContextDestroy")(ctx);
+                lib.Fn<D_blimgdestroy>("ut_blImageDestroy")(img);
+                return buf;
+            }
+            var ob = Raster(orig, of); var nb = Raster(neu, nf);
+            len = Math.Min(ob.Length, nb.Length);
+            for (int i=0;i<len;i++){int d=Math.Abs(ob[i]-nb[i]);if(d>maxPix)maxPix=d;sum+=d;}
+            double mean = len>0?(double)sum/len:0;
+            Console.WriteLine($"    Blend2D {name}: raster maxPix={maxPix}, meanPix={mean:F3}");
+            Check($"{name} blend2d raster (max<=2)", maxPix <= 2, $"maxPix={maxPix} meanPix={mean:F3}");
+
+            orig.Fn<D_doneface>("ut_ft_done_face")(of); neu.Fn<D_doneface>("ut_ft_done_face")(nf);
+        }
+        finally { pin.Free(); }
+        orig.Fn<D_done>("ut_ft_done")(oLib); neu.Fn<D_done>("ut_ft_done")(nLib);
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_paintfmt(IntPtr face, IntPtr pP, int pIns);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_paintlayers(IntPtr face, IntPtr pP, int pIns, out uint nl, out uint l, out IntPtr iP);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_nextlayer(IntPtr face, ref uint nl, ref uint l, ref IntPtr iP, out IntPtr cP, out int cIns);
