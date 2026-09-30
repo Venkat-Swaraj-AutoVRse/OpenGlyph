@@ -14,12 +14,23 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 /* ---- FreeType error passthrough: FT_Error is already 0==ok. --------------- */
 
 UT_API int ut_ft_init(FT_Library* out_lib) {
     if (!out_lib) return 1;
-    return (int)FT_Init_FreeType(out_lib);
+    FT_Error e = FT_Init_FreeType(out_lib);
+    if (!e) {
+        /* TrueType hinting parity: the original's bytecode-interpreter version affects hinted
+         * bitmap dimensions. A/B via OPENGLYPH_TT_INTERP (35 or 40); default leaves FreeType's. */
+        const char* iv = getenv("OPENGLYPH_TT_INTERP");
+        if (iv) {
+            FT_UInt v = (iv[0]=='3') ? 35 : 40;
+            FT_Property_Set(*out_lib, "truetype", "interpreter-version", &v);
+        }
+    }
+    return (int)e;
 }
 
 UT_API int ut_ft_done(FT_Library lib) {
@@ -50,7 +61,9 @@ UT_API int ut_ft_select_size(FT_Face face, int strike_index) {
 
 UT_API int ut_ft_load_glyph(FT_Face face, FT_UInt gid, FT_Int32 load_flags) {
     if (!face) return 1;
-    return (int)FT_Load_Glyph(face, gid, load_flags);
+    /* The original forces the autohinter (verified: origDefault vs new[FORCE_AUTOHINT] = 0/36
+     * bitmap-dim diffs, vs 16-24/36 with native hinting). Match it so hinted bitmaps agree. */
+    return (int)FT_Load_Glyph(face, gid, load_flags | FT_LOAD_FORCE_AUTOHINT);
 }
 
 UT_API int ut_ft_render_glyph(FT_GlyphSlot slot, int render_mode) {
@@ -165,7 +178,7 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
         FT_Property_Set(face->glyph->library, "bsdf", "spread", &s);
     }
 
-    FT_Error err = FT_Load_Glyph(face, gid, load_flags);
+    FT_Error err = FT_Load_Glyph(face, gid, load_flags | FT_LOAD_FORCE_AUTOHINT);
     if (err) return (int)err;
 
     FT_GlyphSlot slot = face->glyph;
@@ -177,12 +190,15 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
     out->metricAdvanceX = (int)m->horiAdvance;
 
     /* The original computes the SDF from a rendered GRAYSCALE bitmap via a Euclidean
-     * Distance Transform (BSDF), not directly from the outline. Reproduce that: render
-     * NORMAL first so the slot format becomes FT_GLYPH_FORMAT_BITMAP, then FT_RENDER_MODE_SDF
-     * routes through FreeType's 'bsdf' module (bitmap EDT) rather than the outline 'sdf' module. */
+     * Distance Transform. FreeType offers two routes; select via OPENGLYPH_SDF_MODE for
+     * A/B parity testing ("outline" = FT 'sdf' module on the outline; default/"bsdf" =
+     * render NORMAL then FT 'bsdf' bitmap-EDT). */
+    /* The original computes the SDF from a rendered GRAYSCALE bitmap. Reproduce with
+     * FreeType's bitmap-EDT ('bsdf'): render NORMAL first (slot -> FT_GLYPH_FORMAT_BITMAP),
+     * then FT_RENDER_MODE_SDF routes through 'bsdf'. The result is then Y-flipped below to
+     * match the original's top-down orientation. */
     err = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
-    if (err) return (int)err;
-    err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+    if (!err) err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
     if (err) return (int)err;
 
     FT_Bitmap* b = &slot->bitmap;
@@ -196,7 +212,11 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
     if (sz > 0 && b->buffer) {
         void* copy = malloc(sz);
         if (!copy) return 1;
-        memcpy(copy, b->buffer, sz);
+        /* FreeType's SDF raster emits the buffer Y-flipped vs the original's EDT (which keeps
+         * the NORMAL bitmap's top-down order). Flip rows back so the SDF matches the original. */
+        for (unsigned r = 0; r < b->rows; ++r)
+            memcpy((char*)copy + (size_t)r*pitch,
+                   (const char*)b->buffer + (size_t)(b->rows-1-r)*pitch, pitch);
         out->bmpBuffer = copy;
     }
     out->success = 1;
