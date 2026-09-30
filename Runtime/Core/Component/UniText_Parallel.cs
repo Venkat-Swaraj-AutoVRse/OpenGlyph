@@ -588,9 +588,26 @@ namespace LightSide
             public int atlasIndex;
         }
 
+    #if UNITY_EDITOR
+        /// <summary>
+        /// EDITOR-ONLY: returns a copy of the vertices of every generated sub-mesh, in world-local
+        /// (mesh) space, exactly as the engine produced them on the last rebuild. Used by pixel-snap
+        /// integration tests to read back real geometry after <c>Canvas.ForceUpdateCanvases()</c>.
+        /// Never compiled into player builds.
+        /// </summary>
+        internal System.Collections.Generic.List<Vector3> GetGeneratedVerticesForEditorTests()
+        {
+            var result = new System.Collections.Generic.List<Vector3>();
+            if (renderData == null) return result;
+            foreach (var rd in renderData)
+                if (rd.mesh != null)
+                    result.AddRange(rd.mesh.vertices);
+            return result;
+        }
+    #endif
+
     #if UNITEXT_TESTS
         #region Test Support
-
         private List<Mesh> testMeshSnapshots;
         private List<TestSegmentFontInfo> testSegmentFontInfo;
         private static List<Vector4> tempUvBuffer;
