@@ -64,6 +64,25 @@ unsafe class Program
 
     static int pass = 0, fail = 0;
     static List<string> failures = new();
+    // Mirrors the C SDF near-edge remap (ut_ft.c) over all 256 inputs and verifies it is strictly
+    // increasing: no flat run of adjacent inputs longer than 2 (only rounding ties allowed), and
+    // never decreasing. Catches plateaus (e.g. the old clamp) that make shader thresholds wobble.
+    static void SdfMappingMonotonicity()
+    {
+        const double a=8.0, G=1.55; const int B=24; double s2=(B-G*a)/(B-a);
+        int Map(int v){ double d=v-128.0, ad=d<0?-d:d, nd;
+            if(ad<=a) nd=d*G; else if(ad<=B) nd=(d<0?-1.0:1.0)*(G*a+(ad-a)*s2); else nd=d;
+            int o=128+(int)(nd+(nd>=0?0.5:-0.5)); return o<0?0:(o>255?255:o); }
+        int prev=Map(0), run=1, maxRun=1; bool decreasing=false;
+        for(int v=1; v<256; v++){ int o=Map(v);
+            if(o<prev) decreasing=true;
+            if(o==prev){ run++; if(run>maxRun) maxRun=run; } else run=1;
+            prev=o; }
+        Console.WriteLine($"    SDF mapping monotonicity: decreasing={decreasing} maxFlatRun={maxRun} (s2={s2:F3})");
+        Check("sdf mapping strictly increasing (maxRun<=2)", !decreasing && maxRun<=2,
+              $"decreasing={decreasing} maxRun={maxRun}");
+    }
+
     static void Check(string what, bool ok, string detail = "")
     {
         if (ok) pass++;
@@ -138,6 +157,8 @@ unsafe class Program
             foreach (var f in Directory.GetFiles(fontsDir, "*.ttf"))
                 CompareEditor(eo, en, f);
         }
+
+        SdfMappingMonotonicity();
 
         Console.WriteLine($"\n===== RESULT: {pass} passed, {fail} failed =====");
         foreach (var fl in failures) Console.WriteLine("  FAIL " + fl);
