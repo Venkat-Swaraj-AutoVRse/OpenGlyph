@@ -1,16 +1,15 @@
 {
-    "name": "media.lightside.unitext",
+    "name": "com.openglyph.text",
     "version": "1.0.0",
-    "displayName": "UniText",
-    "description": "Professional Unicode text rendering for Unity with full RTL support, HarfBuzz shaping, and extensible markup system.",
+    "displayName": "OpenGlyph",
+    "description": "Open-source (MIT) Unicode text engine for Unity: full RTL/BiDi, HarfBuzz shaping, emoji and extensible markup. Community fork of UniText 1.0 by Light Side LLC.",
     "unity": "2021.3",
     "dependencies": {
         "com.unity.ugui": "1.0.0",
         "com.unity.modules.ui": "1.0.0"
     },
     "author": {
-        "name": "LightSide",
-        "url": "https://unity.lightside.media"
+        "name": "OpenGlyph contributors"
     },
     "keywords": [
         "text",
@@ -24,8 +23,7 @@
         "localization",
         "ui"
     ],
-    "license": "SEE LICENSE IN LICENSE.md",
-    "documentationUrl": "https://unity.lightside.media/unitext/docs/",
+    "license": "MIT",
     "samples": [
         {
             "displayName": "Basic Usage",
