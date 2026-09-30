@@ -10,7 +10,7 @@ namespace LightSide.Tests
     public class SegmentationRegressionTests
     {
         [OneTimeSetUp]
-        public void Setup() => SegHelper.EnsureUnicode();
+        public void Setup() { SegHelper.EnsureUnicode(); SegHelper.AssignDictionaries(); }
 
         private static readonly (string name, string text)[] Samples =
         {
@@ -47,5 +47,30 @@ namespace LightSide.Tests
                         "Segmentation must not affect non-SA scripts.");
             }
         }
+
+#if UNITY_EDITOR
+        [Test]
+        public void NoSegmentationAsset_LivesUnderResources()
+        {
+            // Build-size guard: dictionaries must stay OUT of Resources so they are not
+            // force-shipped in every player build. They live in Dictionaries/ and are
+            // pulled in only when referenced from UniTextSettings.
+            var offenders = new System.Collections.Generic.List<string>();
+            foreach (var guid in UnityEditor.AssetDatabase.FindAssets("Dict"))
+            {
+                var path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid).Replace('\\', '/');
+                if (!path.EndsWith(".bytes", System.StringComparison.Ordinal)) continue;
+                var lower = path.ToLowerInvariant();
+                bool isSegDict = lower.Contains("thaidict") || lower.Contains("laodict")
+                              || lower.Contains("khmerdict") || lower.Contains("myanmardict");
+                if (isSegDict && lower.Contains("/resources/"))
+                    offenders.Add(path);
+            }
+            Assert.IsEmpty(offenders,
+                "Segmentation dictionaries must not live under any Resources folder (they would ship in " +
+                "every build). Move them to a regular folder (e.g. Dictionaries/). Offenders: "
+                + string.Join(", ", offenders));
+        }
+#endif
     }
 }

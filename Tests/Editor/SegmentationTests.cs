@@ -11,6 +11,8 @@ namespace LightSide.Tests
     internal static class SegHelper
     {
         private static bool _init;
+        private static bool _dictsAssigned;
+        private static readonly Dictionary<string, TextAsset> _dicts = new Dictionary<string, TextAsset>();
 
         public static void EnsureUnicode()
         {
@@ -20,6 +22,73 @@ namespace LightSide.Tests
                 Assert.Ignore("UnicodeData could not be initialized (Resources/UnicodeData.bytes missing in host project).");
             _init = true;
         }
+
+        /// <summary>
+        /// Loads the four dictionary .bytes assets from the package's Dictionaries/ folder
+        /// and assigns them into a UniTextSettings instance so the opt-in segmenter can
+        /// resolve them. EditMode only (uses AssetDatabase to locate the package assets).
+        /// </summary>
+        public static void AssignDictionaries()
+        {
+#if UNITY_EDITOR
+            if (_dictsAssigned) return;
+
+            var entries = new List<SegmentationDictionaryEntry>();
+            var map = new (string name, SegmentationScript script)[]
+            {
+                ("ThaiDict", SegmentationScript.Thai),
+                ("LaoDict", SegmentationScript.Lao),
+                ("KhmerDict", SegmentationScript.Khmer),
+                ("MyanmarDict", SegmentationScript.Myanmar),
+            };
+
+            foreach (var (name, script) in map)
+            {
+                var asset = FindDictionary(name);
+                _dicts[script.ToString()] = asset;
+                if (asset != null)
+                    entries.Add(new SegmentationDictionaryEntry { script = script, dictionary = asset });
+            }
+
+            // Build a settings instance carrying the current UnicodeData + our dictionaries.
+            var settings = UnityEngine.Resources.Load<UniTextSettings>("UniTextSettings");
+            if (settings == null)
+                settings = ScriptableObject.CreateInstance<UniTextSettings>();
+            var so = new UnityEditor.SerializedObject(settings);
+            var prop = so.FindProperty("segmentationDictionaries");
+            prop.arraySize = entries.Count;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var el = prop.GetArrayElementAtIndex(i);
+                el.FindPropertyRelative("script").enumValueIndex = (int)entries[i].script;
+                el.FindPropertyRelative("dictionary").objectReferenceValue = entries[i].dictionary;
+            }
+            so.ApplyModifiedPropertiesWithoutUndo();
+            UniTextSettings.SetInstance(settings);
+            _dictsAssigned = true;
+#endif
+        }
+
+        public static TextAsset Dictionary(string script)
+        {
+            _dicts.TryGetValue(script, out var a);
+            return a;
+        }
+
+#if UNITY_EDITOR
+        private static TextAsset FindDictionary(string name)
+        {
+            foreach (var guid in UnityEditor.AssetDatabase.FindAssets(name))
+            {
+                var path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
+                if (path.EndsWith("/Dictionaries/" + name + ".bytes", StringComparison.Ordinal)
+                    || path.EndsWith("\\Dictionaries\\" + name + ".bytes", StringComparison.Ordinal)
+                    || path.Replace('\\','/').EndsWith("/Dictionaries/" + name + ".bytes", StringComparison.Ordinal))
+                    return UnityEditor.AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+            }
+            return null;
+        }
+#endif
 
         /// <summary>Converts a UTF-16 string to a codepoint array (fixtures are all BMP).</summary>
         public static int[] ToCodepoints(string s)
@@ -59,7 +128,7 @@ namespace LightSide.Tests
     public class SegmentationTests
     {
         [OneTimeSetUp]
-        public void Setup() => SegHelper.EnsureUnicode();
+        public void Setup() { SegHelper.EnsureUnicode(); SegHelper.AssignDictionaries(); }
 
         private static void AssertFixtures(SegmentationFixtures.Case[] cases, string script)
         {

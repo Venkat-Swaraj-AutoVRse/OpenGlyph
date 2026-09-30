@@ -15,6 +15,8 @@ namespace OpenGlyph.DictGen
     ///
     ///   icuDir  directory holding thaidict.txt, laodict.txt, khmerdict.txt, burmesedict.txt
     ///   outDir  directory to write ThaiDict.bytes, LaoDict.bytes, KhmerDict.bytes, MyanmarDict.bytes
+    ///           (the package ships these in Dictionaries/, OUTSIDE any Resources folder, so they
+    ///           are only included in a build when referenced from UniTextSettings)
     ///
     /// Source data: unicode-org/icu, tag release-74-2,
     ///   icu4c/source/data/brkitr/dictionaries/*.txt  (Unicode License V3).

@@ -16,7 +16,7 @@ namespace LightSide.Tests
     public class SegmentationPerfTests
     {
         [OneTimeSetUp]
-        public void Setup() => SegHelper.EnsureUnicode();
+        public void Setup() { SegHelper.EnsureUnicode(); SegHelper.AssignDictionaries(); }
 
         private static int[] Build100KbThai()
         {

@@ -40,6 +40,9 @@ namespace LightSide
         /// <summary>Unicode script id recorded in the file header (informational).</summary>
         public int ScriptId { get; }
 
+        /// <summary>The Unicode script this trie serves, derived from <see cref="ScriptId"/>.</summary>
+        public UnicodeScript Script => (UnicodeScript)ScriptId;
+
         /// <summary>Number of words encoded (informational).</summary>
         public int WordCount { get; }
 

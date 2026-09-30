@@ -12,47 +12,50 @@ namespace LightSide
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Algorithm.</b> Following ICU's dictionary-based break iteration, each SA run
-    /// is segmented by a dynamic program that finds the segmentation minimising the
-    /// number of segments, preferring longer dictionary matches and treating any
-    /// codepoint not covered by a dictionary word as a single-codepoint fallback
-    /// segment. This is equivalent to maximal matching with lookahead but is
-    /// deterministic and order-independent. The dictionary is a minimized DAWG
-    /// (<see cref="DictionaryTrie"/>) walked with zero per-lookup allocation.
+    /// <b>Algorithm.</b> A faithful re-implementation of ICU's dictionary break iteration
+    /// (ICU4C <c>dictbe.cpp</c>, the Thai/Lao/Khmer/Burmese family): a forward scan that,
+    /// at each position, gathers candidate dictionary words and, when more than one match,
+    /// chooses the candidate that lets the following one or two words also match (a
+    /// 3-word lookahead). Runs of characters not covered by the dictionary are resynced
+    /// into a single unknown segment using per-script end-of-word / begin-of-word sets and
+    /// root/prefix "combine" thresholds, and a break is never emitted before a combining
+    /// mark. The dictionary is a minimized DAWG (<see cref="DictionaryTrie"/>) walked with
+    /// zero per-lookup allocation.
     /// </para>
     /// <para>
-    /// <b>Grapheme safety.</b> A boundary is only emitted where the caller-supplied
-    /// grapheme-cluster boundary flag is set, so a break is never placed inside a
-    /// cluster (e.g. between a base and its combining marks / vowel signs).
+    /// <b>Grapheme safety.</b> Emitted boundaries are additionally filtered to UAX #29
+    /// grapheme-cluster boundaries, so a break is never placed inside a cluster (between a
+    /// base and its combining marks / vowel signs, or inside a Khmer coeng stack).
     /// </para>
     /// <para>
-    /// <b>Lazy loading.</b> Each script's dictionary binary is loaded from
-    /// <c>Resources/Segmentation/&lt;Script&gt;Dict.bytes</c> only the first time that
-    /// script is actually seen. Missing dictionaries degrade gracefully (no injected
-    /// breaks for that script — behaviour identical to pre-segmentation).
+    /// <b>Opt-in loading.</b> Each script's dictionary is loaded ONLY if one is assigned in
+    /// <see cref="UniTextSettings"/> (a per-script <see cref="SegmentationDictionaryEntry"/>).
+    /// The dictionary assets live outside any Resources folder, so a project that assigns
+    /// none ships no dictionary bytes and behaves exactly as before (no interior breaks),
+    /// with a single one-time warning per unconfigured script it encounters.
     /// </para>
     /// </remarks>
     /// <seealso cref="DictionaryTrie"/>
     /// <seealso cref="LineBreakAlgorithm"/>
     internal sealed class DictionarySegmenter
     {
-        // A single-codepoint fallback segment costs more than any dictionary word so
-        // the DP prefers dictionary coverage; among dictionary-only paths it minimises
-        // segment count (favouring longer words), matching ICU behaviour.
-        private const int DictWordCost = 1;
-        private const long FallbackCost = 1L << 16;
+        // ICU tuning constants (from ICU4C dictbe.cpp), shared by all four engines.
+        private const int Lookahead = 3;             // *_LOOKAHEAD
+        private const int RootCombineThreshold = 3;  // *_ROOT_COMBINE_THRESHOLD
+        private const int PrefixCombineThreshold = 3; // *_PREFIX_COMBINE_THRESHOLD
+        private const int MinWord = 2;               // *_MIN_WORD
 
         private readonly UnicodeDataProvider _provider;
         private readonly GraphemeBreaker _graphemeBreaker;
 
-        // Lazily-loaded per-script dictionaries. Indexed by an internal small enum.
+        // Lazily-loaded per-script dictionaries.
         private DictionaryTrie _thai, _lao, _khmer, _myanmar;
         private bool _thaiTried, _laoTried, _khmerTried, _myanmarTried;
 
-        // Reusable DP scratch (grows as needed). Not thread-shared: the segmenter is
-        // held per line-break-algorithm instance, which is used single-threaded.
-        private long[] _cost = Array.Empty<long>();
-        private int[] _prev = Array.Empty<int>();
+        // Reusable candidate-length scratch for the 3-word lookahead (word lengths are
+        // small; POSSIBLE_WORD_LIST_MAX in ICU is 20).
+        private readonly int[] _cand0 = new int[64];
+        private readonly int[] _cand1 = new int[64];
 
         // Reusable grapheme-boundary scratch for the whole codepoint buffer.
         private bool[] _graphemeScratch = Array.Empty<bool>();
@@ -72,28 +75,23 @@ namespace LightSide
 
         /// <summary>
         /// Scans <paramref name="codepoints"/> for maximal runs of SA characters and,
-        /// for each run whose script has a dictionary, sets <c>breaks[i] = Optional</c>
-        /// at interior word boundaries. Positions outside SA runs are never touched, so
-        /// line breaking for every other script is unchanged. Grapheme-cluster boundaries
-        /// (UAX #29) are computed internally so a break is never placed inside a cluster.
+        /// for each run whose script has an assigned dictionary, sets <c>breaks[i] =
+        /// Optional</c> at interior word boundaries. Positions outside SA runs are never
+        /// touched, so line breaking for every other script is unchanged. Grapheme-cluster
+        /// boundaries (UAX #29) are computed internally so a break is never placed inside a
+        /// cluster.
         /// </summary>
         /// <param name="codepoints">The full codepoint buffer.</param>
         /// <param name="breaks">
         /// UAX #14 break-opportunity buffer (length codepoints.Length + 1); modified in place.
         /// </param>
-        public void InjectBreaks(
-            ReadOnlySpan<int> codepoints,
-            Span<LineBreakType> breaks)
+        public void InjectBreaks(ReadOnlySpan<int> codepoints, Span<LineBreakType> breaks)
         {
             int n = codepoints.Length;
             if (n < 2) return;
 
-            // Grapheme-cluster boundaries for the whole buffer (UAX #29). Computed once,
-            // into reusable scratch. length n + 1: index i is the boundary BEFORE cp i.
-            if (_graphemeScratch.Length < n + 1)
-                _graphemeScratch = new bool[n + 1];
-            var graphemeBoundaries = _graphemeScratch.AsSpan(0, n + 1);
-            _graphemeBreaker.GetBreakOpportunities(codepoints, graphemeBoundaries);
+            bool graphemeReady = false;
+            Span<bool> graphemeBoundaries = default;
 
             int i = 0;
             while (i < n)
@@ -104,20 +102,36 @@ namespace LightSide
                     continue;
                 }
 
-                // Extend a maximal SA run.
                 int runStart = i;
                 int j = i + 1;
                 while (j < n && _provider.GetLineBreakClass(codepoints[j]) == LineBreakClass.SA)
                     j++;
-                int runEnd = j; // exclusive
+                int runEnd = j;
 
-                if (runEnd - runStart >= 2)
+                if (runEnd - runStart >= MinWord * 2 && ResolveTrie(codepoints[runStart]) != null)
+                {
+                    // Compute grapheme boundaries once, lazily, only if a real SA run with
+                    // a dictionary is present (avoids the O(n) pass for pure non-SA text).
+                    if (!graphemeReady)
+                    {
+                        if (_graphemeScratch.Length < n + 1)
+                            _graphemeScratch = new bool[n + 1];
+                        graphemeBoundaries = _graphemeScratch.AsSpan(0, n + 1);
+                        _graphemeBreaker.GetBreakOpportunities(codepoints, graphemeBoundaries);
+                        graphemeReady = true;
+                    }
+
                     SegmentRun(codepoints, runStart, runEnd, breaks, graphemeBoundaries);
+                }
 
                 i = runEnd;
             }
         }
 
+        /// <summary>
+        /// Segments one SA run via ICU's forward-scan-with-lookahead algorithm and marks
+        /// interior word boundaries as Optional breaks (grapheme-safe, additive only).
+        /// </summary>
         private void SegmentRun(
             ReadOnlySpan<int> codepoints,
             int start,
@@ -127,86 +141,166 @@ namespace LightSide
         {
             var trie = ResolveTrie(codepoints[start]);
             if (trie == null)
-                return; // unknown / unsupported script — leave the run intact
+                return;
 
-            int len = end - start;
-            EnsureScratch(len + 1);
-            var cost = _cost;
-            var prev = _prev;
+            int rangeEnd = end - start;               // run-relative length
+            int current = 0;                          // run-relative scan position
 
-            // DP over run-relative positions 0..len. cost[k] = min cost to segment [start, start+k).
-            cost[0] = 0;
-            prev[0] = -1;
-            for (int k = 1; k <= len; k++)
+            while (current < rangeEnd)
             {
-                cost[k] = long.MaxValue;
-                prev[k] = -1;
-            }
+                int cpWordLength = 0;
+                int candidates = Candidates(trie, codepoints, start, current, rangeEnd, _cand0, out _);
 
-            for (int p = 0; p < len; p++)
-            {
-                if (cost[p] == long.MaxValue)
-                    continue;
-
-                // 1) All dictionary words starting at run position p.
-                int node = DictionaryTrie.Root;
-                bool anyWord = false;
-                for (int q = p; q < len; q++)
+                if (candidates == 1)
                 {
-                    node = trie.Step(node, codepoints[start + q]);
-                    if (node < 0)
-                        break;
-                    if (trie.IsWord(node))
+                    cpWordLength = _cand0[0];
+                }
+                else if (candidates > 1)
+                {
+                    // Choose the candidate that lets the following word(s) also match.
+                    int marked = _cand0[candidates - 1]; // default: longest
+                    bool decided = false;
+                    for (int a = candidates - 1; a >= 0 && !decided; a--)
                     {
-                        int wlen = q + 1 - p;
-                        long c = cost[p] + DictWordCost;
-                        int endPos = p + wlen;
-                        if (c < cost[endPos])
+                        int lenA = _cand0[a];
+                        if (current + lenA >= rangeEnd) { marked = lenA; break; }
+                        int c1 = Candidates(trie, codepoints, start, current + lenA, rangeEnd, _cand1, out _);
+                        if (c1 > 0)
                         {
-                            cost[endPos] = c;
-                            prev[endPos] = p;
+                            for (int b = c1 - 1; b >= 0; b--)
+                            {
+                                int lenB = _cand1[b];
+                                if (current + lenA + lenB >= rangeEnd) { marked = lenA; decided = true; break; }
+                                // If a third word can start after A+B, A is a good split.
+                                int nodeC = DictionaryTrie.Root, pos = current + lenA + lenB, cnt = 0;
+                                for (int q = pos; q < rangeEnd; q++)
+                                {
+                                    nodeC = trie.Step(nodeC, codepoints[start + q]);
+                                    if (nodeC < 0) break;
+                                    if (trie.IsWord(nodeC)) { cnt++; break; }
+                                }
+                                if (cnt > 0) { marked = lenA; decided = true; break; }
+                            }
                         }
-                        anyWord = true;
+                    }
+                    cpWordLength = marked;
+                }
+
+                // Resync unknown run: if what follows is not a dictionary word (and the
+                // current word is short / shares little prefix), scan forward to a plausible
+                // boundary and fold the passed-over characters into one segment.
+                if (current + cpWordLength < rangeEnd && cpWordLength < RootCombineThreshold)
+                {
+                    int nextCandidates = Candidates(trie, codepoints, start, current + cpWordLength, rangeEnd, _cand1, out int nextPrefix);
+                    if (nextCandidates <= 0 && (cpWordLength == 0 || nextPrefix < PrefixCombineThreshold))
+                    {
+                        int remaining = rangeEnd - (current + cpWordLength);
+                        int chars = 0;
+                        int scan = current + cpWordLength;
+                        for (;;)
+                        {
+                            int pc = codepoints[start + scan];
+                            scan++; chars++; remaining--;
+                            if (remaining <= 0) break;
+                            int uc = codepoints[start + scan];
+                            if (IsEndWord(trie, pc) && IsBeginWord(pc, uc))
+                            {
+                                int nc = Candidates(trie, codepoints, start, scan, rangeEnd, _cand1, out _);
+                                if (nc > 0) break;
+                            }
+                        }
+                        cpWordLength += chars;
                     }
                 }
 
-                // 2) Single-codepoint fallback (always available) so unknown text still
-                //    advances and the DP can never get stuck.
-                long fc = cost[p] + FallbackCost;
-                if (fc < cost[p + 1])
-                {
-                    cost[p + 1] = fc;
-                    prev[p + 1] = p;
-                }
+                // Never stop before a combining mark.
+                while (current + cpWordLength < rangeEnd && IsMark(codepoints[start + current + cpWordLength]))
+                    cpWordLength++;
 
-                _ = anyWord;
-            }
+                if (cpWordLength <= 0)
+                    cpWordLength = 1; // safety: always advance
 
-            // Back-track the optimal path and mark interior boundaries.
-            // A boundary at run position b (0 < b < len) becomes an Optional break at
-            // absolute index start + b, but only if it is a grapheme-cluster boundary
-            // and the UAX #14 pass left it as None (we only ADD opportunities).
-            int cur = len;
-            while (cur > 0)
-            {
-                int pcur = prev[cur];
-                if (pcur > 0) // interior boundary (pcur == 0 is the run's own start)
+                int boundary = current + cpWordLength;
+                if (boundary < rangeEnd)
                 {
-                    int abs = start + pcur;
+                    int abs = start + boundary;
                     if (graphemeBoundaries[abs] && breaks[abs] == LineBreakType.None)
                         breaks[abs] = LineBreakType.Optional;
                 }
-                cur = pcur;
+                current = boundary;
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void EnsureScratch(int required)
+        /// <summary>
+        /// Fills <paramref name="lens"/> with the ascending lengths (in codepoints) of all
+        /// dictionary words starting at run position <paramref name="p"/>, and returns the
+        /// count. <paramref name="prefix"/> receives the longest matched prefix length
+        /// (whether or not it ends on a word) — ICU's <c>longestPrefix</c>.
+        /// </summary>
+        private int Candidates(DictionaryTrie trie, ReadOnlySpan<int> cps, int start, int p, int rangeEnd,
+            int[] lens, out int prefix)
         {
-            if (_cost.Length < required)
+            int count = 0;
+            int node = DictionaryTrie.Root;
+            prefix = 0;
+            for (int q = p; q < rangeEnd; q++)
             {
-                _cost = new long[required];
-                _prev = new int[required];
+                node = trie.Step(node, cps[start + q]);
+                if (node < 0) break;
+                prefix = q + 1 - p;
+                if (trie.IsWord(node) && count < lens.Length)
+                    lens[count++] = q + 1 - p;
+            }
+            return count;
+        }
+
+        // ---- Per-script character-class predicates (from ICU4C dictbe.cpp) ----
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool IsMark(int cp)
+        {
+            var gc = _provider.GetGeneralCategory(cp);
+            return gc == GeneralCategory.Mn || gc == GeneralCategory.Mc || gc == GeneralCategory.Me;
+        }
+
+        /// <summary>
+        /// ICU fEndWordSet: characters allowed to end a word. Default is the whole SA
+        /// word-set, minus per-script exceptions (Thai MAI HAN-AKAT and leading vowels,
+        /// Lao leading vowels, Khmer COENG).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool IsEndWord(DictionaryTrie trie, int cp)
+        {
+            switch (trie.Script)
+            {
+                case UnicodeScript.Thai:
+                    return cp != 0x0E31 && !(cp >= 0x0E40 && cp <= 0x0E44);
+                case UnicodeScript.Lao:
+                    return !(cp >= 0x0EC0 && cp <= 0x0EC4);
+                case UnicodeScript.Khmer:
+                    return cp != 0x17D2; // COENG must not end a word (keeps coeng stacks intact)
+                default:
+                    return true; // Myanmar: whole SA set
+            }
+        }
+
+        /// <summary>ICU fBeginWordSet: characters allowed to begin a word.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool IsBeginWord(int prevCp, int cp)
+        {
+            // Dispatch on the script of the candidate begin character.
+            switch (_provider.GetScript(cp))
+            {
+                case UnicodeScript.Thai:
+                    return (cp >= 0x0E01 && cp <= 0x0E2E) || (cp >= 0x0E40 && cp <= 0x0E44);
+                case UnicodeScript.Lao:
+                    return (cp >= 0x0E81 && cp <= 0x0EAE) || (cp >= 0x0EDC && cp <= 0x0EDD) || (cp >= 0x0EC0 && cp <= 0x0EC4);
+                case UnicodeScript.Khmer:
+                    return cp >= 0x1780 && cp <= 0x17B3;
+                case UnicodeScript.Myanmar:
+                    return cp >= 0x1000 && cp <= 0x102A;
+                default:
+                    return false;
             }
         }
 
@@ -215,29 +309,37 @@ namespace LightSide
             switch (_provider.GetScript(codepoint))
             {
                 case UnicodeScript.Thai:
-                    if (!_thaiTried) { _thai = Load("ThaiDict"); _thaiTried = true; }
+                    if (!_thaiTried) { _thai = Load(SegmentationScript.Thai); _thaiTried = true; }
                     return _thai;
                 case UnicodeScript.Lao:
-                    if (!_laoTried) { _lao = Load("LaoDict"); _laoTried = true; }
+                    if (!_laoTried) { _lao = Load(SegmentationScript.Lao); _laoTried = true; }
                     return _lao;
                 case UnicodeScript.Khmer:
-                    if (!_khmerTried) { _khmer = Load("KhmerDict"); _khmerTried = true; }
+                    if (!_khmerTried) { _khmer = Load(SegmentationScript.Khmer); _khmerTried = true; }
                     return _khmer;
                 case UnicodeScript.Myanmar:
-                    if (!_myanmarTried) { _myanmar = Load("MyanmarDict"); _myanmarTried = true; }
+                    if (!_myanmarTried) { _myanmar = Load(SegmentationScript.Myanmar); _myanmarTried = true; }
                     return _myanmar;
                 default:
                     return null;
             }
         }
 
-        private static DictionaryTrie Load(string name)
+        /// <summary>
+        /// Loads the dictionary assigned for a script in <see cref="UniTextSettings"/>.
+        /// Returns <see langword="null"/> (with a single one-time warning) when none is
+        /// assigned, so the script falls back to default line breaking.
+        /// </summary>
+        private static DictionaryTrie Load(SegmentationScript script)
         {
-            var asset = Resources.Load<TextAsset>("Segmentation/" + name);
+            var asset = UniTextSettings.GetSegmentationDictionary(script);
             if (asset == null)
             {
-                Debug.LogWarning($"[DictionarySegmenter] Missing dictionary Resources/Segmentation/{name}.bytes — " +
-                                 "SA runs of this script will not receive word-boundary breaks.");
+                Debug.LogWarning(
+                    $"[DictionarySegmenter] No segmentation dictionary assigned for {script}. " +
+                    $"Text in this script will not receive dictionary word-boundary line breaks. " +
+                    $"Assign a dictionary in Project Settings \u2192 UniText \u2192 Word Segmentation Dictionaries " +
+                    $"to enable it. See Documentation/GettingStarted.md (\u201cWord segmentation\u201d).");
                 return null;
             }
 
@@ -247,7 +349,7 @@ namespace LightSide
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[DictionarySegmenter] Failed to load {name}: {ex.Message}");
+                Debug.LogError($"[DictionarySegmenter] Failed to load {script} dictionary: {ex.Message}");
                 return null;
             }
         }
