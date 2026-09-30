@@ -189,8 +189,21 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
      * FreeType's bitmap-EDT ('bsdf'): render NORMAL first (slot -> FT_GLYPH_FORMAT_BITMAP),
      * then FT_RENDER_MODE_SDF routes through 'bsdf'. The result is then Y-flipped below to
      * match the original's top-down orientation. */
-    err = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
-    if (!err) err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+    /* SDF renderer. Both FreeType routes ('sdf' outline-EDT and 'bsdf' bitmap-EDT) match the
+     * original on the real gates -- dims, reach (+-1px), and the NEAR-EDGE slope measured as the
+     * median |dByte/px| over edge +-1.5px (ratio 0.96-1.05). The earlier "soft text" was a render
+     * TOOL bug (it upscaled the thresholded preview instead of the SDF field), not the DLL. Keep
+     * 'bsdf' (the accepted baseline, render NORMAL then SDF, matched across all M2 parity);
+     * OPENGLYPH_SDF_MODE=outline selects the outline 'sdf' module for A/B. */
+    {
+        const char* mode = getenv("OPENGLYPH_SDF_MODE");
+        if (mode && mode[0]=='o') {            /* outline sdf */
+            err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+        } else {                               /* bsdf: bitmap-EDT (default, accepted baseline) */
+            err = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
+            if (!err) err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+        }
+    }
     if (err) return (int)err;
 
     FT_Bitmap* b = &slot->bitmap;

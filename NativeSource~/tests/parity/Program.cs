@@ -77,6 +77,15 @@ unsafe class Program
         Console.WriteLine($"    SDF reach median (edge->0 px): orig={mo:F1} new={mn:F1} (gate +-1px)");
         Check($"{name} sdf reach +-1px", Math.Abs(mo-mn)<=1.0, $"orig={mo} new={mn}");
     }
+    // Near-edge slope: median |dByte/px| within +-1.5px of the crossing; ratio new/orig 0.95-1.05.
+    static void nearEdgeSlopeReport(System.Collections.Generic.List<double> so, System.Collections.Generic.List<double> sn, string name)
+    {
+        so.Sort(); sn.Sort();
+        double mo=so.Count>0?so[so.Count/2]:0, mn=sn.Count>0?sn[sn.Count/2]:0;
+        double ratio = mo>0? mn/mo : 0;
+        Console.WriteLine($"    SDF near-edge slope median |dByte/px|: orig={mo:F1} new={mn:F1} ratio={ratio:F3} (gate 0.95-1.05)");
+        Check($"{name} sdf near-edge slope 0.95-1.05", ratio>=0.95 && ratio<=1.05, $"ratio={ratio:F3} orig={mo} new={mn}");
+    }
 
     static readonly (string script, uint tag, int dir, int[] cps)[] Samples = new (string, uint, int, int[])[]
     {
@@ -510,6 +519,7 @@ unsafe class Program
                 // perceptual accumulators
                 double edgeMeanSum1=0, edgeMax1=0, covSum1=0; double edgeMeanSum4=0, edgeMax4=0, covSum4=0; int pc=0;
                 var reachO=new System.Collections.Generic.List<double>(); var reachN=new System.Collections.Generic.List<double>();
+                var slopeEO=new System.Collections.Generic.List<double>(); var slopeEN=new System.Collections.Generic.List<double>();
                 const int SDF_LOAD = 0, SPREAD = 8;
                 for (uint g = 1; g <= (uint)nng && compared < nGlyphs; g++)
                 {
@@ -534,6 +544,15 @@ unsafe class Program
                         if(cxo>2){ for(int x=cxo;x>=0;x--) if(ob[cy*pit+x]<=0){ rO=cxo-x; break; } }
                         if(cxn>2){ for(int x=cxn;x>=0;x--) if(nb[cy*pit+x]<=0){ rN=cxn-x; break; } }
                         if(rO>0 && rN>0){ reachO.Add(rO); reachN.Add(rN); }
+                        // NEAR-EDGE SLOPE: over all horizontal 128-crossings, average |dByte/px|
+                        // within +-1.5px of the crossing (6 samples at 0.5px via linear interp of
+                        // integer bytes ~ mean of the 3 steps each side). Robust vs single-peak.
+                        for(int y=2;y<ores.bh-2;y++) for(int x=2;x<ores.bw-3;x++){
+                            int va=ob[y*pit+x],vb=ob[y*pit+x+1];
+                            if((va-128)*(vb-128)<0){ double s=(Math.Abs(ob[y*pit+x+1]-ob[y*pit+x])+Math.Abs(ob[y*pit+x+2]-ob[y*pit+x+1])+Math.Abs(ob[y*pit+x]-ob[y*pit+x-1]))/3.0; slopeEO.Add(s); }
+                            int vc=nb[y*pit+x],vd=nb[y*pit+x+1];
+                            if((vc-128)*(vd-128)<0){ double s=(Math.Abs(nb[y*pit+x+1]-nb[y*pit+x])+Math.Abs(nb[y*pit+x+2]-nb[y*pit+x+1])+Math.Abs(nb[y*pit+x]-nb[y*pit+x-1]))/3.0; slopeEN.Add(s); }
+                        }
                         compared++;
                         // perceptual: threshold at 128 (shader edge=0.5), 1x and 4x bilinear.
                         Perceptual(ob, nb, ores.bw, ores.bh, Math.Abs(ores.bp), SPREAD, 1, out double em1, out double ex1, out double cov1);
@@ -553,6 +572,7 @@ unsafe class Program
                 Console.WriteLine($"    SDF perceptual 1x: edgeMean={em1a:F3}px edgeMax={edgeMax1:F3}px covDiff={cov1a:P2}");
                 Console.WriteLine($"    SDF perceptual 4x: edgeMean={em4a:F3}px edgeMax={edgeMax4:F3}px covDiff={cov4a:P2}");
                 slopesO_reachReport(reachO, reachN, name);
+                nearEdgeSlopeReport(slopeEO, slopeEN, name);
                 // Perceptual gate is the pass/fail criterion: edgeMean<=0.10px, edgeMax<=0.50px, cov<=1%.
                 bool gate = dimMismatch==0
                     && em1a<=0.10 && edgeMax1<=0.50 && cov1a<=0.01
