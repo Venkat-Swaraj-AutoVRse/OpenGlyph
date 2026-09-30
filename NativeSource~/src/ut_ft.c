@@ -176,6 +176,12 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
     out->metricBearingY = (int)m->horiBearingY;
     out->metricAdvanceX = (int)m->horiAdvance;
 
+    /* The original computes the SDF from a rendered GRAYSCALE bitmap via a Euclidean
+     * Distance Transform (BSDF), not directly from the outline. Reproduce that: render
+     * NORMAL first so the slot format becomes FT_GLYPH_FORMAT_BITMAP, then FT_RENDER_MODE_SDF
+     * routes through FreeType's 'bsdf' module (bitmap EDT) rather than the outline 'sdf' module. */
+    err = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
+    if (err) return (int)err;
     err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
     if (err) return (int)err;
 

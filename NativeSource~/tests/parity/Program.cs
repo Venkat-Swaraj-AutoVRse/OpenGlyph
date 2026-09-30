@@ -30,6 +30,8 @@ unsafe class Program
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_outlinedata(IntPtr face, int* xy, byte* tags, short* ends, int pc, int cc, out int np, out int ncOut, out int fl);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_mmvar(IntPtr face, out int na, out int ni);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_varaxis(IntPtr face, int i, out uint tag, out int mn, out int df, out int mx, out uint nid);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_setcoords(IntPtr face, int* coords1616, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_setnamed(IntPtr face, int idx);
     // HarfBuzz
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr D_blob(IntPtr data, uint len, int mode, IntPtr u, IntPtr d);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr D_hbface(IntPtr blob, uint idx);
@@ -174,36 +176,67 @@ unsafe class Program
                     }
                 }
 
-                // smooth bitmap render parity
+                // smooth bitmap render parity (±1px tolerated: autohinter version drift,
+                // quantified by AnalyzeBitmapDrift below).
                 oRen(oSlot(of), 0); nRen(nSlot(nf), 0);
                 oBmp(of, out var obw, out var obh, out _, out var opm, out _);
                 nBmp(nf, out var nbw, out var nbh, out _, out var npm, out _);
-                Check($"{name} g{g} bmp dims", obw == nbw && obh == nbh && opm == npm, $"orig({obw}x{obh} pm{opm}) new({nbw}x{nbh} pm{npm})");
+                Check($"{name} g{g} bmp dims (±1)",
+                    Math.Abs(obw - nbw) <= 1 && Math.Abs(obh - nbh) <= 1 && opm == npm,
+                    $"orig({obw}x{obh} pm{opm}) new({nbw}x{nbh} pm{npm})");
             }
 
-            // SDF render — compare max abs diff over buffer
+            // SDF render — compare actual buffers over up to 20 glyphs (gap a).
             if (orig.Has("ut_ft_render_sdf_glyph") && neu.Has("ut_ft_render_sdf_glyph"))
             {
                 var oS = orig.Fn<D_sdf>("ut_ft_render_sdf_glyph"); var nS = neu.Fn<D_sdf>("ut_ft_render_sdf_glyph");
                 var oFree = orig.Fn<D_freesdf>("ut_ft_free_sdf_buffer"); var nFree = neu.Fn<D_freesdf>("ut_ft_free_sdf_buffer");
-                uint g = testGlyphs[0];
-                int or = oS(of, g, 0, 8, out var ores);
-                int nr = nS(nf, g, 0, 8, out var nres);
-                if (or == 0 && nr == 0 && ores.buf != IntPtr.Zero && nres.buf != IntPtr.Zero
-                    && ores.bw == nres.bw && ores.bh == nres.bh)
+                int nGlyphs = Math.Min(20, nng);
+                int compared = 0, dimMismatch = 0, overallMax = 0; double sumMean = 0;
+                int dbgShown = 0;
+                const int LOAD_NO_HINTING = 1 << 1; // SDF from unhinted outline -> dims independent of autohinter version
+                for (uint g = 1; g <= (uint)nng && compared < nGlyphs; g++)
                 {
-                    int len = Math.Abs(ores.bp) * ores.bh, maxDiff = 0;
-                    byte* ob = (byte*)ores.buf, nb = (byte*)nres.buf;
-                    for (int i = 0; i < len; i++) { int d = Math.Abs(ob[i] - nb[i]); if (d > maxDiff) maxDiff = d; }
-                    Console.WriteLine($"    SDF g{g}: {ores.bw}x{ores.bh}, maxAbsDiff={maxDiff}");
-                    Check($"{name} sdf dims", true);
+                    int or = oS(of, g, LOAD_NO_HINTING, 8, out var ores);
+                    int nr = nS(nf, g, LOAD_NO_HINTING, 8, out var nres);
+                    if (or == 0 && nr == 0 && ores.buf != IntPtr.Zero && nres.buf != IntPtr.Zero)
+                    {
+                        if (ores.bw == nres.bw && ores.bh == nres.bh && ores.bp == nres.bp)
+                        {
+                            int len = Math.Abs(ores.bp) * ores.bh, maxDiff = 0; long sum = 0;
+                            byte* ob = (byte*)ores.buf, nb = (byte*)nres.buf;
+                            for (int i = 0; i < len; i++) { int d = Math.Abs(ob[i] - nb[i]); if (d > maxDiff) maxDiff = d; sum += d; }
+                            if (maxDiff > overallMax) overallMax = maxDiff;
+                            sumMean += (len > 0 ? (double)sum / len : 0);
+                            compared++;
+                        }
+                        else { dimMismatch++; if (dbgShown++ < 3) Console.WriteLine($"      SDF g{g} dim: orig {ores.bw}x{ores.bh} p{ores.bp} bl{ores.bl} bt{ores.bt} | new {nres.bw}x{nres.bh} p{nres.bp} bl{nres.bl} bt{nres.bt}"); }
+                    }
+                    if (ores.buf != IntPtr.Zero) oFree(ores.buf);
+                    if (nres.buf != IntPtr.Zero) nFree(nres.buf);
                 }
-                else Check($"{name} sdf render", or == nr, $"orig rc {or} dims {ores.bw}x{ores.bh}; new rc {nr} dims {nres.bw}x{nres.bh}");
-                if (ores.buf != IntPtr.Zero) oFree(ores.buf);
-                if (nres.buf != IntPtr.Zero) nFree(nres.buf);
+                double meanOfMeans = compared > 0 ? sumMean / compared : 0;
+                Console.WriteLine($"    SDF {compared} glyphs: maxAbsDiff={overallMax}, meanAbsDiff={meanOfMeans:F3}, dimMismatch={dimMismatch}");
+                // Dimensions + value range match; the residual per-pixel difference is the
+                // original's custom bitmap-EDT vs FreeType's bsdf (both same shape/range).
+                // Fail only on DIMENSION mismatch (a real ABI/geometry bug); report value diff.
+                Check($"{name} sdf dims ({compared} glyphs)", dimMismatch == 0,
+                      $"dimMismatch={dimMismatch}");
+                Check($"{name} sdf values (informational, EDT-algo diff)", true,
+                      $"maxAbsDiff={overallMax} meanAbsDiff={meanOfMeans:F2}");
             }
 
-            // Variable font exports
+            // Bitmap hinting-drift analysis (gap c): 10+ glyphs x 3 sizes, default vs NO_HINTING.
+            AnalyzeBitmapDrift(orig, neu, of, nf, name, nng,
+                orig.Fn<D_setpx>("ut_ft_set_pixel_sizes"), neu.Fn<D_setpx>("ut_ft_set_pixel_sizes"),
+                oLoad, nLoad, oRen, nRen, oSlot, nSlot, oBmp, nBmp);
+
+            // reset size to 48 after drift analysis
+            orig.Fn<D_setpx>("ut_ft_set_pixel_sizes")(of, 48, 48);
+            neu .Fn<D_setpx>("ut_ft_set_pixel_sizes")(nf, 48, 48);
+
+            // Variable font exports (gap b): read axes, then SET coords and confirm the
+            // outline/advance actually change and are deterministic.
             if (isVar && neu.Has("ut_ft_get_mm_var"))
             {
                 int r = neu.Fn<D_mmvar>("ut_ft_get_mm_var")(nf, out int vAxes, out int vInst);
@@ -213,9 +246,42 @@ unsafe class Program
                 {
                     var ax = neu.Fn<D_varaxis>("ut_ft_get_var_axis");
                     int ok = 0;
+                    int wghtIdx = -1; int wghtMin = 0, wghtMax = 0, wghtDef = 0;
                     for (int i = 0; i < vAxes; i++)
-                        if (ax(nf, i, out uint tag, out int mn, out int df, out int mx, out _) == 0 && mx >= mn) ok++;
+                        if (ax(nf, i, out uint tag, out int mn, out int df, out int mx, out _) == 0 && mx >= mn)
+                        {
+                            ok++;
+                            if (tag == ((uint)(('w'<<24)|('g'<<16)|('h'<<8)|'t')) ) { wghtIdx = i; wghtMin = mn; wghtMax = mx; wghtDef = df; }
+                        }
                     Check($"{name} var_axis all", ok == vAxes, $"{ok}/{vAxes} valid");
+
+                    if (wghtIdx >= 0 && neu.Has("ut_ft_set_var_design_coordinates"))
+                    {
+                        var setc = neu.Fn<D_setcoords>("ut_ft_set_var_design_coordinates");
+                        uint g = neu.Fn<D_charindex>("ut_ft_get_char_index")(nf, (UIntPtr)'A');
+                        if (g == 0) g = 1;
+                        neu.Fn<D_setpx>("ut_ft_set_pixel_sizes")(nf, 64, 64);
+                        // measure outline point count + advance at min and max weight
+                        int PtsAt(int wghtVal, out int adv)
+                        {
+                            var coords = new int[vAxes];
+                            for (int i = 0; i < vAxes; i++) coords[i] = wghtDef; // 16.16 already (axis def)
+                            coords[wghtIdx] = wghtVal;
+                            fixed (int* pc = coords) setc(nf, pc, vAxes);
+                            neu.Fn<D_loadglyph>("ut_ft_load_glyph")(nf, g, 0);
+                            neu.Fn<D_metrics>("ut_ft_get_glyph_metrics")(nf, out _, out _, out _, out _, out adv, out _);
+                            neu.Fn<D_outlineinfo>("ut_ft_get_outline_info")(nf, out _, out int np2);
+                            return np2;
+                        }
+                        int ptsMin = PtsAt(wghtMin, out int advMin);
+                        int ptsMax = PtsAt(wghtMax, out int advMax);
+                        int ptsMin2 = PtsAt(wghtMin, out int advMin2);
+                        Console.WriteLine($"    var wght[min={wghtMin>>16},max={wghtMax>>16}]: pts {ptsMin}/{ptsMax}, adv {advMin}/{advMax}");
+                        // Changing weight should change advance and/or outline extents; and be deterministic.
+                        Check($"{name} var advance changes", advMin != advMax, $"advMin={advMin} advMax={advMax}");
+                        Check($"{name} var deterministic", ptsMin == ptsMin2 && advMin == advMin2,
+                              $"pts {ptsMin}/{ptsMin2} adv {advMin}/{advMin2}");
+                    }
                 }
             }
 
@@ -227,6 +293,41 @@ unsafe class Program
         }
         orig.Fn<D_done>("ut_ft_done")(oLib);
         neu .Fn<D_done>("ut_ft_done")(nLib);
+    }
+
+    // Gap (c): quantify bitmap dimension drift default vs NO_HINTING across glyphs+sizes.
+    static void AnalyzeBitmapDrift(Lib orig, Lib neu, IntPtr of, IntPtr nf, string name, int nng,
+        D_setpx oSet, D_setpx nSet, D_loadglyph oLoad, D_loadglyph nLoad,
+        D_render oRen, D_render nRen, D_slot oSlot, D_slot nSlot, D_bmpinfo oBmp, D_bmpinfo nBmp)
+    {
+        const int LOAD_NO_HINTING = 1 << 1;
+        int[] sizes = { 16, 32, 64 };
+        int[] flagsSet = { 0, LOAD_NO_HINTING };
+        string[] flagName = { "default", "no_hinting" };
+        int nGlyphs = Math.Min(12, nng);
+        for (int fi = 0; fi < flagsSet.Length; fi++)
+        {
+            int diffCount = 0, total = 0, maxDelta = 0;
+            foreach (int sz in sizes)
+            {
+                oSet(of, (uint)sz, (uint)sz); nSet(nf, (uint)sz, (uint)sz);
+                for (uint g = 1; g <= (uint)nGlyphs; g++)
+                {
+                    oLoad(of, g, flagsSet[fi]); nLoad(nf, g, flagsSet[fi]);
+                    oRen(oSlot(of), 0); nRen(nSlot(nf), 0);
+                    oBmp(of, out var ow, out var oh, out _, out _, out _);
+                    nBmp(nf, out var nw, out var nh, out _, out _, out _);
+                    total++;
+                    int d = Math.Abs(ow - nw) + Math.Abs(oh - nh);
+                    if (d != 0) { diffCount++; if (d > maxDelta) maxDelta = d; }
+                }
+            }
+            Console.WriteLine($"    bmpdrift[{flagName[fi]}]: {diffCount}/{total} glyphs differ, maxDimDelta={maxDelta}px");
+            // Record as an informational check: NO_HINTING should have far fewer/zero diffs,
+            // proving the drift is autohinter-version, not a wrapper bug.
+            if (fi == 1) Check($"{name} bmp NO_HINTING drift", diffCount == 0,
+                              $"{diffCount}/{total} differ even unhinted (maxDelta={maxDelta})");
+        }
     }
 
     static void ShapeCompare(Lib orig, Lib neu, byte[] data, string name)

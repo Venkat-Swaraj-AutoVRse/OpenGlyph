@@ -44,11 +44,15 @@ FetchContent_Declare(zlib
   GIT_SHALLOW    TRUE)
 set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(zlib)
-# zlib's CMake exports the static target `zlibstatic`. Provide the ZLIB::ZLIB alias that
-# downstream find_package(ZLIB)-style users (libpng, FreeType) expect, and expose the
-# include dirs. Do NOT set ZLIB_LIBRARY to a bare name — CMake would treat it as a link
-# input filename and fail (LNK1181 zlibstatic.obj).
-set(ZLIB_INCLUDE_DIR "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
+# Point find_package(ZLIB) (used by libpng and FreeType) at the fetched build. Under the VS
+# multi-config generator the static lib lands at <bindir>/<Config>/zlibstatic.lib. Seed the
+# FindZLIB cache vars + ZLIB_FOUND so no configure-time file existence check is needed, and
+# provide the ZLIB::ZLIB imported-style target for consumers that prefer it.
+set(ZLIB_INCLUDE_DIR  "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
+set(ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
+set(ZLIB_LIBRARY  "${zlib_BINARY_DIR}/$<CONFIG>/zlibstatic.lib" CACHE STRING "" FORCE)
+set(ZLIB_LIBRARIES zlibstatic CACHE STRING "" FORCE)
+set(ZLIB_FOUND TRUE CACHE BOOL "" FORCE)
 if(TARGET zlibstatic AND NOT TARGET ZLIB::ZLIB)
   add_library(ZLIB::ZLIB ALIAS zlibstatic)
 endif()
@@ -65,9 +69,14 @@ set(PNG_TOOLS    OFF CACHE BOOL "" FORCE)
 set(PNG_FRAMEWORK OFF CACHE BOOL "" FORCE)
 set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(libpng)
-# libpng exports `png_static`. Expose include dirs; do NOT set PNG_LIBRARY to a bare name.
+# Seed FindPNG (used by FreeType) at the fetched static libpng, same technique as ZLIB.
 if(TARGET png_static)
   set(PNG_PNG_INCLUDE_DIR "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
+  set(PNG_INCLUDE_DIR     "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
+  set(PNG_INCLUDE_DIRS    "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
+  set(PNG_LIBRARY   "${libpng_BINARY_DIR}/$<CONFIG>/libpng16_static.lib" CACHE STRING "" FORCE)
+  set(PNG_LIBRARIES png_static CACHE STRING "" FORCE)
+  set(PNG_FOUND TRUE CACHE BOOL "" FORCE)
   if(NOT TARGET PNG::PNG)
     add_library(PNG::PNG ALIAS png_static)
   endif()
