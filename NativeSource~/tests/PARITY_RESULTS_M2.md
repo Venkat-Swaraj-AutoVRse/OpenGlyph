@@ -45,17 +45,26 @@ Pinned rest: FreeType `VER-2-13-3`, HarfBuzz `12.2.0`, zlib `v1.3.1`, libpng `v1
 only 0.35–0.76 byte ≈ **0.02–0.05 px**. A source-level midpoint/spread correction does not
 apply to the edge *position* — it is localized, not a constant shift.
 
-### SDF gradient (slope) fix — a real DLL defect
-The rendered NEW text was visibly softer/blurrier at 4× with an even DIFF ring on BOTH sides of
-every edge: edge *position* matched but the distance *gradient* was shallower. Measured median
-`|dByte/px|` at the 128 crossing (spread 8): **orig ~20–25, new ~15** (ratio 0.65–0.75). Cause:
-FreeType maps distance→byte as `128 + (dist/spread)*127` (slope ~127/spread) but the original
-uses a steeper curve (~190/spread). A shallower gradient means softer text and wrong
-outline/glow/underlay extents in the shaders. **Fix** (in `ut_ft_render_sdf_glyph`, at the
-mapping, keeping dims): remap around the midpoint `v → clamp(128 + (v-128)*k)`, `k = 1.4961`
-(≈190/127); symmetric so the 0.5 edge position is unchanged. **Gate** (new): median slope ratio
-new/orig ∈ [0.95, 1.05]. After: **5/6 fonts pass** — NotoSans 0.957, Arabic 1.048, Hebrew 1.000,
-Thai 0.957, RobotoFlex 1.048; **Devanagari 0.880** (its orig slope 25 vs 22, byte quantization).
+### SDF gradient / saturation — investigated, remap REVERTED (was wrong)
+An earlier round added a byte remap `v → clamp(128 + (v-128)*1.4961)` to steepen a "shallow
+slope" (peak `|dByte/px|` at the crossing measured orig ~23 vs new ~15). **That was a
+measurement artifact and the remap was a defect**: clamping at 128±127 cut the field's REACH
+~1.5× — at spread 8 the original reaches 0 (fully outside) at ~8–9 px but the remapped build
+saturated at ~5–6 px (spread 22: orig ~22–24 px, remapped ~15–19 px). That clips
+outlines/glows/underlays that sample distance beyond the shortened reach.
+
+The original's outside profile is in fact **linear** — e.g. `123,111,96,80,64,48,32,16,0` = a
+standard `127/spread` field reaching 0 at ±spread px — exactly what FreeType's `bsdf` produces.
+So no remap is needed. **Fix: reverted the remap** (keep only the Y-flip). Reach then matches:
+the SDF bitmap **dimensions are identical** on both (the reach envelope is equal by
+construction), and the median edge→0 reach matches on Latin/Hebrew/Devanagari/Thai/RobotoFlex.
+The prior "Devanagari 0.88 slope" was that discarded peak-step metric — Devanagari reach now
+matches 10/10.
+
+**Gate (replaces the peak-slope gate): SDF reach within ±1 px** of the original (median edge→0
+px). Result: **5/6 pass** — NotoSans 8/9, Devanagari 10/10, Hebrew 9/9, Thai 9/9, RobotoFlex
+11/11; **Arabic 8 vs 11** (new over-reaches ~3 px on rare Arabic glyphs — same
+autohinter/EDT class as the Arabic hinting/perceptual diffs).
 
 ### Perceptual gate (B.2/B.3 — the pass/fail criterion)
 Each SDF thresholded at the shader edge (byte 128 = 0.5, per `Shaders/UniText.cginc` `SDFLayer`)
@@ -147,3 +156,36 @@ set PARITY_EDITOR_ORIG=<build>\unitext_native_editor_orig.dll
 set PARITY_EDITOR_NEW=<build>\Release\unitext_native_editor.dll
 dotnet run -c Release --project NativeSource~/tests/parity -- <build>\unitext_native_orig.dll <build>\Release\unitext_native.dll <fontsDir> <fontsDir>\RobotoFlex-VF.ttf
 ```
+
+
+
+## Milestone 3 — CI + multi-platform CMake
+
+`.github/workflows/native.yml` builds the native layer for every shipped platform, CMake 3.31.6
+pinned in every job (Blend2D requires it), output names matching `Plugins/<platform>/` exactly:
+- Windows x64 + ARM64 (MSVC); Linux x64 + ARM64 (gcc / aarch64 cross); macOS universal
+  arm64+x86_64 (runtime + editor dylib); Android arm64-v8a/armeabi-v7a/x86/x86_64 (NDK r26d
+  pinned); iOS device+sim as an xcframework of static libs + tvOS static; WebGL static `.a`
+  (emsdk 3.1.64 pinned, Blend2D OFF — wasm has no JIT, COLR uses the JS path).
+- Parity harness runs on Windows/Linux/macOS vs that platform's shipped original; binaries
+  upload as artifacts; an `assemble` job lays out the `Plugins/` tree.
+- **Validated with actionlint 1.7.1 — 0 errors.**
+
+CMake platform handling: library type STATIC for iOS/tvOS/WebGL, SHARED otherwise; non-Windows
+uses default-hidden visibility + a GNU version script (`NativeSource~/exports/ut_symbols.map`)
+or a Mach-O exported-symbols list (`ut_symbols.macho.txt`) restricting the dynamic table to the
+117 `ut_*` (+8 editor) exports; `.def` is Windows-only; editor DLL gated to desktop.
+
+Parity harness portability: takes DLL paths as args and uses `NativeLibrary.Load` + `GetExport`
+(no hardcoded `.dll`/backslashes/drive paths), so it builds/runs unchanged on Linux/macOS.
+
+**Platforms actually built locally (this Windows host):** Windows x64 only (native, Blend2D-on,
+portable CMake). Linux could not be built here — Docker Desktop's Linux engine was down and the
+only WSL distro is the userland-less docker-desktop backend; the other jobs are validated by
+inspection + actionlint, not executed.
+
+## Milestone 3 — SDF saturation/reach
+See "SDF gradient / saturation" above: the earlier k=1.4961 slope remap was reverted (it cut
+field reach ~1.5×, clipping outline/glow/underlay); the original is a standard linear
+`127/spread` field and no remap is needed. Reach gate (±1 px) passes 5/6 (Arabic over-reaches
+~3 px). The re-shipped `Plugins/Windows/x86_64/unitext_native.dll` is the no-remap build.
