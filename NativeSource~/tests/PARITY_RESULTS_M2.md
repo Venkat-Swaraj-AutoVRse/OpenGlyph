@@ -45,35 +45,37 @@ Pinned rest: FreeType `VER-2-13-3`, HarfBuzz `12.2.0`, zlib `v1.3.1`, libpng `v1
 only 0.35–0.76 byte ≈ **0.02–0.05 px**. A source-level midpoint/spread correction does not
 apply to the edge *position* — it is localized, not a constant shift.
 
-### SDF field — fully resolved: the "softness" was a render-tool bug, not a DLL defect
-Two rounds chased an apparent 4× softness. Sequence: (1) a `v→clamp(128+(v-128)*1.4961)` remap
-steepened a "shallow slope" but clipped REACH ~1.5× (reverted); (2) the revert restored reach
-but the render still looked soft. The **root cause was the render tool**, not the field: it
-upscaled the *thresholded 1× shader preview* to 4× (blurring both columns) instead of upscaling
-the SDF *field* and applying `smoothstep` at target resolution the way the GPU samples. Fixed in
-the render tool (upscale field → smoothstep); at 4× ORIG and NEW are now equally crisp.
+### SDF field — resolved: match the original's near-edge discontinuity (AA curves + edge jump)
+The original's SDF is **AA-smooth on curves** (no aliasing) yet has a **~5–7 byte discontinuity
+exactly at the contour** — the signature of an EDT on a hard/boundary mask. The right metric is
+the **straddle jump**: `|dByte|` across the pixel pair straddling 128, median over all H+V
+crossings (a bilinear normal profile smooths this away and is blind to it). Original ≈ 21–23.
 
-**Full cross-edge profile** (sdfdiag, normal-sampled −spread..+spread @0.25 px, 40 edge points,
-spread 8): orig and new track within ~2–4 bytes across the whole range, no divergence >10. The
-original's outside profile is linear (`123,111,96,80,64,48,32,16,0` = `127/spread`, reaching 0
-at ±spread) — the same field FreeType produces.
+Variant table (spread 8, straddle jump orig≈22):
 
-**Near-edge slope** measured correctly (median `|dByte/px|` over edge ±1.5 px, NOT the
-single-sample peak that read 23): matches. Renderer variant results (both gates):
+| Variant | straddle jump (new) | ratio | reach ±1px | dims | curves | verdict |
+|---|---|---|---|---|---|---|
+| bsdf (NORMAL→SDF, AA) | 15 | 0.65–0.71 | ok | equal | smooth | too soft |
+| outline `sdf` | 14 | 0.64–0.71 | ok | equal | smooth | too soft |
+| mono→sdf (1-bit) | — | — | ok | **MISMATCH** (39×42 vs 41×44) | — | rejected |
+| thresh (binarize@128→SDF) | 17 | 0.74–0.81 | ok | equal | **ALIASED** | rejected |
+| **bsdf + band-limited near-edge steepen — chosen** | 23 | **1.00–1.095** | ok | equal | smooth | **passes** |
 
-| Variant | near-edge slope ratio | reach ±1px | dims | verdict |
-|---|---|---|---|---|
-| bsdf (render NORMAL → SDF) — **chosen** | 0.979–1.047 | 5/6 (Arabic 8v11) | equal | passes; accepted baseline |
-| outline `sdf` (SDF on outline) | 0.958–1.047 | 5/6 (Arabic 8v12) | equal | also passes; not needed |
-| remap k=1.4961 (prior) | ~1.0 (peak) | FAILS (reach ~0.66×) | equal | rejected — clipped reach |
+No stock FreeType path reproduces AA-curves **and** the edge discontinuity together (hard mask →
+aliasing; AA → soft jump). **Fix:** keep bsdf (AA curves) and add a **reach-preserving,
+band-limited near-edge steepen** in `ut_ft_render_sdf_glyph`: `v → 128 + clamp((v−128)*G, ±B)`
+for `|v−128| < B` only (B=24, G=1.55), leaving the linear tail — hence the ±spread reach —
+untouched. This injects the near-edge discontinuity without a hard mask, so curves stay AA.
+`OPENGLYPH_SDF_MODE=bsdf|thresh|mono|outline` keep the raw variants for A/B.
 
-Chosen: **bsdf** (the accepted baseline; matches dims, reach ±1px, and near-edge slope, and was
-validated across all M2 parity). `OPENGLYPH_SDF_MODE=outline` keeps the A/B path.
+An earlier `v→clamp(128+(v−128)*1.4961)` GLOBAL remap was rejected — it clipped reach ~1.5×
+(saturated the whole field, not just the near-edge band). The band-limited version fixes that.
 
-**Gates (both kept, next to each other):** near-edge slope ratio ∈ [0.95,1.05] (median |dByte/px|
-over ±1.5 px) — **6/6 pass** (0.979–1.047); reach ±1 px — **5/6 pass** (Arabic new over-reaches
-~3 px, same rare-Arabic autohinter/EDT class as the hinting/perceptual diffs). dims equal;
-edgeMean ≤ 0.10 px (see perceptual gate).
+**Gates (both kept, next to each other):** straddle-jump ratio ∈ [0.85,1.15] (median |dByte| across
+the 128 crossing pair, H+V) — **6/6 pass** (1.00–1.095); reach ±1 px — **5/6 pass** (Arabic ±1
+now). dims equal; edgeMean ≤ 0.10 px (perceptual gate). The bilinear normal-profile slope gate
+was removed (blind to the discontinuity). **Render** (`renders/m3/sdf_text.png`): at 4× NEW now
+equals ORIGINAL — crisp, smooth curves, neither softer nor aliased.
 
 ### Perceptual gate (B.2/B.3 — the pass/fail criterion)
 Each SDF thresholded at the shader edge (byte 128 = 0.5, per `Shaders/UniText.cginc` `SDFLayer`)
