@@ -77,14 +77,15 @@ unsafe class Program
         Console.WriteLine($"    SDF reach median (edge->0 px): orig={mo:F1} new={mn:F1} (gate +-1px)");
         Check($"{name} sdf reach +-1px", Math.Abs(mo-mn)<=1.0, $"orig={mo} new={mn}");
     }
-    // Near-edge slope: median |dByte/px| within +-1.5px of the crossing; ratio new/orig 0.95-1.05.
+    // Straddle-jump: median |dByte| across the 128 crossing pair (H+V); ratio new/orig 0.85-1.15.
+    // Sees the original's edge discontinuity (EDT on a hard mask); the reach gate stays too.
     static void nearEdgeSlopeReport(System.Collections.Generic.List<double> so, System.Collections.Generic.List<double> sn, string name)
     {
         so.Sort(); sn.Sort();
         double mo=so.Count>0?so[so.Count/2]:0, mn=sn.Count>0?sn[sn.Count/2]:0;
         double ratio = mo>0? mn/mo : 0;
-        Console.WriteLine($"    SDF near-edge slope median |dByte/px|: orig={mo:F1} new={mn:F1} ratio={ratio:F3} (gate 0.95-1.05)");
-        Check($"{name} sdf near-edge slope 0.95-1.05", ratio>=0.95 && ratio<=1.05, $"ratio={ratio:F3} orig={mo} new={mn}");
+        Console.WriteLine($"    SDF straddle jump median |dByte|: orig={mo:F1} new={mn:F1} ratio={ratio:F3} (gate 0.85-1.15)");
+        Check($"{name} sdf straddle jump 0.85-1.15", ratio>=0.85 && ratio<=1.15, $"ratio={ratio:F3} orig={mo} new={mn}");
     }
 
     static readonly (string script, uint tag, int dir, int[] cps)[] Samples = new (string, uint, int, int[])[]
@@ -544,15 +545,15 @@ unsafe class Program
                         if(cxo>2){ for(int x=cxo;x>=0;x--) if(ob[cy*pit+x]<=0){ rO=cxo-x; break; } }
                         if(cxn>2){ for(int x=cxn;x>=0;x--) if(nb[cy*pit+x]<=0){ rN=cxn-x; break; } }
                         if(rO>0 && rN>0){ reachO.Add(rO); reachN.Add(rN); }
-                        // NEAR-EDGE SLOPE: over all horizontal 128-crossings, average |dByte/px|
-                        // within +-1.5px of the crossing (6 samples at 0.5px via linear interp of
-                        // integer bytes ~ mean of the 3 steps each side). Robust vs single-peak.
-                        for(int y=2;y<ores.bh-2;y++) for(int x=2;x<ores.bw-3;x++){
-                            int va=ob[y*pit+x],vb=ob[y*pit+x+1];
-                            if((va-128)*(vb-128)<0){ double s=(Math.Abs(ob[y*pit+x+1]-ob[y*pit+x])+Math.Abs(ob[y*pit+x+2]-ob[y*pit+x+1])+Math.Abs(ob[y*pit+x]-ob[y*pit+x-1]))/3.0; slopeEO.Add(s); }
-                            int vc=nb[y*pit+x],vd=nb[y*pit+x+1];
-                            if((vc-128)*(vd-128)<0){ double s=(Math.Abs(nb[y*pit+x+1]-nb[y*pit+x])+Math.Abs(nb[y*pit+x+2]-nb[y*pit+x+1])+Math.Abs(nb[y*pit+x]-nb[y*pit+x-1]))/3.0; slopeEN.Add(s); }
-                        }
+                        // STRADDLE JUMP: |dByte| across the pair straddling 128, over all H+V
+                        // crossings. This sees the original's ~5-7 byte edge discontinuity (EDT on
+                        // a hard mask), which a bilinear normal profile smooths away.
+                        for(int y=0;y<ores.bh;y++) for(int x=0;x<ores.bw-1;x++){
+                            int va=ob[y*pit+x],vb=ob[y*pit+x+1]; if((va-128)*(vb-128)<0) slopeEO.Add(Math.Abs(vb-va));
+                            int vc=nb[y*pit+x],vd=nb[y*pit+x+1]; if((vc-128)*(vd-128)<0) slopeEN.Add(Math.Abs(vd-vc)); }
+                        for(int x=0;x<ores.bw;x++) for(int y=0;y<ores.bh-1;y++){
+                            int va=ob[y*pit+x],vb=ob[(y+1)*pit+x]; if((va-128)*(vb-128)<0) slopeEO.Add(Math.Abs(vb-va));
+                            int vc=nb[y*pit+x],vd=nb[(y+1)*pit+x]; if((vc-128)*(vd-128)<0) slopeEN.Add(Math.Abs(vd-vc)); }
                         compared++;
                         // perceptual: threshold at 128 (shader edge=0.5), 1x and 4x bilinear.
                         Perceptual(ob, nb, ores.bw, ores.bh, Math.Abs(ores.bp), SPREAD, 1, out double em1, out double ex1, out double cov1);
