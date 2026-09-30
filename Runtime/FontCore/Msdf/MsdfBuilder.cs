@@ -36,7 +36,7 @@ namespace LightSide.Msdf
         /// <param name="outline">Glyph outline in pixel units, y-up.</param>
         /// <param name="spread">Padding in pixels on each side; pxRange = 2*spread.</param>
         /// <param name="angleThreshold">Corner threshold for edge colouring.</param>
-        public static MsdfGlyphResult Build(GlyphOutline outline, int spread, double angleThreshold = EdgeColoring.DefaultAngleThreshold)
+        public static MsdfGlyphResult Build(GlyphOutline outline, int spread, double angleThreshold = EdgeColoring.DefaultAngleThreshold, bool errorCorrection = true)
         {
             var result = new MsdfGlyphResult { IsValid = false };
             if (outline == null || outline.IsEmpty || spread < 1)
@@ -78,7 +78,7 @@ namespace LightSide.Msdf
                 // Translate so the glyph box's lower-left sits at (spread, spread).
                 TranslateX = spread - gx0,
                 TranslateY = spread - gy0,
-                ErrorCorrection = true,
+                ErrorCorrection = errorCorrection,
             };
 
             float[] field = MsdfGenerator.Generate(shape, in cfg);

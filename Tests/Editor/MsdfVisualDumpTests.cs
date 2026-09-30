@@ -39,7 +39,7 @@ namespace LightSide.Tests
             raw.Apply();
             string rawPath = Path.Combine(outDir, "msdf_A_raw_rgb.png");
             File.WriteAllBytes(rawPath, raw.EncodeToPNG());
-            Object.DestroyImmediate(raw);
+            UnityEngine.Object.DestroyImmediate(raw);
 
             // 4x upscales: nearest of the median (SDF-like) vs bilinear median (MSDF).
             int up = 4;
@@ -66,8 +66,8 @@ namespace LightSide.Tests
             string msdfPath = Path.Combine(outDir, "msdf_A_upscale_msdf_median_bilinear.png");
             File.WriteAllBytes(sdfPath, sdfTex.EncodeToPNG());
             File.WriteAllBytes(msdfPath, msdfTex.EncodeToPNG());
-            Object.DestroyImmediate(sdfTex);
-            Object.DestroyImmediate(msdfTex);
+            UnityEngine.Object.DestroyImmediate(sdfTex);
+            UnityEngine.Object.DestroyImmediate(msdfTex);
 
             TestContext.WriteLine("[MSDF-VISUAL] raw:   " + rawPath);
             TestContext.WriteLine("[MSDF-VISUAL] sdf:   " + sdfPath);

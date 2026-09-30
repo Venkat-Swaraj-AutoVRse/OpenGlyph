@@ -57,6 +57,15 @@ namespace LightSide.Msdf
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Vector2D operator -(Vector2D a) => new Vector2D(-a.X, -a.Y);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Vector2D a, Vector2D b) => a.X == b.X && a.Y == b.Y;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Vector2D a, Vector2D b) => a.X != b.X || a.Y != b.Y;
+
+        public bool Equals(Vector2D other) => X == other.X && Y == other.Y;
+        public override bool Equals(object obj) => obj is Vector2D v && Equals(v);
+        public override int GetHashCode() => (X, Y).GetHashCode();
+
         /// <summary>Dot product.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static double Dot(Vector2D a, Vector2D b) => a.X * b.X + a.Y * b.Y;
