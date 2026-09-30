@@ -115,8 +115,11 @@ UT_API void ut_ft_get_glyph_metrics(FT_Face face, int* width, int* height,
                                     int* bearingX, int* bearingY, int* advanceX, int* advanceY) {
     if (!face || !face->glyph) return;
     FT_Glyph_Metrics* m = &face->glyph->metrics;
-    if (width)    *width    = (int)m->width;
-    if (height)   *height   = (int)m->height;
+    /* Convention (matches the original DLL + C# consumers, see UniTextFont.cs:388-394):
+     *   width/height  -> integer PIXELS (26.6 >> 6)
+     *   bearing/advance -> raw 26.6 fixed point (C# divides advance by 64f). */
+    if (width)    *width    = (int)(m->width  >> 6);
+    if (height)   *height   = (int)(m->height >> 6);
     if (bearingX) *bearingX = (int)m->horiBearingX;
     if (bearingY) *bearingY = (int)m->horiBearingY;
     if (advanceX) *advanceX = (int)m->horiAdvance;

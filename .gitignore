@@ -25,6 +25,8 @@ Thumbs.db
 NativeSource~/build/
 NativeSource~/out/
 NativeSource~/**/_deps/
+NativeSource~/tests/**/bin/
+NativeSource~/tests/**/obj/
 NativeSource~/tests/bin/
 NativeSource~/tests/obj/
 NativeSource~/tests/fonts/*.ttf
