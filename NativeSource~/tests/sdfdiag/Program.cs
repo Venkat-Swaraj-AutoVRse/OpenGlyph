@@ -72,6 +72,21 @@ unsafe class SdfDiag
                     so.Sort(); sn.Sort(); double mo=so.Count>0?so[so.Count/2]:0, mn=sn.Count>0?sn[sn.Count/2]:0;
                     // byte value 3px inside/outside the first crossing on the center row
                     Console.WriteLine($"   MEASURED slope@128 (median |dByte/px|): orig={mo:F1} new={mn:F1} ratio new/orig={(mo>0?mn/mo:0):F3}");
+                    // REACH/SATURATION: on the center row, from the leftmost 128-crossing walk
+                    // outward (decreasing) to the first 0, and inward (increasing) to the first 255;
+                    // report px distance. Do it for orig and new.
+                    { int cy=ors.bh/2;
+                      int cxoO=-1; for(int x=0;x<ors.bw-1;x++){int av=ob[cy*pitchO+x],bv=ob[cy*pitchO+x+1]; if((av-128)*(bv-128)<0){cxoO=x;break;}}
+                      int cxoN=-1; for(int x=0;x<nrs.bw-1;x++){int av=nb[cy*pitchN+x],bv=nb[cy*pitchN+x+1]; if((av-128)*(bv-128)<0){cxoN=x;break;}}
+                      double oOut=0,oIn=0,nOut=0,nIn=0;
+                      if(cxoO>=0){ for(int x=cxoO;x>=0;x--){if(ob[cy*pitchO+x]<=0){oOut=cxoO-x;break;}} for(int x=cxoO+1;x<ors.bw;x++){if(ob[cy*pitchO+x]>=255){oIn=x-cxoO;break;}} }
+                      if(cxoN>=0){ for(int x=cxoN;x>=0;x--){if(nb[cy*pitchN+x]<=0){nOut=cxoN-x;break;}} for(int x=cxoN+1;x<nrs.bw;x++){if(nb[cy*pitchN+x]>=255){nIn=x-cxoN;break;}} }
+                      Console.WriteLine($"   REACH px (edge->0 out / edge->255 in): orig out={oOut:F1} in={oIn:F1} | new out={nOut:F1} in={nIn:F1}");
+                      // profile: orig byte at 1..8 px outside the crossing (raw FreeType, no remap effect on orig)
+                      if(cxoO>=0){ var sb=new System.Text.StringBuilder("   orig outside profile: ");
+                        for(int d=0;d<=8;d++){int x=cxoO-d; sb.Append(x>=0?ob[cy*pitchO+x].ToString():"--").Append(' ');}
+                        Console.WriteLine(sb.ToString()); }
+                    }
                     if (ch=='A') {
                         Console.WriteLine("   --- orig (>=128 = '#') ---");
                         for(int y=0;y<ors.bh;y+=2){var sb=new System.Text.StringBuilder("   ");for(int x=0;x<ors.bw;x+=2)sb.Append(ob[y*pitchO+x]>=128?'#':(ob[y*pitchO+x]>=64?'.':' '));Console.WriteLine(sb);}
