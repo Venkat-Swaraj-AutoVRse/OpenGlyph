@@ -17,7 +17,9 @@ $fonts = @(
   # Thai (OFL)
   @{ name='NotoSansThai-Regular.ttf';       url="$rawBase/ofl/notosansthai/NotoSansThai%5Bwdth%2Cwght%5D.ttf" },
   # Variable font for the MM/variations test (Roboto Flex, OFL)
-  @{ name='RobotoFlex-VF.ttf';              url="$rawBase/ofl/robotoflex/RobotoFlex%5BGRAD%2CXOPQ%2CXTRA%2CYOPQ%2CYTAS%2CYTDE%2CYTFI%2CYTLC%2CYTUC%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf" }
+  @{ name='RobotoFlex-VF.ttf';              url="$rawBase/ofl/robotoflex/RobotoFlex%5BGRAD%2CXOPQ%2CXTRA%2CYOPQ%2CYTAS%2CYTDE%2CYTFI%2CYTLC%2CYTUC%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf" },
+  # COLRv1 color font for COLR paint-tree parity (Noto Color Emoji, OFL)
+  @{ name='NotoColorEmoji-COLRv1.ttf';      url="$rawBase/ofl/notocoloremoji/NotoColorEmoji-Regular.ttf" }
 )
 
 foreach ($f in $fonts) {
