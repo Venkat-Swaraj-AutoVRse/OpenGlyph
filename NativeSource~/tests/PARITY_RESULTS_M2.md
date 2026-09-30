@@ -59,21 +59,27 @@ Variant table (spread 8, straddle jump orig≈22):
 | outline `sdf` | 14 | 0.64–0.71 | ok | equal | smooth | too soft |
 | mono→sdf (1-bit) | — | — | ok | **MISMATCH** (39×42 vs 41×44) | — | rejected |
 | thresh (binarize@128→SDF) | 17 | 0.74–0.81 | ok | equal | **ALIASED** | rejected |
-| **bsdf + band-limited near-edge steepen — chosen** | 23 | **1.00–1.095** | ok | equal | smooth | **passes** |
+| **bsdf + continuous near-edge remap — chosen** | 20 | **0.87–0.91** | ok | equal | smooth | **passes** |
 
 No stock FreeType path reproduces AA-curves **and** the edge discontinuity together (hard mask →
 aliasing; AA → soft jump). **Fix:** keep bsdf (AA curves) and add a **reach-preserving,
-band-limited near-edge steepen** in `ut_ft_render_sdf_glyph`: `v → 128 + clamp((v−128)*G, ±B)`
-for `|v−128| < B` only (B=24, G=1.55), leaving the linear tail — hence the ±spread reach —
-untouched. This injects the near-edge discontinuity without a hard mask, so curves stay AA.
-`OPENGLYPH_SDF_MODE=bsdf|thresh|mono|outline` keep the raw variants for A/B.
+continuous, strictly-monotonic** near-edge remap of `d = v−128` in `ut_ft_render_sdf_glyph`:
+`|d|≤a → d·G` (steep segment); `a<|d|≤B → sign(d)·(G·a+(|d|−a)·s2)`, `s2=(B−G·a)/(B−a)`;
+`|d|>B → d` (identity tail, so ±spread reach is untouched). `a=8, G=1.55, B=24 → s2=0.725`.
+This injects the near-edge discontinuity without a hard mask (curves stay AA) and without a
+plateau. `OPENGLYPH_SDF_MODE=bsdf|thresh|mono|outline` keep the raw variants for A/B.
 
-An earlier `v→clamp(128+(v−128)*1.4961)` GLOBAL remap was rejected — it clipped reach ~1.5×
-(saturated the whole field, not just the near-edge band). The band-limited version fixes that.
+Two prior mistakes, fixed: (1) a GLOBAL `v→clamp(128+(v−128)*1.4961)` remap clipped reach ~1.5×
+(saturated the whole field); (2) a `clamp(d*G,±B)` band remap created a **flat plateau** for
+`G·a≤|d|<B` — a shader threshold landing in bytes 104/152 (outline/underlay/glow near 0.4/0.6)
+mapped to a band, wobbling as those params animate. The continuous piecewise curve above fixes
+both: monotonic (no plateau) and reach-preserving.
 
-**Gates (both kept, next to each other):** straddle-jump ratio ∈ [0.85,1.15] (median |dByte| across
-the 128 crossing pair, H+V) — **6/6 pass** (1.00–1.095); reach ±1 px — **5/6 pass** (Arabic ±1
-now). dims equal; edgeMean ≤ 0.10 px (perceptual gate). The bilinear normal-profile slope gate
+**Gates (all kept):** straddle-jump ratio ∈ [0.85,1.15] (median |dByte| across the 128 crossing
+pair, H+V) — **6/6 pass** (0.870–0.909); reach ±1 px — **5/6 pass** (Arabic ±1
+now). dims equal; edgeMean ≤ 0.10 px (perceptual gate). **SDF-mapping monotonicity gate**: the
+remap over all 256 inputs is strictly increasing with max flat run 2 (rounding ties only) —
+`decreasing=False, maxFlatRun=2`. The bilinear normal-profile slope gate
 was removed (blind to the discontinuity). **Render** (`renders/m3/sdf_text.png`): at 4× NEW now
 equals ORIGINAL — crisp, smooth curves, neither softer nor aliased.
 
