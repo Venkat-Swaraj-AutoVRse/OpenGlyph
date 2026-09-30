@@ -95,6 +95,14 @@ unsafe class Program
         if (varFont != null && File.Exists(varFont))
             CompareFont(orig, neu, varFont, true);
 
+        // COLRv1 paint-tree parity (M2) on a color font, opt-in via env var.
+        string colrFont = Environment.GetEnvironmentVariable("PARITY_COLR_FONT");
+        if (!string.IsNullOrEmpty(colrFont) && File.Exists(colrFont))
+        {
+            Console.WriteLine($"\n== COLRv1 ==\nfont: {colrFont}");
+            CompareColr(orig, neu, colrFont);
+        }
+
         // Editor DLL subset parity (M2): opt-in via env vars so positional args stay stable.
         string edOrig = Environment.GetEnvironmentVariable("PARITY_EDITOR_ORIG");
         string edNew  = Environment.GetEnvironmentVariable("PARITY_EDITOR_NEW");
@@ -113,6 +121,90 @@ unsafe class Program
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate uint D_glyphcount(IntPtr data, uint size);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate uint D_subset(IntPtr data, uint size, uint[] cps, uint n, IntPtr outData, uint cap);
+
+    // COLR delegates
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_glyphpaint(IntPtr face, uint bg, int root, out IntPtr pP, out int pIns);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_paintfmt(IntPtr face, IntPtr pP, int pIns);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_paintlayers(IntPtr face, IntPtr pP, int pIns, out uint nl, out uint l, out IntPtr iP);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_nextlayer(IntPtr face, ref uint nl, ref uint l, ref IntPtr iP, out IntPtr cP, out int cIns);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int D_palettedata(IntPtr face, out PaletteData pd);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct PaletteData { public ushort num_palettes; public IntPtr name_ids; public IntPtr flags; public ushort num_entries; public IntPtr entry_name_ids; }
+
+    // Walks the COLRv1 paint tree for a color glyph, returning the sequence of paint formats seen.
+    static List<int> WalkPaint(Lib lib, IntPtr face, IntPtr pP, int pIns, int depth)
+    {
+        var fmts = new List<int>();
+        if (depth > 64) return fmts;
+        var getFmt = lib.Fn<D_paintfmt>("ut_colr_get_paint_format");
+        int fmt = getFmt(face, pP, pIns);
+        fmts.Add(fmt);
+        // FT_COLR_PAINTFORMAT_COLR_LAYERS == 1
+        if (fmt == 1)
+        {
+            var getLayers = lib.Fn<D_paintlayers>("ut_colr_get_paint_layers");
+            var nextLayer = lib.Fn<D_nextlayer>("ut_colr_get_next_layer");
+            if (getLayers(face, pP, pIns, out uint nl, out uint l, out IntPtr iP) != 0)
+            {
+                int guard = 0;
+                while (nextLayer(face, ref nl, ref l, ref iP, out IntPtr cP, out int cIns) != 0 && guard++ < 512)
+                    fmts.AddRange(WalkPaint(lib, face, cP, cIns, depth + 1));
+            }
+        }
+        return fmts;
+    }
+
+    static void CompareColr(Lib orig, Lib neu, string path)
+    {
+        byte[] data = File.ReadAllBytes(path);
+        string name = Path.GetFileName(path);
+        var oi = orig.Fn<D_init>("ut_ft_init"); var ni = neu.Fn<D_init>("ut_ft_init");
+        oi(out var oLib); ni(out var nLib);
+        var pin = GCHandle.Alloc(data, GCHandleType.Pinned);
+        try
+        {
+            byte* p = (byte*)pin.AddrOfPinnedObject();
+            orig.Fn<D_newface>("ut_ft_new_memory_face")(oLib, p, (IntPtr)data.Length, IntPtr.Zero, out var of);
+            neu .Fn<D_newface>("ut_ft_new_memory_face")(nLib, p, (IntPtr)data.Length, IntPtr.Zero, out var nf);
+            if (of == IntPtr.Zero || nf == IntPtr.Zero) { Check($"{name} colr face", false); return; }
+
+            // palette data parity
+            var opd = orig.Fn<D_palettedata>("ut_ft_palette_data_get");
+            var npd = neu .Fn<D_palettedata>("ut_ft_palette_data_get");
+            int orp = opd(of, out PaletteData opdD);
+            int nrp = npd(nf, out PaletteData npdD);
+            Check($"{name} palette_data", orp == nrp && opdD.num_palettes == npdD.num_palettes && opdD.num_entries == npdD.num_entries,
+                  $"orig(rc{orp} pal{opdD.num_palettes} ent{opdD.num_entries}) new(rc{nrp} pal{npdD.num_palettes} ent{npdD.num_entries})");
+
+            var oGP = orig.Fn<D_glyphpaint>("ut_colr_get_glyph_paint");
+            var nGP = neu .Fn<D_glyphpaint>("ut_colr_get_glyph_paint");
+            neu.Fn<D_faceinfo>("ut_ft_get_face_info")(nf, out _, out int ng, out _, out _, out _, out _, out _, out _, out _);
+            int colorGlyphs = 0, treeMatch = 0, treeMismatch = 0;
+            for (uint g = 1; g < (uint)ng && colorGlyphs < 40; g++)
+            {
+                int oHas = oGP(of, g, 1, out IntPtr opP, out int opIns);
+                int nHas = nGP(nf, g, 1, out IntPtr npP, out int npIns);
+                if (oHas == 0 && nHas == 0) continue;
+                if (oHas != nHas) { treeMismatch++; continue; }
+                colorGlyphs++;
+                var oFmts = WalkPaint(orig, of, opP, opIns, 0);
+                var nFmts = WalkPaint(neu, nf, npP, npIns, 0);
+                bool same = oFmts.Count == nFmts.Count;
+                if (same) for (int i = 0; i < oFmts.Count; i++) if (oFmts[i] != nFmts[i]) { same = false; break; }
+                if (same) treeMatch++; else treeMismatch++;
+            }
+            Console.WriteLine($"    COLR {name}: {colorGlyphs} color glyphs walked, treeMatch={treeMatch}, mismatch={treeMismatch}");
+            Check($"{name} COLR paint trees", treeMismatch == 0 && colorGlyphs > 0,
+                  $"match={treeMatch} mismatch={treeMismatch} colorGlyphs={colorGlyphs}");
+
+            orig.Fn<D_doneface>("ut_ft_done_face")(of);
+            neu .Fn<D_doneface>("ut_ft_done_face")(nf);
+        }
+        finally { pin.Free(); }
+        orig.Fn<D_done>("ut_ft_done")(oLib);
+        neu .Fn<D_done>("ut_ft_done")(nLib);
+    }
 
     static void CompareEditor(Lib eo, Lib en, string path)
     {
