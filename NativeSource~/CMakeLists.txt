@@ -1,14 +1,14 @@
 # OpenGlyph native layer — clean-room rebuild of unitext_native{,_editor}
 #
 # Builds:
-#   unitext_native         (runtime: FreeType + HarfBuzz + Blend2D, 110 ut_* exports)
-#   unitext_native_editor  (editor: harfbuzz-subset + native file dialog, 8 exports)
+#   unitext_native         (runtime: FreeType + HarfBuzz [+ Blend2D in M2], ut_* exports)
+#   unitext_native_editor  (editor: harfbuzz-subset + native file dialog)  -- M2
 #
 # Upstream sources are FETCHED at PINNED versions (no vendored copies, no closed source).
 # Third-party licenses recorded in ../Third-Party Notices.txt.
 #
 # Windows x64 build (VS generator, ninja not required):
-#   cmake -S NativeSource~ -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+#   cmake -S NativeSource~ -B build -G "Visual Studio 17 2022" -A x64
 #   cmake --build build --config Release
 #
 cmake_minimum_required(VERSION 3.24)
@@ -18,48 +18,89 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
 
 # ---- Pinned upstream versions -------------------------------------------------
-# FreeType: 2.13.3 — has SDF/BSDF modules, COLRv1 paint API, sbix bitmap_top fix,
-#           and the MM/variations API needed for Task 3.
+# FreeType 2.13.3: SDF/BSDF modules, COLRv1 paint API, sbix bitmap_top fix, MM/variations.
 set(OPENGLYPH_FREETYPE_TAG   "VER-2-13-3")
-# HarfBuzz: 12.x as required by the brief.
+# HarfBuzz 12.x as required by the brief.
 set(OPENGLYPH_HARFBUZZ_TAG   "12.2.0")
-# Blend2D: commit-versioned (no semver releases). Pin an exact commit before first build.
-#          Depends on asmjit (also commit-pinned). REPLACE the placeholders below with the
-#          exact SHAs you intend to ship, then record them in Third-Party Notices.txt.
+# zlib + libpng: required by FreeType for 'sbix'/'CBDT' PNG-compressed color-bitmap strikes
+# (the C# side reads PIXEL_MODE_BGRA / LOAD_COLOR / sbix — see FT.cs, EmojiFont.cs).
+set(OPENGLYPH_ZLIB_TAG       "v1.3.1")
+set(OPENGLYPH_LIBPNG_TAG     "v1.6.44")
+# Blend2D (M2): commit-versioned. Pin exact SHAs before enabling.
 set(OPENGLYPH_BLEND2D_TAG    "REPLACE_WITH_PINNED_BLEND2D_COMMIT")
 set(OPENGLYPH_ASMJIT_TAG     "REPLACE_WITH_PINNED_ASMJIT_COMMIT")
 
 include(FetchContent)
 
-# ---- FreeType (BSD-style FTL / GPLv2 dual) -----------------------------------
+# ---- zlib (Zlib license) ------------------------------------------------------
+FetchContent_Declare(zlib
+  GIT_REPOSITORY https://github.com/madler/zlib.git
+  GIT_TAG        ${OPENGLYPH_ZLIB_TAG}
+  GIT_SHALLOW    TRUE)
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(zlib)
+# zlib's CMake exports the static target `zlibstatic`. Provide the ZLIB::ZLIB alias that
+# downstream find_package(ZLIB)-style users (libpng, FreeType) expect, and expose the
+# include dirs. Do NOT set ZLIB_LIBRARY to a bare name — CMake would treat it as a link
+# input filename and fail (LNK1181 zlibstatic.obj).
+set(ZLIB_INCLUDE_DIR "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
+if(TARGET zlibstatic AND NOT TARGET ZLIB::ZLIB)
+  add_library(ZLIB::ZLIB ALIAS zlibstatic)
+endif()
+
+# ---- libpng (libpng/PNG license) ---------------------------------------------
+FetchContent_Declare(libpng
+  GIT_REPOSITORY https://github.com/pnggroup/libpng.git
+  GIT_TAG        ${OPENGLYPH_LIBPNG_TAG}
+  GIT_SHALLOW    TRUE)
+set(PNG_SHARED   OFF CACHE BOOL "" FORCE)
+set(PNG_STATIC   ON  CACHE BOOL "" FORCE)
+set(PNG_TESTS    OFF CACHE BOOL "" FORCE)
+set(PNG_TOOLS    OFF CACHE BOOL "" FORCE)
+set(PNG_FRAMEWORK OFF CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(libpng)
+# libpng exports `png_static`. Expose include dirs; do NOT set PNG_LIBRARY to a bare name.
+if(TARGET png_static)
+  set(PNG_PNG_INCLUDE_DIR "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
+  if(NOT TARGET PNG::PNG)
+    add_library(PNG::PNG ALIAS png_static)
+  endif()
+endif()
+
+# ---- FreeType (FTL / GPLv2 dual) ---------------------------------------------
 FetchContent_Declare(freetype
   GIT_REPOSITORY https://github.com/freetype/freetype.git
   GIT_TAG        ${OPENGLYPH_FREETYPE_TAG}
   GIT_SHALLOW    TRUE)
-# Build FreeType without external deps for a self-contained DLL.
-set(FT_DISABLE_ZLIB    ON  CACHE BOOL "" FORCE)
-set(FT_DISABLE_BZIP2   ON  CACHE BOOL "" FORCE)
-set(FT_DISABLE_PNG     ON  CACHE BOOL "" FORCE)
-set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)  # avoid circular dep; HB links FT, not vice-versa
-set(FT_DISABLE_BROTLI  ON  CACHE BOOL "" FORCE)
+# Enable zlib + PNG (color bitmaps); disable the rest for a lean self-contained DLL.
+set(FT_DISABLE_ZLIB     OFF CACHE BOOL "" FORCE)
+set(FT_REQUIRE_ZLIB     ON  CACHE BOOL "" FORCE)
+set(FT_DISABLE_PNG      OFF CACHE BOOL "" FORCE)
+set(FT_REQUIRE_PNG      ON  CACHE BOOL "" FORCE)
+set(FT_DISABLE_BZIP2    ON  CACHE BOOL "" FORCE)
+set(FT_DISABLE_HARFBUZZ ON  CACHE BOOL "" FORCE)  # avoid circular dep (HB links FT, not vice-versa)
+set(FT_DISABLE_BROTLI   ON  CACHE BOOL "" FORCE)
 
 # ---- HarfBuzz 12.x (MIT "Old") -----------------------------------------------
 FetchContent_Declare(harfbuzz
   GIT_REPOSITORY https://github.com/harfbuzz/harfbuzz.git
   GIT_TAG        ${OPENGLYPH_HARFBUZZ_TAG}
   GIT_SHALLOW    TRUE)
-set(HB_HAVE_FREETYPE   ON  CACHE BOOL "" FORCE)   # hb_ft_* + ot funcs
-set(HB_BUILD_SUBSET    ON  CACHE BOOL "" FORCE)   # editor subsetting
+set(HB_HAVE_FREETYPE   ON  CACHE BOOL "" FORCE)
+set(HB_BUILD_SUBSET    ON  CACHE BOOL "" FORCE)
 set(HB_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
 set(HB_BUILD_UTILS     OFF CACHE BOOL "" FORCE)
-set(SKIP_INSTALL_ALL   ON  CACHE BOOL "" FORCE)
 
-# ---- Blend2D (Zlib) + asmjit (Zlib) ------------------------------------------
-# NOTE: enable once the commit SHAs above are pinned. Kept gated so the FT+HB
-#       build is exercisable before Blend2D is wired.
-option(OPENGLYPH_ENABLE_BLEND2D "Fetch and link Blend2D" OFF)
+FetchContent_MakeAvailable(freetype harfbuzz)
+
+# ---- Blend2D (M2, gated) ------------------------------------------------------
+option(OPENGLYPH_ENABLE_BLEND2D "Fetch and link Blend2D (milestone 2)" OFF)
 if(OPENGLYPH_ENABLE_BLEND2D)
   FetchContent_Declare(asmjit
     GIT_REPOSITORY https://github.com/asmjit/asmjit.git
@@ -73,18 +114,25 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   FetchContent_MakeAvailable(asmjit blend2d)
 endif()
 
-FetchContent_MakeAvailable(freetype harfbuzz)
-
 # ---- Runtime library: unitext_native -----------------------------------------
+# Milestone 1 source set. ut_bl* and ut_colr* are STUBS this milestone (return 0/failure)
+# so the DLL links and exports the full ABI; real impls land in M2.
 add_library(unitext_native SHARED
   src/ut_ft.c
   src/ut_ft_variations.c
-  src/ut_colr.c
   src/ut_hb.c
-  src/ut_bl.cpp
+  src/ut_colr_stub.c
+  src/ut_bl_stub.c
   src/ut_version.c
-  src/ut_exports.def)   # explicit export list: exactly the 110 ut_* symbols
+  src/ut_exports.def)
 target_link_libraries(unitext_native PRIVATE freetype harfbuzz)
+# FreeType references zlib + libpng symbols (sbix/CBDT PNG strikes); pull the statics in.
+if(TARGET zlibstatic)
+  target_link_libraries(unitext_native PRIVATE zlibstatic)
+endif()
+if(TARGET png_static)
+  target_link_libraries(unitext_native PRIVATE png_static)
+endif()
 if(OPENGLYPH_ENABLE_BLEND2D)
   target_link_libraries(unitext_native PRIVATE blend2d::blend2d)
   target_compile_definitions(unitext_native PRIVATE OPENGLYPH_HAVE_BLEND2D=1)
@@ -92,14 +140,17 @@ endif()
 target_include_directories(unitext_native PRIVATE include)
 set_target_properties(unitext_native PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native")
 
-# ---- Editor library: unitext_native_editor -----------------------------------
-add_library(unitext_native_editor SHARED
-  src/editor/subset.c
-  src/editor/dialog_win32.c
-  src/editor/ut_editor_exports.def)
-target_link_libraries(unitext_native_editor PRIVATE harfbuzz-subset harfbuzz)
-target_include_directories(unitext_native_editor PRIVATE include)
-set_target_properties(unitext_native_editor PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native_editor")
-if(WIN32)
-  target_link_libraries(unitext_native_editor PRIVATE comdlg32)
+# ---- Editor library: unitext_native_editor (milestone 2) ---------------------
+option(OPENGLYPH_BUILD_EDITOR_DLL "Build unitext_native_editor (milestone 2)" OFF)
+if(OPENGLYPH_BUILD_EDITOR_DLL)
+  add_library(unitext_native_editor SHARED
+    src/editor/subset.c
+    src/editor/dialog_win32.c
+    src/editor/ut_editor_exports.def)
+  target_link_libraries(unitext_native_editor PRIVATE harfbuzz-subset harfbuzz)
+  target_include_directories(unitext_native_editor PRIVATE include)
+  set_target_properties(unitext_native_editor PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native_editor")
+  if(WIN32)
+    target_link_libraries(unitext_native_editor PRIVATE comdlg32)
+  endif()
 endif()
