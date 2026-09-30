@@ -11,6 +11,13 @@ namespace LightSide
         /// <summary>Signed Distance Field — resolution-independent, supports outlines/shadows/glow.</summary>
         SDF,
 
+        /// <summary>
+        /// Multi-channel Signed Distance Field (RGB) — resolution-independent like SDF but
+        /// preserves sharp corners at large scale via median-of-three reconstruction.
+        /// Falls back to <see cref="SDF"/> when the native outline export is unavailable.
+        /// </summary>
+        Msdf,
+
         /// <summary>Anti-aliased grayscale bitmap — pixel-perfect at sampling size.</summary>
         Smooth,
 
