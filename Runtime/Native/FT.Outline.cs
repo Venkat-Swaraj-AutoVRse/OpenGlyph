@@ -69,5 +69,49 @@ namespace LightSide
                 return false;
             }
         }
+
+        /// <summary>
+        /// Determines whether the native <c>ut_ft_get_outline_data</c> export is resolvable in the
+        /// loaded binary, WITHOUT requiring a loaded glyph slot. Invokes the export once with
+        /// deliberately tiny buffers on <paramref name="face"/>: a missing entry point throws
+        /// <see cref="EntryPointNotFoundException"/> before touching the slot (returns false); any
+        /// other outcome (success, capacity-too-small, or an in-native fault on the tiny buffers)
+        /// means the entry point resolved (returns true). Latch the result in the caller — this is
+        /// the single point of truth for "does the phase-0 export exist", so callers never redeclare
+        /// the P/Invoke themselves.
+        /// </summary>
+        public static bool OutlineExportAvailable(IntPtr face)
+        {
+            if (!initialized || face == IntPtr.Zero) return false;
+
+            var xy = new int[2];
+            var tags = new byte[1];
+            var ends = new short[1];
+            try
+            {
+                fixed (int* pxy = xy)
+                fixed (byte* ptags = tags)
+                fixed (short* pends = ends)
+                {
+                    // Return code and out-counts are irrelevant here; the only thing learned is
+                    // whether the entry point resolves.
+                    ut_ft_get_outline_data(face, pxy, ptags, pends, 1, 1, out _, out _, out _);
+                }
+                return true;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return false; // old binary predating this export
+            }
+            catch (DllNotFoundException)
+            {
+                return false; // native library missing entirely
+            }
+            catch
+            {
+                // Entry point resolved and faulted on the tiny buffers — the export exists.
+                return true;
+            }
+        }
     }
 }
