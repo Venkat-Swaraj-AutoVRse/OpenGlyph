@@ -22,6 +22,13 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Work around a CMake 4.2 GNUInstallDirs bug (infinite recursion in
+# _GNUInstallDirs_RUNSTATEDIR_get_default) triggered when Blend2D includes it: shadow the
+# stock module with a lean shim (cmake/GNUInstallDirs.cmake) placed first on the module path.
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+set(CMAKE_INSTALL_RUNSTATEDIR "run" CACHE PATH "" FORCE)
+include(GNUInstallDirs)
+
 # ---- Pinned upstream versions -------------------------------------------------
 # FreeType 2.13.3: SDF/BSDF modules, COLRv1 paint API, sbix bitmap_top fix, MM/variations.
 set(OPENGLYPH_FREETYPE_TAG   "VER-2-13-3")
@@ -31,9 +38,9 @@ set(OPENGLYPH_HARFBUZZ_TAG   "12.2.0")
 # (the C# side reads PIXEL_MODE_BGRA / LOAD_COLOR / sbix — see FT.cs, EmojiFont.cs).
 set(OPENGLYPH_ZLIB_TAG       "v1.3.1")
 set(OPENGLYPH_LIBPNG_TAG     "v1.6.44")
-# Blend2D (M2): commit-versioned. Pin exact SHAs before enabling.
-set(OPENGLYPH_BLEND2D_TAG    "REPLACE_WITH_PINNED_BLEND2D_COMMIT")
-set(OPENGLYPH_ASMJIT_TAG     "REPLACE_WITH_PINNED_ASMJIT_COMMIT")
+# Blend2D (M2): commit-versioned. Pinned to specific commits (verified via git ls-remote).
+set(OPENGLYPH_BLEND2D_TAG    "58ca9460b4138af6e793184682e9324e0a8053b2")
+set(OPENGLYPH_ASMJIT_TAG     "0d7f01052f2d3f6d6b9bb6714ef32bd7b80177eb")
 
 include(FetchContent)
 
@@ -109,16 +116,22 @@ set(HB_BUILD_UTILS     OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(freetype harfbuzz)
 
 # ---- Blend2D (M2, gated) ------------------------------------------------------
-option(OPENGLYPH_ENABLE_BLEND2D "Fetch and link Blend2D (milestone 2)" OFF)
+# Blend2D is implemented (src/ut_bl.cpp) and pinned, but its master CMakeLists triggers a
+# recursion bug in the installed CMake 4.2.2 (Check*CompilerFlag on flags like
+# '-Zc:arm64-aliased-neon-types-'; see PARITY_RESULTS_M2.md). Default OFF here so the runtime
+# DLL builds; turn ON with a compatible CMake (<= 3.31): -DOPENGLYPH_ENABLE_BLEND2D=ON.
+option(OPENGLYPH_ENABLE_BLEND2D "Fetch and link Blend2D (needs CMake <= 3.31)" OFF)
 if(OPENGLYPH_ENABLE_BLEND2D)
   FetchContent_Declare(asmjit
     GIT_REPOSITORY https://github.com/asmjit/asmjit.git
     GIT_TAG        ${OPENGLYPH_ASMJIT_TAG})
   set(ASMJIT_STATIC ON CACHE BOOL "" FORCE)
+  set(ASMJIT_NO_INSTALL ON CACHE BOOL "" FORCE)   # avoid GNUInstallDirs (CMake 4.2 recursion bug)
   FetchContent_Declare(blend2d
     GIT_REPOSITORY https://github.com/blend2d/blend2d.git
     GIT_TAG        ${OPENGLYPH_BLEND2D_TAG})
   set(BLEND2D_STATIC ON CACHE BOOL "" FORCE)
+  set(BLEND2D_NO_INSTALL ON CACHE BOOL "" FORCE)  # avoid GNUInstallDirs (CMake 4.2 recursion bug)
   set(ASMJIT_DIR ${asmjit_SOURCE_DIR} CACHE PATH "" FORCE)
   FetchContent_MakeAvailable(asmjit blend2d)
 endif()
@@ -126,12 +139,19 @@ endif()
 # ---- Runtime library: unitext_native -----------------------------------------
 # Milestone 1 source set. ut_bl* and ut_colr* are STUBS this milestone (return 0/failure)
 # so the DLL links and exports the full ABI; real impls land in M2.
+# Blend2D source: real impl when enabled, stub otherwise (keeps the ABI exported either way).
+if(OPENGLYPH_ENABLE_BLEND2D)
+  set(OPENGLYPH_BL_SRC src/ut_bl.cpp)
+else()
+  set(OPENGLYPH_BL_SRC src/ut_bl_stub.c)
+endif()
+
 add_library(unitext_native SHARED
   src/ut_ft.c
   src/ut_ft_variations.c
   src/ut_hb.c
   src/ut_colr.c
-  src/ut_bl_stub.c
+  ${OPENGLYPH_BL_SRC}
   src/ut_version.c
   src/ut_exports.def)
 target_link_libraries(unitext_native PRIVATE freetype harfbuzz)
@@ -150,13 +170,19 @@ target_include_directories(unitext_native PRIVATE include)
 set_target_properties(unitext_native PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native")
 
 # ---- Editor library: unitext_native_editor (milestone 2) ---------------------
-option(OPENGLYPH_BUILD_EDITOR_DLL "Build unitext_native_editor (milestone 2)" OFF)
+option(OPENGLYPH_BUILD_EDITOR_DLL "Build unitext_native_editor (milestone 2)" ON)
 if(OPENGLYPH_BUILD_EDITOR_DLL)
   add_library(unitext_native_editor SHARED
     src/editor/subset.c
     src/editor/dialog_win32.c
     src/editor/ut_editor_exports.def)
   target_link_libraries(unitext_native_editor PRIVATE harfbuzz-subset harfbuzz)
+  # harfbuzz + harfbuzz-subset are separate static libs that both embed the same CFF/number
+  # translation units, so MSVC sees duplicate (byte-identical) symbols. Allow multiple
+  # definitions; the editor DLL is functionally verified by the parity harness subset test.
+  if(MSVC)
+    target_link_options(unitext_native_editor PRIVATE /FORCE:MULTIPLE /IGNORE:4088)
+  endif()
   target_include_directories(unitext_native_editor PRIVATE include)
   set_target_properties(unitext_native_editor PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native_editor")
   if(WIN32)

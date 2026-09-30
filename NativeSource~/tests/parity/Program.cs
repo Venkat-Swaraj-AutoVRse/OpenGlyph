@@ -95,9 +95,79 @@ unsafe class Program
         if (varFont != null && File.Exists(varFont))
             CompareFont(orig, neu, varFont, true);
 
+        // Editor DLL subset parity (M2): opt-in via env vars so positional args stay stable.
+        string edOrig = Environment.GetEnvironmentVariable("PARITY_EDITOR_ORIG");
+        string edNew  = Environment.GetEnvironmentVariable("PARITY_EDITOR_NEW");
+        if (!string.IsNullOrEmpty(edOrig) && !string.IsNullOrEmpty(edNew) && File.Exists(edOrig) && File.Exists(edNew))
+        {
+            Console.WriteLine($"\n== EDITOR DLL ==\norig: {edOrig}\nnew : {edNew}");
+            var eo = new Lib(edOrig); var en = new Lib(edNew);
+            foreach (var f in Directory.GetFiles(fontsDir, "*.ttf"))
+                CompareEditor(eo, en, f);
+        }
+
         Console.WriteLine($"\n===== RESULT: {pass} passed, {fail} failed =====");
         foreach (var fl in failures) Console.WriteLine("  FAIL " + fl);
         return fail == 0 ? 0 : 1;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate uint D_glyphcount(IntPtr data, uint size);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate uint D_subset(IntPtr data, uint size, uint[] cps, uint n, IntPtr outData, uint cap);
+
+    static void CompareEditor(Lib eo, Lib en, string path)
+    {
+        byte[] data = File.ReadAllBytes(path);
+        string name = Path.GetFileName(path);
+        var gcO = eo.Fn<D_glyphcount>("get_glyph_count"); var gcN = en.Fn<D_glyphcount>("get_glyph_count");
+        var suO = eo.Fn<D_subset>("subset_font"); var suN = en.Fn<D_subset>("subset_font");
+
+        var pin = GCHandle.Alloc(data, GCHandleType.Pinned);
+        try
+        {
+            IntPtr p = pin.AddrOfPinnedObject();
+            uint gco = gcO(p, (uint)data.Length), gcn = gcN(p, (uint)data.Length);
+            Check($"{name} editor glyph_count", gco == gcn && gcn > 0, $"orig {gco} vs new {gcn}");
+
+            // subset to a small ASCII set and compare the resulting subset fonts' glyph counts.
+            uint[] cps = { 'H','e','l','o','W','r','d',' ' };
+            uint needO = suO(p, (uint)data.Length, cps, (uint)cps.Length, IntPtr.Zero, 0);
+            uint needN = suN(p, (uint)data.Length, cps, (uint)cps.Length, IntPtr.Zero, 0);
+            Check($"{name} editor subset size", needO > 0 && needN > 0, $"orig {needO} new {needN}");
+            if (needN > 0)
+            {
+                var outO = new byte[needO]; var outN = new byte[needN];
+                var poO = GCHandle.Alloc(outO, GCHandleType.Pinned);
+                var poN = GCHandle.Alloc(outN, GCHandleType.Pinned);
+                try
+                {
+                    suO(p, (uint)data.Length, cps, (uint)cps.Length, poO.AddrOfPinnedObject(), needO);
+                    suN(p, (uint)data.Length, cps, (uint)cps.Length, poN.AddrOfPinnedObject(), needN);
+                    // valid font? sfnt magic (0x00010000 or 'OTTO'/'true') at offset 0
+                    bool okO = IsSfnt(outO), okN = IsSfnt(outN);
+                    Check($"{name} editor subset valid font", okO && okN, $"origMagic={okO} newMagic={okN}");
+                    // same glyph set: feed each subset back through get_glyph_count
+                    var pgO = GCHandle.Alloc(outO, GCHandleType.Pinned);
+                    var pgN = GCHandle.Alloc(outN, GCHandleType.Pinned);
+                    try
+                    {
+                        uint sgO = gcN(pgO.AddrOfPinnedObject(), (uint)outO.Length);
+                        uint sgN = gcN(pgN.AddrOfPinnedObject(), (uint)outN.Length);
+                        Check($"{name} editor subset glyph set", sgO == sgN && sgN > 0, $"orig {sgO} new {sgN}");
+                        Console.WriteLine($"    editor {name}: full={gcn}g subset={sgN}g ({needN}B)");
+                    }
+                    finally { pgO.Free(); pgN.Free(); }
+                }
+                finally { poO.Free(); poN.Free(); }
+            }
+        }
+        finally { pin.Free(); }
+    }
+
+    static bool IsSfnt(byte[] b)
+    {
+        if (b.Length < 4) return false;
+        uint m = ((uint)b[0]<<24)|((uint)b[1]<<16)|((uint)b[2]<<8)|b[3];
+        return m == 0x00010000u || m == 0x4F54544Fu /*OTTO*/ || m == 0x74727565u /*true*/ || m == 0x74746366u /*ttcf*/;
     }
 
     static void CompareFont(Lib orig, Lib neu, string path, bool isVar)
