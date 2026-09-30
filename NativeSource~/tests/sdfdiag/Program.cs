@@ -57,6 +57,13 @@ unsafe class SdfDiag
                     int mnO=255,mxO=0,mnN=255,mxN=0, maxD=0, mdx=0, mdy=0, mdo=0, mdn=0;
                     for(int y=0;y<ors.bh;y++)for(int x=0;x<ors.bw;x++){int vo=ob[y*pitchO+x],vn=nb[y*pitchN+x];if(vo<mnO)mnO=vo;if(vo>mxO)mxO=vo;if(vn<mnN)mnN=vn;if(vn>mxN)mxN=vn; int d=Math.Abs(vo-vn); if(d>maxD){maxD=d;mdx=x;mdy=y;mdo=vo;mdn=vn;}}
                     Console.WriteLine($"   orig[{mnO}-{mxO}] new[{mnN}-{mxN}] maxDiff={maxD} at({mdx},{mdy}) orig={mdo} new={mdn}");
+                    // signed mean overall, and signed mean in the edge band (values within +-40 of 128)
+                    long ssum=0; int scnt=0; long esum=0; int ecnt=0;
+                    for(int y=0;y<ors.bh;y++)for(int x=0;x<ors.bw;x++){int vo=ob[y*pitchO+x],vn=nb[y*pitchN+x]; ssum+=(vo-vn); scnt++; if(Math.Abs(vo-128)<=40){esum+=(vo-vn); ecnt++;}}
+                    double sMean = scnt>0?(double)ssum/scnt:0, eMean = ecnt>0?(double)esum/ecnt:0;
+                    // byte-per-pixel slope at edge ~= 127/spread; px offset ~= edge signed diff / slope
+                    double slope = 127.0/spread; double pxOff = slope>0? eMean/slope : 0;
+                    Console.WriteLine($"   signedMean={sMean:F2} edgeSignedMean={eMean:F2} slope={slope:F1}/px  => edgePxOffset~{pxOff:F3}px");
                     if (ch=='A') {
                         Console.WriteLine("   --- orig (>=128 = '#') ---");
                         for(int y=0;y<ors.bh;y+=2){var sb=new System.Text.StringBuilder("   ");for(int x=0;x<ors.bw;x+=2)sb.Append(ob[y*pitchO+x]>=128?'#':(ob[y*pitchO+x]>=64?'.':' '));Console.WriteLine(sb);}
