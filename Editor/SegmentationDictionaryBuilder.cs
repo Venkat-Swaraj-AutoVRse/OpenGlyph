@@ -42,7 +42,7 @@ namespace LightSide.EditorTools
             }
 
             var outDir = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(toolProj))),
-                "Resources", "Segmentation");
+                "Dictionaries");
 
             var psi = new ProcessStartInfo("dotnet",
                 $"run -c Release --project \"{toolProj}\" -- \"{icuDir}\" \"{outDir}\"")

@@ -15,7 +15,7 @@ namespace LightSide.Tests
     public class SegmentationWrapTests
     {
         [OneTimeSetUp]
-        public void Setup() => SegHelper.EnsureUnicode();
+        public void Setup() { SegHelper.EnsureUnicode(); SegHelper.AssignDictionaries(); }
 
         [Test]
         public void NarrowWrap_BreaksAtWordBoundaries_NeverMidCluster()
