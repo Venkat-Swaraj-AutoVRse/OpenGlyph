@@ -1,4 +1,4 @@
-Shader "UniText/MSDF" {
+Shader "UniText/MSDF Overlay" {
 
 Properties {
 	_FaceTex			("Face Texture", 2D) = "white" {}
@@ -84,8 +84,8 @@ Properties {
 SubShader {
 
 	Tags
-	{
-		"Queue"="Transparent"
+  {
+		"Queue"="Overlay"
 		"IgnoreProjector"="True"
 		"RenderType"="Transparent"
 	}
@@ -103,7 +103,7 @@ SubShader {
 	ZWrite Off
 	Lighting Off
 	Fog { Mode Off }
-	ZTest [unity_GUIZTestMode]
+	ZTest Always
 	Blend One OneMinusSrcAlpha
 	ColorMask [_ColorMask]
 
@@ -158,15 +158,15 @@ SubShader {
 			fixed4	underlayColor	: COLOR1;
 		    #endif
 
-		    float4 textures			: TEXCOORD5;
+			float4 textures			: TEXCOORD5;
 		};
 
 		// Used by Unity internally to handle Texture Tiling and Offset.
-		float4 _FaceTex_ST;
-		float4 _OutlineTex_ST;
-		float _UIMaskSoftnessX;
-        float _UIMaskSoftnessY;
-        int _UIVertexColorAlwaysGammaSpace;
+		uniform float4	_FaceTex_ST;
+		uniform float4	_OutlineTex_ST;
+		uniform float	_UIMaskSoftnessX;
+        uniform float	_UIMaskSoftnessY;
+        uniform int     _UIVertexColorAlwaysGammaSpace;
 
 		pixel_t VertShader(vertex_t input)
 		{
@@ -194,13 +194,16 @@ SubShader {
 			float gradientScale = input.texcoord0.z;
 			float spreadRatio = input.texcoord1.x;
 
-			// MSDF uses the same scale term as SDF; the median simply replaces the alpha sample.
+			// SDF scale (includes xScaleVal and gradientScale for proper edge rendering)
 			float scale = baseScale * xScaleVal * gradientScale;
 
+			// Normalization factor for effects (independent of atlas settings)
 			float normFactor = REFERENCE_SPREAD_RATIO / max(spreadRatio, 0.001);
 
+			// Base weight (font weight only, without dilate)
 			float baseWeight = lerp(_WeightNormal, _WeightBold, bold) / 4.0 * _ScaleRatioA * 0.5;
 
+			// Face bias with dilate applied via normFactor (independent of atlas settings)
 			float normalizedEffect = (baseWeight + _FaceDilate * _ScaleRatioA * 0.5) * normFactor;
 			float bias = (0.5 - normalizedEffect) * scale - 0.5;
 
@@ -222,15 +225,18 @@ SubShader {
 			float normalizedUnderlayEffect = (baseWeight + underlayDilate * 0.5) * normFactor;
 			float layerBias = (0.5 - normalizedUnderlayEffect) * layerScale - 0.5;
 
+			// Underlay UV offset (independent of atlas settings)
 			float offsetFactor = ComputeUnderlayOffsetFactor(gradientScale, normFactor);
 			float x = -(_UnderlayOffsetX * _ScaleRatioC) * offsetFactor * _MainTex_TexelSize.x;
 			float y = -(_UnderlayOffsetY * _ScaleRatioC) * offsetFactor * _MainTex_TexelSize.y;
 			float2 layerOffset = float2(x, y);
 		    #endif
 
+			// Generate UV for the Masking Texture
 			float4 clampedRect = clamp(_ClipRect, -2e10, 2e10);
 			float2 maskUV = (vert.xy - clampedRect.xy) / (clampedRect.zw - clampedRect.xy);
 
+			// Support for texture tiling and offset
 			float2 textureUV = input.texcoord1.yz;
 			float2 faceUV = TRANSFORM_TEX(textureUV, _FaceTex);
 			float2 outlineUV = TRANSFORM_TEX(textureUV, _OutlineTex);
@@ -261,12 +267,10 @@ SubShader {
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 
-			// MSDF: reconstruct distance as the median of the three atlas channels.
-			half sampled = UniTextSampleMSDF(_MainTex, input.atlas.xy);
-			half d = sampled * input.param.y;  // * scale
+			half d = UniTextSampleMSDF(_MainTex, input.atlas.xy) * input.param.y;  // * scale
 
 		    #ifndef UNDERLAY_ON
-			clip(sampled - input.param.x);
+			clip(UniTextSampleMSDF(_MainTex, input.atlas.xy) - input.param.x);
 		    #endif
 
 			float scale = input.param.y;
@@ -274,8 +278,10 @@ SubShader {
 			float baseWeight = input.param.w;
 			float normFactor = input.atlas.w;
 
+			// Start with empty result
 			half4 result = half4(0, 0, 0, 0);
 
+			// Underlay layer (behind everything)
 		    #if UNDERLAY_ON
 			half ud = UniTextSampleMSDF(_MainTex, input.texcoord2.xy) * input.texcoord2.z;
 			result = SDFLayer(ud, input.texcoord2.w, input.underlayColor);
@@ -287,6 +293,7 @@ SubShader {
 			result = input.underlayColor * (1 - saturate(ud - input.texcoord2.w)) * faceMask;
 		    #endif
 
+			// Outline layer (width applied via normFactor for independence from atlas settings)
 			float softnessFactor = _OutlineSoftness * _ScaleRatioA * normFactor;
 			float scaleSoftness = scale / (1 + softnessFactor);
 			float normalizedOutlineEffect = (baseWeight + (_FaceDilate + _OutlineWidth) * _ScaleRatioA * 0.5) * normFactor;
@@ -301,6 +308,7 @@ SubShader {
 			half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor);
 			result = BlendOver(result, outlineResult);
 
+			// Face layer (on top)
 			half4 faceColor = _FaceColor;
 			faceColor.rgb *= input.color.rgb;
 			faceColor *= tex2D(_FaceTex, input.textures.xy + float2(_FaceUVSpeedX, _FaceUVSpeedY) * _Time.y);
@@ -309,18 +317,13 @@ SubShader {
 			half4 faceResult = SDFLayer(d, bias, faceColor);
 
 		    #if BEVEL_ON
+			// Calculate sd for bevel (using normFactor for independence from atlas settings)
 			float normalizedFaceEffect = (baseWeight + _FaceDilate * _ScaleRatioA * 0.5) * normFactor;
-			float sd = (0.5 - normalizedFaceEffect + 0.5 / scale - sampled) * scale;
+			float sd = (0.5 - normalizedFaceEffect + 0.5 / scale - UniTextSampleMSDF(_MainTex, input.atlas.xy)) * scale;
 			float outlineRange = _OutlineWidth * _ScaleRatioA * 0.5 * normFactor * scale;
 
 			float3 dxy = float3(0.5 * _MainTex_TexelSize.x, 0.5 * _MainTex_TexelSize.y, 0);
-			// Height field from MSDF medians of the 4 neighbours.
-			float4 h = float4(
-				UniTextSampleMSDF(_MainTex, input.atlas.xy - dxy.xz),
-				UniTextSampleMSDF(_MainTex, input.atlas.xy + dxy.xz),
-				UniTextSampleMSDF(_MainTex, input.atlas.xy - dxy.zy),
-				UniTextSampleMSDF(_MainTex, input.atlas.xy + dxy.zy));
-			float3 n = GetSurfaceNormal(h, baseWeight, input.atlas.z);
+			float3 n = GetSurfaceNormal(input.atlas.xy, baseWeight, dxy, input.atlas.z);
 
 			float3 bump = UnpackNormal(tex2D(_BumpMap, input.textures.xy + float2(_FaceUVSpeedX, _FaceUVSpeedY) * _Time.y)).xyz;
 			bump *= lerp(_BumpFace, _BumpOutline, saturate(sd + outlineRange));
@@ -340,12 +343,14 @@ SubShader {
 			result = BlendOver(result, faceResult);
 
 		    #if GLOW_ON
+			// Calculate sd for glow (using normFactor for independence from atlas settings)
 			float normalizedGlowEffect = (baseWeight + _FaceDilate * _ScaleRatioA * 0.5) * normFactor;
-			float sdGlow = (0.5 - normalizedGlowEffect + 0.5 / scale - sampled) * scale;
+			float sdGlow = (0.5 - normalizedGlowEffect + 0.5 / scale - UniTextSampleMSDF(_MainTex, input.atlas.xy)) * scale;
 			float4 glowColor = GetGlowColor(sdGlow, normFactor * scale);
 			result.rgb += glowColor.rgb * glowColor.a;
 		    #endif
 
+		    // Alternative implementation to UnityGet2DClipping with support for softness.
 		    #if UNITY_UI_CLIP_RECT
 			half2 m = saturate((_ClipRect.zw - _ClipRect.xy - abs(input.mask.xy)) * input.mask.zw);
 			result *= m.x * m.y;
@@ -355,14 +360,19 @@ SubShader {
 			clip(result.a - 0.001);
 		    #endif
 
+			// Apply vertex alpha
+		    #if (UNDERLAY_ON | UNDERLAY_INNER)
 			result *= input.color.a;
+		    #else
+			result *= input.color.a;
+		    #endif
 
-  		    return result;
+			return result;
 		}
 		ENDCG
 	}
 }
 
-Fallback "UniText/SDF"
+Fallback "UniText/SDF Overlay"
 CustomEditor "LightSide.UniText_SDFShaderGUI"
 }

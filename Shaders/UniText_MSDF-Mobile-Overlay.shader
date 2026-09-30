@@ -1,14 +1,12 @@
-// Simplified MSDF shader (single-pass):
+// Simplified SDF shader (Overlay version):
 // - No Shading Option (bevel / bump / env map)
 // - No Glow Option
-// - Renders Face, Outline, and Underlay in one pass
-// Multi-channel variant of UniText/Mobile/SDF: the atlas alpha sample is replaced by the
-// median of the RGB channels (UniTextSampleMSDF), preserving sharp corners at large scale.
+// - ZTest Always for overlay rendering
 
-Shader "UniText/Mobile/MSDF" {
+Shader "UniText/Mobile/MSDF Overlay" {
 
 Properties {
-	_FaceColor          ("Face Color", Color) = (1,1,1,1)
+	_FaceColor		    ("Face Color", Color) = (1,1,1,1)
 	_FaceDilate			("Face Dilate", Range(-1,1)) = 0
 
 	_OutlineColor	    ("Outline Color", Color) = (0,0,0,1)
@@ -54,11 +52,12 @@ Properties {
 
 SubShader {
 	Tags
-	{
-		"Queue"="Transparent"
+  {
+		"Queue"="Overlay"
 		"IgnoreProjector"="True"
 		"RenderType"="Transparent"
 	}
+
 
 	Stencil
 	{
@@ -73,7 +72,7 @@ SubShader {
 	ZWrite Off
 	Lighting Off
 	Fog { Mode Off }
-	ZTest [unity_GUIZTestMode]
+	ZTest Always
 	Blend One OneMinusSrcAlpha
 	ColorMask [_ColorMask]
 
@@ -92,7 +91,7 @@ SubShader {
 		#define UNITEXT_MSDF
 		#include "UniText_MSDF.cginc"
 
-		// Unity auto-generated: (1/width, 1/height, width, height)
+		// Unity auto-provided: (1/width, 1/height, width, height)
 		float4 _MainTex_TexelSize;
 
 		struct pixel_t
@@ -132,7 +131,10 @@ SubShader {
 
 			float baseWeight = ComputeBaseWeight(input.texcoord0);
 
+			// Face bias (normalized via normFactor)
 			float faceBias = ComputeBias(baseWeight, _FaceDilate, scale, normFactor);
+
+			// Outline bias (same logic, different dilate)
 			float outlineBias = ComputeBias(baseWeight, _FaceDilate + _OutlineDilate, scale, normFactor);
 
 			fixed4 color = GammaToLinearIfNeeded(input.color);
@@ -149,11 +151,13 @@ SubShader {
 			outlineColor.rgb *= outlineColor.a;
 
 			#if (UNDERLAY_ON | UNDERLAY_INNER)
+			// Underlay parameters (normalized via normFactor)
 			float softnessFactor = _UnderlaySoftness * _ScaleRatioC * normFactor;
 			float layerScale = scale / (1 + softnessFactor);
 			float underlayDilate = _FaceDilate * _ScaleRatioA + _UnderlayDilate * _ScaleRatioC;
 			float layerBias = ComputeBias(baseWeight, underlayDilate, layerScale, normFactor);
 
+			// Underlay UV offset (independent of atlas settings)
 			float gradientScaleVal = input.texcoord0.z;
 			float offsetFactor = ComputeUnderlayOffsetFactor(gradientScaleVal, normFactor);
 			float2 layerOffset = float2(
@@ -182,6 +186,7 @@ SubShader {
 			half d = UniTextSampleMSDF(_MainTex, input.uv) * input.param.x;
 			half4 result = half4(0, 0, 0, 0);
 
+			// Underlay layer (behind everything)
 			#if UNDERLAY_ON
 			half ud = UniTextSampleMSDF(_MainTex, input.underlayUV) * input.underlayParam.x;
 			half4 underlayColor = float4(_UnderlayColor.rgb * _UnderlayColor.a, _UnderlayColor.a);
@@ -195,14 +200,17 @@ SubShader {
 			result = underlayColor * (1 - saturate(ud - input.underlayParam.y)) * faceMask;
 			#endif
 
+			// Outline layer
 			#ifdef OUTLINE_ON
 			half4 outlineResult = SDFLayer(d, input.param.z, input.outlineColor);
 			result = BlendOver(result, outlineResult);
 			#endif
 
+			// Face layer (on top)
 			half4 faceResult = SDFLayer(d, input.param.y, input.faceColor);
 			result = BlendOver(result, faceResult);
 
+			// Apply vertex alpha for underlay
 			#if (UNDERLAY_ON | UNDERLAY_INNER)
 			result *= input.param.w;
 			#endif
@@ -213,6 +221,6 @@ SubShader {
 	}
 }
 
-Fallback "UniText/Mobile/SDF"
+Fallback "UniText/Mobile/SDF Overlay"
 CustomEditor "LightSide.UniText_SDFShaderGUI"
 }

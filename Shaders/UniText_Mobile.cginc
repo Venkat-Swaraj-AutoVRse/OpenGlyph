@@ -91,7 +91,7 @@ float4 PixShader(pixel_t input) : SV_Target
 {
     UNITY_SETUP_INSTANCE_ID(input);
 
-    float d = tex2D(_MainTex, input.texcoord0.xy).a;
+    float d = UNITEXT_SAMPLE_DF(_MainTex, input.texcoord0.xy);
 
     // Screen-space derivative scale calculation
     float pixelSize = abs(ddx(input.texcoord0.y)) + abs(ddy(input.texcoord0.y));
@@ -135,13 +135,13 @@ float4 PixShader(pixel_t input) : SV_Target
 
     // Underlay layer
     #if UNDERLAY_ON
-    float ud = tex2D(_MainTex, input.texcoord2.xy).a * layerScale;
+    float ud = UNITEXT_SAMPLE_DF(_MainTex, input.texcoord2.xy) * layerScale;
     float4 underlayResult = input.underlayColor * saturate(ud - layerBias);
     faceColor = BlendOver(underlayResult, faceColor);
     #endif
 
     #if UNDERLAY_INNER
-    float ud = tex2D(_MainTex, input.texcoord2.xy).a * layerScale;
+    float ud = UNITEXT_SAMPLE_DF(_MainTex, input.texcoord2.xy) * layerScale;
     float faceMask = saturate(d * scaleSoftness - faceBias);
     float4 underlayResult = input.underlayColor * (1 - saturate(ud - layerBias)) * faceMask;
     faceColor = BlendOver(underlayResult, faceColor);

@@ -4,6 +4,16 @@
 #ifndef UNITEXT_SDF_MOBILE_COMMON_INCLUDED
 #define UNITEXT_SDF_MOBILE_COMMON_INCLUDED
 
+#ifndef UNITEXT_DF_SAMPLE_DEFINED
+#define UNITEXT_DF_SAMPLE_DEFINED
+half UniTextMedian3_(half3 rgb) { return max(min(rgb.r, rgb.g), min(max(rgb.r, rgb.g), rgb.b)); }
+#ifdef UNITEXT_MSDF
+    #define UNITEXT_SAMPLE_DF(tex, uv) UniTextMedian3_(tex2D(tex, uv).rgb)
+#else
+    #define UNITEXT_SAMPLE_DF(tex, uv) (tex2D(tex, uv).a)
+#endif
+#endif // UNITEXT_DF_SAMPLE_DEFINED
+
 #include "UnityCG.cginc"
 #include "UnityUI.cginc"
 #include "UniText_Properties.cginc"
@@ -126,7 +136,7 @@ half4 SDFLayer(half d, float threshold, half4 color)
 // Sample SDF and render layer
 half4 SDFLayerSample(float2 uv, float scale, float threshold, half4 color)
 {
-    half d = tex2D(_MainTex, uv).a * scale;
+    half d = UNITEXT_SAMPLE_DF(_MainTex, uv) * scale;
     return color * saturate(d - threshold);
 }
 

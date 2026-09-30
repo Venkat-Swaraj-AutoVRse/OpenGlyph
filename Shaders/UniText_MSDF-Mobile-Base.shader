@@ -1,14 +1,11 @@
-// Simplified MSDF shader (single-pass):
+// Simplified SDF shader - Base pass for 2-pass rendering (rendered first, behind face)
 // - No Shading Option (bevel / bump / env map)
 // - No Glow Option
-// - Renders Face, Outline, and Underlay in one pass
-// Multi-channel variant of UniText/Mobile/SDF: the atlas alpha sample is replaced by the
-// median of the RGB channels (UniTextSampleMSDF), preserving sharp corners at large scale.
+// - Renders outline and underlay effects
 
-Shader "UniText/Mobile/MSDF" {
+Shader "UniText/Mobile/MSDF-Base" {
 
 Properties {
-	_FaceColor          ("Face Color", Color) = (1,1,1,1)
 	_FaceDilate			("Face Dilate", Range(-1,1)) = 0
 
 	_OutlineColor	    ("Outline Color", Color) = (0,0,0,1)
@@ -78,6 +75,7 @@ SubShader {
 	ColorMask [_ColorMask]
 
 	Pass {
+		Name "BASE"
 		CGPROGRAM
 		#pragma vertex VertShader
 		#pragma fragment PixShader
@@ -92,22 +90,21 @@ SubShader {
 		#define UNITEXT_MSDF
 		#include "UniText_MSDF.cginc"
 
-		// Unity auto-generated: (1/width, 1/height, width, height)
+		// Unity auto-provided: (1/width, 1/height, width, height)
 		float4 _MainTex_TexelSize;
 
 		struct pixel_t
 		{
 			UNITY_VERTEX_INPUT_INSTANCE_ID
 			UNITY_VERTEX_OUTPUT_STEREO
-			float4 vertex       : SV_POSITION;
-			fixed4 faceColor    : COLOR;
-			fixed4 outlineColor : COLOR1;
-			float2 uv           : TEXCOORD0;
-			half4  param        : TEXCOORD1;  // scale, faceBias, outlineBias, alpha
-			half4  mask         : TEXCOORD2;
+			float4 vertex        : SV_POSITION;
+			fixed4 outlineColor  : COLOR;
+			float2 uv            : TEXCOORD0;
+			half4  param         : TEXCOORD1;  // scale, outlineBias, alpha, unused
+			half4  mask          : TEXCOORD2;
 			#if (UNDERLAY_ON | UNDERLAY_INNER)
-			float2 underlayUV   : TEXCOORD3;
-			half2  underlayParam: TEXCOORD4;  // scale, bias
+			float2 underlayUV    : TEXCOORD3;
+			half2  underlayParam : TEXCOORD4;  // scale, bias
 			#endif
 		};
 
@@ -132,28 +129,25 @@ SubShader {
 
 			float baseWeight = ComputeBaseWeight(input.texcoord0);
 
-			float faceBias = ComputeBias(baseWeight, _FaceDilate, scale, normFactor);
-			float outlineBias = ComputeBias(baseWeight, _FaceDilate + _OutlineDilate, scale, normFactor);
+			// Outline = same as Face, just with different dilate (normalized via normFactor)
+			float softnessFactor = _OutlineSoftness * _ScaleRatioA * normFactor;
+			float scaleSoftness = scale / (1 + softnessFactor);
+			float outlineBias = ComputeBias(baseWeight, _FaceDilate + _OutlineDilate, scaleSoftness, normFactor);
 
 			fixed4 color = GammaToLinearIfNeeded(input.color);
-			float opacity = color.a;
-			#if (UNDERLAY_ON | UNDERLAY_INNER)
-			opacity = 1.0;
-			#endif
-
-			fixed4 faceColor = fixed4(color.rgb, opacity) * _FaceColor;
-			faceColor.rgb *= faceColor.a;
 
 			fixed4 outlineColor = _OutlineColor;
-			outlineColor.a *= opacity;
+			outlineColor.a *= color.a;
 			outlineColor.rgb *= outlineColor.a;
 
 			#if (UNDERLAY_ON | UNDERLAY_INNER)
-			float softnessFactor = _UnderlaySoftness * _ScaleRatioC * normFactor;
-			float layerScale = scale / (1 + softnessFactor);
+			// Underlay parameters (normalized via normFactor)
+			float underlaySoftness = _UnderlaySoftness * _ScaleRatioC * normFactor;
+			float layerScale = scale / (1 + underlaySoftness);
 			float underlayDilate = _FaceDilate * _ScaleRatioA + _UnderlayDilate * _ScaleRatioC;
 			float layerBias = ComputeBias(baseWeight, underlayDilate, layerScale, normFactor);
 
+			// Underlay UV offset (independent of atlas settings)
 			float gradientScaleVal = input.texcoord0.z;
 			float offsetFactor = ComputeUnderlayOffsetFactor(gradientScaleVal, normFactor);
 			float2 layerOffset = float2(
@@ -166,10 +160,9 @@ SubShader {
 			#endif
 
 			output.vertex = vPosition;
-			output.faceColor = faceColor;
 			output.outlineColor = outlineColor;
 			output.uv = input.texcoord0.xy;
-			output.param = half4(scale, faceBias, outlineBias, color.a);
+			output.param = half4(scale, outlineBias, color.a, 0);
 			output.mask = ComputeMask(vert, pixelSize);
 
 			return output;
@@ -182,6 +175,7 @@ SubShader {
 			half d = UniTextSampleMSDF(_MainTex, input.uv) * input.param.x;
 			half4 result = half4(0, 0, 0, 0);
 
+			// Underlay layer (behind everything)
 			#if UNDERLAY_ON
 			half ud = UniTextSampleMSDF(_MainTex, input.underlayUV) * input.underlayParam.x;
 			half4 underlayColor = float4(_UnderlayColor.rgb * _UnderlayColor.a, _UnderlayColor.a);
@@ -191,20 +185,18 @@ SubShader {
 			#if UNDERLAY_INNER
 			half ud = UniTextSampleMSDF(_MainTex, input.underlayUV) * input.underlayParam.x;
 			half4 underlayColor = float4(_UnderlayColor.rgb * _UnderlayColor.a, _UnderlayColor.a);
-			half faceMask = saturate(d - input.param.y);
-			result = underlayColor * (1 - saturate(ud - input.underlayParam.y)) * faceMask;
+			result = underlayColor * (1 - saturate(ud - input.underlayParam.y));
 			#endif
 
+			// Outline layer (same logic as Face, just different bias)
 			#ifdef OUTLINE_ON
-			half4 outlineResult = SDFLayer(d, input.param.z, input.outlineColor);
+			half4 outlineResult = SDFLayer(d, input.param.y, input.outlineColor);
 			result = BlendOver(result, outlineResult);
 			#endif
 
-			half4 faceResult = SDFLayer(d, input.param.y, input.faceColor);
-			result = BlendOver(result, faceResult);
-
+			// Apply vertex alpha
 			#if (UNDERLAY_ON | UNDERLAY_INNER)
-			result *= input.param.w;
+			result *= input.param.z;
 			#endif
 
 			return ApplyClipping(result, input.mask);
@@ -213,6 +205,6 @@ SubShader {
 	}
 }
 
-Fallback "UniText/Mobile/SDF"
+Fallback "UniText/Mobile/SDF-Base"
 CustomEditor "LightSide.UniText_SDFShaderGUI"
 }
