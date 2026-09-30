@@ -41,6 +41,48 @@ namespace LightSide.Msdf
             }
         }
 
+        /// <summary>True once <see cref="Probe"/> or a real call has determined availability.</summary>
+        public static bool HasProbed => _probed;
+
+        /// <summary>
+        /// Definitively determines whether the export exists by invoking it once with minimal
+        /// buffers on <paramref name="face"/> (whose glyph slot need not be loaded — a missing
+        /// export throws before touching the slot). Latches the result. Call this BEFORE choosing
+        /// an atlas format so a missing export never yields a half-written RGB atlas.
+        /// </summary>
+        public static unsafe bool Probe(IntPtr face)
+        {
+            if (_probed) return _available;
+            if (face == IntPtr.Zero) return false; // don't latch on a null face
+
+            var xy = new int[2];
+            var tags = new byte[1];
+            var ends = new short[1];
+            try
+            {
+                fixed (int* pXy = xy)
+                fixed (byte* pTags = tags)
+                fixed (short* pEnds = ends)
+                {
+                    // Return code is irrelevant here (buffers are deliberately tiny); the ONLY
+                    // thing we learn is whether the entry point resolves.
+                    ut_ft_get_outline_data(face, pXy, pTags, pEnds, 1, 1,
+                        out _, out _, out _);
+                }
+                _available = true;
+            }
+            catch (EntryPointNotFoundException) { _available = false; }
+            catch (DllNotFoundException) { _available = false; }
+            catch
+            {
+                // Any other exception means the entry point DID resolve (it ran and faulted on the
+                // tiny buffers); the export exists.
+                _available = true;
+            }
+            _probed = true;
+            return _available;
+        }
+
         /// <summary>
         /// FreeType's FT_OUTLINE_REVERSE_FILL flag (bit 2). Set for glyphs whose fill orientation
         /// is the PostScript convention. Kept here so callers need not depend on FT.cs internals.
