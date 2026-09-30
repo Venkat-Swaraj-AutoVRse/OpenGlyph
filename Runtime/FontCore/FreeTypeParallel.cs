@@ -25,6 +25,8 @@ namespace LightSide
         public int bitmapLeft;
         public int bitmapTop;
         public byte[] sdfPixels;
+        /// <summary>Bytes per pixel in <see cref="sdfPixels"/>: 1 for Alpha8 SDF, 3 for RGB24 MSDF.</summary>
+        public int channels;
     }
 
     /// <summary>Static helper for rendering individual SDF glyphs via EDT.</summary>
@@ -81,6 +83,7 @@ namespace LightSide
             FT.FreeSdfBuffer(native.bmpBuffer);
 
             result.sdfPixels = pixels;
+            result.channels = 1;
             result.isValid = true;
             return true;
         }

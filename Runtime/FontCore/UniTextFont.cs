@@ -115,6 +115,12 @@ namespace LightSide
         [NonSerialized] private FreeTypeFacePool sdfFacePool;
 #endif
 
+        // MSDF: latched once the native outline export is found missing, so we stop retrying and
+        // fall back to SDF for the rest of this font's lifetime (with a one-time warning).
+        [NonSerialized] private bool msdfOutlineUnavailable;
+        [NonSerialized] private bool msdfFallbackWarned;
+        [NonSerialized] private IntPtr msdfFace;
+
         [ThreadStatic] private static List<uint> toAddList;
 
         internal event Action Changed;
@@ -224,16 +230,20 @@ namespace LightSide
         /// <summary>Gets the SDF spread strength (0-1). Padding = PointSize * SpreadStrength.</summary>
         public float SpreadStrength => spreadStrength;
 
-        /// <summary>Gets the padding between glyphs in the atlas. For SDF: computed from SpreadStrength. For COLOR/bitmap: minimal.</summary>
+        /// <summary>Gets the padding between glyphs in the atlas. For SDF/MSDF: computed from SpreadStrength. For COLOR/bitmap: minimal.</summary>
         public int AtlasPadding
         {
             get
             {
-                if (atlasRenderMode != UniTextRenderMode.SDF)
+                if (atlasRenderMode != UniTextRenderMode.SDF && atlasRenderMode != UniTextRenderMode.Msdf)
                     return 1;
                 return Mathf.Max(1, Mathf.RoundToInt(faceInfo.pointSize * spreadStrength));
             }
         }
+
+        /// <summary>True when the atlas stores a distance field (SDF or MSDF) rather than a bitmap.</summary>
+        internal bool IsDistanceFieldMode =>
+            atlasRenderMode == UniTextRenderMode.SDF || atlasRenderMode == UniTextRenderMode.Msdf;
 
         /// <summary>Gets the glyph render mode (SDF, bitmap, etc.).</summary>
         public UniTextRenderMode AtlasRenderMode => atlasRenderMode;
@@ -446,6 +456,11 @@ namespace LightSide
                 FT.UnloadFace(ftFace);
                 ftFace = IntPtr.Zero;
             }
+            if (msdfFace != IntPtr.Zero)
+            {
+                FT.UnloadFace(msdfFace);
+                msdfFace = IntPtr.Zero;
+            }
         }
 
         /// <summary>
@@ -625,6 +640,21 @@ namespace LightSide
         /// <returns>Rendered glyph data (SdfRenderedGlyph[] for SDF fonts). Null on failure.</returns>
         public virtual object RenderPreparedBatch(PreparedBatch batch)
         {
+            // MSDF path: render multi-channel SDF from FreeType outlines. Falls back to SDF when
+            // the native outline export is unavailable.
+            if (atlasRenderMode == UniTextRenderMode.Msdf && !msdfOutlineUnavailable)
+            {
+                var msdf = RenderMsdfBatch(batch);
+                if (msdf != null)
+                    return msdf;
+                // Fallback: export missing -> warn once and render SDF instead.
+                if (!msdfFallbackWarned)
+                {
+                    msdfFallbackWarned = true;
+                    Cat.MeowWarnFormat("[MSDF] {0}: native outline export 'ut_ft_get_outline_data' unavailable; falling back to SDF rendering.", name);
+                }
+            }
+
 #if !UNITY_WEBGL || UNITY_EDITOR
             return sdfFacePool.RenderSdfBatch(batch.filteredGlyphs, batch.pointSize,
                 FT.LOAD_DEFAULT | FT.LOAD_NO_BITMAP, batch.spread);
@@ -637,6 +667,66 @@ namespace LightSide
                     FT.LOAD_DEFAULT | FT.LOAD_NO_BITMAP, batch.spread, out rendered[i]);
             return rendered;
 #endif
+        }
+
+        /// <summary>
+        /// Renders a batch as MSDF using a dedicated FreeType face and the native outline export.
+        /// Returns null (and latches <c>msdfOutlineUnavailable</c>) when the export is missing so
+        /// the caller can fall back to SDF. Rendered sequentially to bound memory on tight hosts.
+        /// </summary>
+        private SdfRenderedGlyph[] RenderMsdfBatch(PreparedBatch batch)
+        {
+            var face = EnsureMsdfFace();
+            if (face == IntPtr.Zero)
+            {
+                msdfOutlineUnavailable = true;
+                return null;
+            }
+
+            var source = new Msdf.FreeTypeOutlineSource(face,
+                (gi, ppem) =>
+                {
+                    if (!FT.SetPixelSize(face, ppem)) return false;
+                    return FT.LoadGlyph(face, gi, FT.LOAD_DEFAULT | FT.LOAD_NO_HINTING);
+                });
+
+            if (!source.IsAvailable)
+            {
+                msdfOutlineUnavailable = true;
+                return null;
+            }
+
+            var list = batch.filteredGlyphs;
+            var results = new SdfRenderedGlyph[list.Count];
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (!Msdf.MsdfGlyphRenderer.TryRender(face, list[i], batch.pointSize, batch.spread,
+                        source, out results[i], out bool unavailable))
+                {
+                    if (unavailable)
+                    {
+                        msdfOutlineUnavailable = true;
+                        // Return already-rendered pixels to the pool before bailing.
+                        for (int j = 0; j <= i; j++)
+                            if (results[j].sdfPixels != null)
+                            {
+                                UniTextArrayPool<byte>.Return(results[j].sdfPixels);
+                                results[j].sdfPixels = null;
+                            }
+                        return null;
+                    }
+                }
+            }
+            return results;
+        }
+
+        private IntPtr EnsureMsdfFace()
+        {
+            if (msdfFace != IntPtr.Zero) return msdfFace;
+            if (fontData == null || fontData.Length == 0) return IntPtr.Zero;
+            if (!FT.IsInitialized) FT.Initialize();
+            msdfFace = FT.LoadFace(fontData, cachedFaceIndex < 0 ? 0 : cachedFaceIndex);
+            return msdfFace;
         }
 
         /// <summary>
@@ -717,7 +807,7 @@ namespace LightSide
                     var raw = curAtlas.GetRawTextureData<byte>();
                     cachedAtlasPtr = (byte*)Unity.Collections.LowLevel.Unsafe.NativeArrayUnsafeUtility.GetUnsafePtr(raw);
                 }
-                CopySdfBitmapToAtlas(r.sdfPixels, r.bmpWidth, r.bmpHeight, packRect.x, packRect.y, cachedAtlasW, cachedAtlasPtr);
+                CopySdfBitmapToAtlas(r.sdfPixels, r.bmpWidth, r.bmpHeight, packRect.x, packRect.y, cachedAtlasW, cachedAtlasPtr, r.channels > 0 ? r.channels : 1);
                 ReturnSdfPixels(ref r);
 
                 int outlineW = r.bmpWidth - 2 * spread;
@@ -776,17 +866,20 @@ namespace LightSide
         }
 
         /// <summary>
-        /// Copies a pre-rendered SDF bitmap (Alpha8, already Y-flipped by native) to the atlas.
+        /// Copies a pre-rendered distance-field bitmap to the atlas. Handles 1-channel (Alpha8 SDF)
+        /// and 3-channel (RGB24 MSDF) payloads; the source is already Y-oriented for the atlas.
         /// </summary>
         private static unsafe void CopySdfBitmapToAtlas(byte[] sdfPixels, int bw, int bh,
-            int packX, int packY, int atlasW, byte* atlasPtr)
+            int packX, int packY, int atlasW, byte* atlasPtr, int channels)
         {
+            int rowBytes = bw * channels;
+            int atlasStride = atlasW * channels;
             fixed (byte* src = sdfPixels)
             {
                 for (int y = 0; y < bh; y++)
                 {
-                    int dstOffset = (packY + y) * atlasW + packX;
-                    Buffer.MemoryCopy(src + y * bw, atlasPtr + dstOffset, bw, bw);
+                    int dstOffset = (packY + y) * atlasStride + packX * channels;
+                    Buffer.MemoryCopy(src + y * rowBytes, atlasPtr + dstOffset, rowBytes, rowBytes);
                 }
             }
         }
@@ -826,7 +919,9 @@ namespace LightSide
 
         protected unsafe void CreateNewAtlasTexture()
         {
-            var texFormat = atlasRenderMode == UniTextRenderMode.SDF ? TextureFormat.Alpha8 : TextureFormat.RGBA32;
+            var texFormat = atlasRenderMode == UniTextRenderMode.SDF ? TextureFormat.Alpha8
+                : atlasRenderMode == UniTextRenderMode.Msdf ? TextureFormat.RGB24
+                : TextureFormat.RGBA32;
             var texture = new Texture2D(atlasSize, atlasSize, texFormat, false);
 
             var rawData = texture.GetRawTextureData<byte>();
