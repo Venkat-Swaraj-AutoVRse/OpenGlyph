@@ -64,6 +64,14 @@ unsafe class SdfDiag
                     // byte-per-pixel slope at edge ~= 127/spread; px offset ~= edge signed diff / slope
                     double slope = 127.0/spread; double pxOff = slope>0? eMean/slope : 0;
                     Console.WriteLine($"   signedMean={sMean:F2} edgeSignedMean={eMean:F2} slope={slope:F1}/px  => edgePxOffset~{pxOff:F3}px");
+                    // Empirical slope at the 128 crossing: |v[x+1]-v[x]| where the row crosses 128.
+                    var so=new System.Collections.Generic.List<double>(); var sn=new System.Collections.Generic.List<double>();
+                    for(int y=0;y<ors.bh;y++)for(int x=0;x<ors.bw-1;x++){
+                        int va=ob[y*pitchO+x],vb=ob[y*pitchO+x+1]; if((va-128)*(vb-128)<0) so.Add(Math.Abs(vb-va));
+                        int vc=nb[y*pitchN+x],vd=nb[y*pitchN+x+1]; if((vc-128)*(vd-128)<0) sn.Add(Math.Abs(vd-vc)); }
+                    so.Sort(); sn.Sort(); double mo=so.Count>0?so[so.Count/2]:0, mn=sn.Count>0?sn[sn.Count/2]:0;
+                    // byte value 3px inside/outside the first crossing on the center row
+                    Console.WriteLine($"   MEASURED slope@128 (median |dByte/px|): orig={mo:F1} new={mn:F1} ratio new/orig={(mo>0?mn/mo:0):F3}");
                     if (ch=='A') {
                         Console.WriteLine("   --- orig (>=128 = '#') ---");
                         for(int y=0;y<ors.bh;y+=2){var sb=new System.Text.StringBuilder("   ");for(int x=0;x<ors.bw;x+=2)sb.Append(ob[y*pitchO+x]>=128?'#':(ob[y*pitchO+x]>=64?'.':' '));Console.WriteLine(sb);}
