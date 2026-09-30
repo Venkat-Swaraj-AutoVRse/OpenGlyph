@@ -222,32 +222,28 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
         unsigned char* copy = (unsigned char*)malloc(sz);
         if (!copy) return 1;
         /* FreeType's SDF raster emits the buffer Y-flipped vs the original's EDT (top-down);
-         * flip rows back. The distance->byte mapping is left as FreeType's standard linear
-         * 128+(dist/spread)*127: the original was verified to be the SAME linear field (outside
-         * profile e.g. 123,111,96,80,64,48,32,16,0 = ~127/spread reaching 0 at +-spread px). An
-         * earlier k=1.4961 "slope steepen" was WRONG -- it matched a misleading peak crossing
-        /* FreeType's SDF raster emits the buffer Y-flipped vs the original's EDT (top-down);
          * flip rows back. FreeType's near-edge gradient is smoother than the original (hard-mask
-         * EDT): the original shows a ~5-7 byte discontinuity at the contour. Reproduce it WITHOUT
-         * touching reach: steepen ONLY the innermost band |v-128| <= B by gain G, then hand back to
-         * the linear tail at the band edge. B and gain are chosen so the straddle jump matches the
-         * original (~20-23) while values at |v-128|>B (hence the ±spread reach) are unchanged. */
-        const int B = 24;          /* band half-width in bytes (allows straddle jump up to ~2*B) */
-        const double G = 1.55;     /* near-edge gain (tuned: straddle jump ~21-22 = original) */
+         * EDT: a ~5-7 byte discontinuity at the contour). Reproduce it WITHOUT touching reach and
+         * WITHOUT a flat plateau, via a continuous, strictly-monotonic piecewise-linear remap of
+         * the signed distance d = v-128:
+         *   |d| <= a      : d * G                       (steep near-edge segment)
+         *   a < |d| <= B  : sign(d)*(G*a + (|d|-a)*s2)   (s2 = (B - G*a)/(B - a), meets identity at B)
+         *   |d| >  B      : d                           (linear tail -> +-spread reach unchanged)
+         * s2 >= 0.5 keeps it monotonic with no plateau; the knee at a sets the straddle jump. */
+        const double a = 8.0;      /* knee: steep segment half-width in bytes */
+        const double G = 1.55;     /* near-edge gain (straddle jump ~orig) */
+        const int    B = 24;       /* band edge where the curve rejoins identity */
+        const double s2 = (B - G*a) / (B - a);   /* = 0.725 for a=8,G=1.55,B=24 (>=0.5) */
         for (unsigned r = 0; r < b->rows; ++r) {
             const unsigned char* src = (const unsigned char*)b->buffer + (size_t)(b->rows-1-r)*pitch;
             unsigned char* dst = copy + (size_t)r*pitch;
             for (int c = 0; c < pitch; ++c) {
-                int v = src[c]; int d = v - 128;
-                if (d > -B && d < B) {                 /* inside the near-edge band: steepen */
-                    double nd = d * G;
-                    if (nd >  B) nd =  B;              /* saturate to band edge, not to 255 */
-                    if (nd < -B) nd = -B;
-                    int o = 128 + (int)(nd + (nd>=0?0.5:-0.5));
-                    dst[c] = (unsigned char)(o<0?0:(o>255?255:o));
-                } else {
-                    dst[c] = (unsigned char)v;         /* linear tail unchanged -> reach preserved */
-                }
+                int v = src[c]; double d = v - 128.0; double ad = d<0?-d:d; double nd;
+                if (ad <= a)        nd = d * G;
+                else if (ad <= B)   nd = (d<0?-1.0:1.0) * (G*a + (ad - a)*s2);
+                else                nd = d;                 /* identity tail: reach preserved */
+                int o = 128 + (int)(nd + (nd>=0?0.5:-0.5));
+                dst[c] = (unsigned char)(o<0?0:(o>255?255:o));
             }
         }
         out->bmpBuffer = copy;
