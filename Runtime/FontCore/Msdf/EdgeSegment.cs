@@ -46,6 +46,14 @@ namespace LightSide.Msdf
         /// <summary>Splits [0,1] into thirds for edge subdivision during coloring.</summary>
         public abstract void SplitInThirds(out EdgeSegment a, out EdgeSegment b, out EdgeSegment c);
 
+        /// <summary>
+        /// Returns a copy of this edge traversed in the opposite direction (endpoints and, for
+        /// Béziers, control points swapped), preserving <see cref="Color"/>. Reversing every edge
+        /// of a contour and reversing their order flips the contour's winding — the operation
+        /// <see cref="Shape.OrientContours"/> uses to make outline orientation consistent.
+        /// </summary>
+        public abstract EdgeSegment Reversed();
+
         public Vector2D Point0 { get; protected set; }
         public Vector2D Point1 { get; protected set; }
 
@@ -118,6 +126,8 @@ namespace LightSide.Msdf
             b = new LinearSegment(Point(1.0 / 3.0), Point(2.0 / 3.0), Color);
             c = new LinearSegment(Point(2.0 / 3.0), Point1, Color);
         }
+
+        public override EdgeSegment Reversed() => new LinearSegment(Point1, Point0, Color);
 
         private static double Sign(double n) => n > 0 ? 1 : (n < 0 ? -1 : 0);
     }
@@ -208,6 +218,8 @@ namespace LightSide.Msdf
                 Point(2.0 / 3.0), Color);
             c = new QuadraticSegment(Point(2.0 / 3.0), Lerp(_p1, Point1, 2.0 / 3.0), Point1, Color);
         }
+
+        public override EdgeSegment Reversed() => new QuadraticSegment(Point1, _p1, Point0, Color);
 
         private static Vector2D Lerp(Vector2D a, Vector2D b, double t) => a + (b - a) * t;
         private static double Sign(double n) => n > 0 ? 1 : (n < 0 ? -1 : 0);
@@ -323,6 +335,8 @@ namespace LightSide.Msdf
                 _p2 == Point1 ? Point1 : Lerp(_p2, Point1, 2.0 / 3.0),
                 Point1, Color);
         }
+
+        public override EdgeSegment Reversed() => new CubicSegment(Point1, _p2, _p1, Point0, Color);
 
         private static Vector2D Lerp(Vector2D a, Vector2D b, double t) => a + (b - a) * t;
         private static double Sign(double n) => n > 0 ? 1 : (n < 0 ? -1 : 0);
