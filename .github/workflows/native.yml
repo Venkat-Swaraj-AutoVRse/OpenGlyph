@@ -44,14 +44,16 @@ jobs:
         run: |
           $orig = "Plugins/Windows/x86_64/unitext_native.dll"
           Copy-Item $orig "$env:RUNNER_TEMP/unitext_native_orig.dll"
+          # Hard gate: parity must pass with 0 failures. The variable-font (mm_var /
+          # variations) checks need a REAL variable font — pass the tracked
+          # RobotoFlex-VF.ttf as the varFont arg. Defaults/ (static fonts) stays the
+          # fonts dir for the broad FT/HB/SDF/bitmap coverage. pwsh stops the job on a
+          # non-zero exit (dotnet run propagates the harness exit code).
           dotnet run -c Release --project "NativeSource~/tests/parity" -- `
             "$env:RUNNER_TEMP/unitext_native_orig.dll" `
-            "build/Release/unitext_native.dll" "Defaults" "Defaults/NotoSans-Regular.ttf"
-          # Soft gate: the harness reports a result and exits non-zero on the pre-existing
-          # mm_var (variations) checks that the committed baseline DLL also fails; those are
-          # not a regression (SDF/bitmap/raster parity is byte-identical). Do not fail CI on
-          # the harness exit code. `|| exit 0` is a bash idiom and errors in pwsh.
-          exit 0
+            "build/Release/unitext_native.dll" `
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
+          if ($LASTEXITCODE -ne 0) { throw "parity failed (exit $LASTEXITCODE)" }
       - name: Stage outputs
         shell: pwsh
         run: |
@@ -98,9 +100,13 @@ jobs:
         if: matrix.arch == 'x64'
         run: |
           cp Plugins/Linux/x86_64/libunitext_native.so "$RUNNER_TEMP/libunitext_native_orig.so"
+          # Hard gate: variable-font checks use the tracked RobotoFlex-VF.ttf; Defaults/
+          # stays the fonts dir for static coverage. No `|| true` — the job fails on a
+          # non-zero harness exit.
           dotnet run -c Release --project "NativeSource~/tests/parity" -- \
             "$RUNNER_TEMP/libunitext_native_orig.so" \
-            "build/libunitext_native.so" "Defaults" "Defaults/NotoSans-Regular.ttf" || true
+            "build/libunitext_native.so" \
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
       - name: Stage outputs
         run: |
           D=$([ "${{ matrix.arch }}" = "x64" ] && echo Linux/x86_64 || echo Linux/ARM64)
@@ -142,9 +148,12 @@ jobs:
       - name: Parity (arm64 runner executes the arm64 slice)
         run: |
           cp Plugins/macOS/libunitext_native.dylib "$RUNNER_TEMP/orig.dylib"
+          # Hard gate: variable-font checks use the tracked RobotoFlex-VF.ttf; Defaults/
+          # stays the fonts dir for static coverage. No `|| true` — the job fails on a
+          # non-zero harness exit.
           dotnet run -c Release --project "NativeSource~/tests/parity" -- \
             "$RUNNER_TEMP/orig.dylib" "build-arm64/libunitext_native.dylib" \
-            "Defaults" "Defaults/NotoSans-Regular.ttf" || true
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
       - name: Lipo universal + stage outputs
         run: |
           mkdir -p out/macOS

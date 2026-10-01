@@ -36,3 +36,7 @@ NativeSource~/tests/obj/
 NativeSource~/tests/fonts/*.ttf
 NativeSource~/tests/fonts/*.otf
 !NativeSource~/tests/fonts/OFL.txt
+# RobotoFlex-VF is the variable font the parity harness needs for the mm_var /
+# variations checks. Track it so CI has a real variable font without a network
+# fetch (OFL, license text tracked above). Other fetched fonts stay ignored.
+!NativeSource~/tests/fonts/RobotoFlex-VF.ttf
