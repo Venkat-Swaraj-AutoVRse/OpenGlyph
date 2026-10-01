@@ -234,6 +234,45 @@ namespace LightSide
         private FontStyleSpec SpecAt(int i) =>
             (perCpSpec != null && i < perCpSpec.Length) ? perCpSpec[i] : baseStyleSpec;
 
+        // Phase 2: write the effective bold/italic request (markup flags OR a styled spec) into the
+        // SAME AttributeKeys.Bold/Italic byte buffers the modifiers read, so the component-property
+        // path triggers synthetic bold/italic exactly like <b>/<i>. The suppression in
+        // BoldModifier/ItalicModifier (realBold/realItalic runs skipped) keeps a real face from being
+        // double-styled, so this is a single source of truth with no double application.
+        private void PopulateStyleAttributeBuffers()
+        {
+            if (!styleActive) return;
+            var cpCount = buf.codepoints.count;
+            if (cpCount == 0) return;
+
+            bool anyBold = false, anyItalic = false;
+            for (int i = 0; i < cpCount; i++)
+            {
+                var spec = SpecAt(i);
+                if (BoldAt(i) || spec.weight >= FontStyleSpec.BoldWeight) anyBold = true;
+                if (ItalicAt(i) || spec.style != StyleAxis.Normal) anyItalic = true;
+            }
+
+            if (anyBold)
+            {
+                var attr = buf.GetOrCreateAttributeData<PooledArrayAttribute<byte>>(AttributeKeys.Bold);
+                if (attr.buffer.data == null || attr.buffer.data.Length < cpCount)
+                    attr.EnsureCountAndClear(cpCount);
+                var data = attr.buffer.data;
+                for (int i = 0; i < cpCount && i < data.Length; i++)
+                    if (BoldAt(i) || SpecAt(i).weight >= FontStyleSpec.BoldWeight) data[i] = 1; // OR-in; never clears markup flags
+            }
+            if (anyItalic)
+            {
+                var attr = buf.GetOrCreateAttributeData<PooledArrayAttribute<byte>>(AttributeKeys.Italic);
+                if (attr.buffer.data == null || attr.buffer.data.Length < cpCount)
+                    attr.EnsureCountAndClear(cpCount);
+                var data = attr.buffer.data;
+                for (int i = 0; i < cpCount && i < data.Length; i++)
+                    if (ItalicAt(i) || SpecAt(i).style != StyleAxis.Normal) data[i] = 1;
+            }
+        }
+
 
         private bool hasValidFirstPassData;
         private bool hasValidGlyphsInAtlas;
@@ -564,6 +603,13 @@ namespace LightSide
             UniTextDebug.BeginSample("TextProcessor.Shape");
             Shape();
             UniTextDebug.EndSample();
+
+            // Phase 2: bridge the style source (component weight/width/style + bold/italic flags) to
+            // the SAME per-codepoint AttributeKeys.Bold/Italic buffers that <b>/<i> markup populates,
+            // so UniText's synthetic BoldModifier/ItalicModifier fire for the PROPERTY path too. The
+            // modifiers already skip runs resolved to a REAL face (realBold/realItalic), so on a family
+            // WITH the face this is a no-op and on a Regular-only family it synthesizes -- one code path.
+            PopulateStyleAttributeBuffers();
 
             UniTextDebug.BeginSample("TextProcessor.Shaped?.Invoke()");
             Shaped?.Invoke();
