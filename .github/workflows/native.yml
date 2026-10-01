@@ -625,6 +625,53 @@ jobs:
             echo "SYMBOL COUNT FAIL"; exit 1
           fi
 
+  # ---------------------------------------------------------------- MSDF parity vs msdfgen v1.12
+  # Permanent per-texel parity test of OpenGlyph's managed MSDF pipeline against upstream msdfgen
+  # v1.12 (85e8b3d, MIT). Linux-only (one runner is enough — the field math is pure managed +
+  # msdfgen core, no per-OS native field code), path-filtered like the rest.
+  #
+  # msdfref (C++) fetches msdfgen core at the pinned tag via FetchContent and acts as the field
+  # oracle; glyphref (.NET) exports OpenGlyph's real FreeType outlines through the live managed
+  # Runtime/FontCore/Msdf code, generates OpenGlyph's RAW+CORRECTED fields, serialises the
+  # identical coloured shape for msdfref, and compares per texel. glyphref returns non-zero when
+  # any glyph's RAW field exceeds 1e-4 per channel or its per-edge colours differ from msdfgen's.
+  msdfref:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Build msdfref (fetches msdfgen 85e8b3d, core only)
+        run: |
+          cmake -S "NativeSource~/tests/msdfref" -B msdfref-build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build msdfref-build
+      - name: Build glyphref (.NET harness over live Msdf sources)
+        run: dotnet build -c Release "NativeSource~/tests/msdfref/glyphref" -o glyphref-bin
+      - name: Run MSDF parity (ppem 64, spread 6; gates RAW within 1e-4 + colours equal)
+        run: |
+          set -euo pipefail
+          # Use the committed Linux x64 runtime .so as the FreeType outline source (same binary the
+          # package ships; the outline export is OS-independent). Default font is NotoSans-Regular,
+          # the font the W-streak gate uses.
+          dotnet glyphref-bin/glyphref.dll \
+            "Plugins/Linux/x86_64/libunitext_native.so" \
+            "Defaults/NotoSans-Regular.ttf" \
+            "msdfref-build/msdfref" \
+            "$RUNNER_TEMP/msdf-parity"
+          echo "=== parity results ==="
+          cat "$RUNNER_TEMP/msdf-parity/PARITY_RESULTS_MSDF.md"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: msdf-parity
+          path: ${{ runner.temp }}/msdf-parity/
+
   # ---------------------------------------------------------------- Assemble Plugins/ tree
   assemble:
     needs: [windows, linux, macos, android, apple_embedded, webgl]

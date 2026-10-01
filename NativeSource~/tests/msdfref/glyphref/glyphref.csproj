@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    glyphref — exports OpenGlyph's REAL FreeType outlines (via the native ut_ft_* exports) at
+    ppem 64, frames + colours them with the project's own managed Runtime/FontCore/Msdf code,
+    generates OpenGlyph's MSDF field (raw + error-corrected), serialises the identical coloured
+    shape to an msdfgen shape-description file for msdfref, invokes msdfref to obtain upstream
+    msdfgen's field at identical framing, and compares PER TEXEL. It is the managed half of the
+    permanent MSDF-parity test (the C++ half is NativeSource~/tests/msdfref).
+
+    It compiles the project's pure-geometry MSDF sources DIRECTLY (they carry no Unity dependency),
+    so the comparison runs the exact production field code, not a copy.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>glyphref</AssemblyName>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <!-- The project MSDF sources use default(T) struct returns etc.; no implicit usings to avoid
+         clashing with the project's own namespaces. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- Production MSDF geometry + generator + the error-correction stage under test. Pulled in
+         by relative path from the package Runtime so this harness always measures the live code.
+         Depth: glyphref → msdfref → tests → NativeSource~ → repo root (4 levels). -->
+    <Compile Include="../../../../Runtime/FontCore/Msdf/Vector2D.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/EdgeSegment.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/EdgeColoring.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/Shape.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/GlyphOutline.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfGenerator.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfErrorCorrection.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfBuilder.cs" />
+  </ItemGroup>
+</Project>
