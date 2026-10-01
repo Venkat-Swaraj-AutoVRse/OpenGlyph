@@ -38,22 +38,6 @@ jobs:
           -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON
       - name: Build
         run: cmake --build build --config Release
-      - name: Parity (x64 only; ARM64 cannot execute on x64 runner)
-        if: matrix.arch == 'x64'
-        shell: pwsh
-        run: |
-          $orig = "Plugins/Windows/x86_64/unitext_native.dll"
-          Copy-Item $orig "$env:RUNNER_TEMP/unitext_native_orig.dll"
-          # Hard gate: parity must pass with 0 failures. The variable-font (mm_var /
-          # variations) checks need a REAL variable font — pass the tracked
-          # RobotoFlex-VF.ttf as the varFont arg. Defaults/ (static fonts) stays the
-          # fonts dir for the broad FT/HB/SDF/bitmap coverage. pwsh stops the job on a
-          # non-zero exit (dotnet run propagates the harness exit code).
-          dotnet run -c Release --project "NativeSource~/tests/parity" -- `
-            "$env:RUNNER_TEMP/unitext_native_orig.dll" `
-            "build/Release/unitext_native.dll" `
-            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
-          if ($LASTEXITCODE -ne 0) { throw "parity failed (exit $LASTEXITCODE)" }
       - name: Stage outputs
         shell: pwsh
         run: |
@@ -65,6 +49,26 @@ jobs:
         with:
           name: native-windows-${{ matrix.arch }}
           path: out/
+      - name: Parity (x64 only; ARM64 cannot execute on x64 runner)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $orig = "Plugins/Windows/x86_64/unitext_native.dll"
+          Copy-Item $orig "$env:RUNNER_TEMP/unitext_native_orig.dll"
+          # Build-then-run (same pattern on all three OSes): build the harness, then run the
+          # built parity.dll with `dotnet <dll>` so no per-arch apphost is launched.
+          dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$env:RUNNER_TEMP/parity-bin"
+          # Hard gate: parity compares the committed Plugins/ binary (the accepted rebuilt
+          # baseline) against the freshly built DLL and must pass with 0 failures. The
+          # variable-font (mm_var / variations) checks need a REAL variable font — pass the
+          # tracked RobotoFlex-VF.ttf as the varFont arg. Defaults/ (static fonts) stays the
+          # fonts dir for the broad FT/HB/SDF/bitmap coverage. pwsh stops the job on a non-zero
+          # exit (the harness returns the failure count's sign via exit code 1).
+          dotnet "$env:RUNNER_TEMP/parity-bin/parity.dll" `
+            "$env:RUNNER_TEMP/unitext_native_orig.dll" `
+            "build/Release/unitext_native.dll" `
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
+          if ($LASTEXITCODE -ne 0) { throw "parity failed (exit $LASTEXITCODE)" }
 
   # ---------------------------------------------------------------- Linux x64 / ARM64
   linux:
@@ -96,17 +100,6 @@ jobs:
             -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON $EXTRA
       - name: Build
         run: cmake --build build
-      - name: Parity (native x64 only)
-        if: matrix.arch == 'x64'
-        run: |
-          cp Plugins/Linux/x86_64/libunitext_native.so "$RUNNER_TEMP/libunitext_native_orig.so"
-          # Hard gate: variable-font checks use the tracked RobotoFlex-VF.ttf; Defaults/
-          # stays the fonts dir for static coverage. No `|| true` — the job fails on a
-          # non-zero harness exit.
-          dotnet run -c Release --project "NativeSource~/tests/parity" -- \
-            "$RUNNER_TEMP/libunitext_native_orig.so" \
-            "build/libunitext_native.so" \
-            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
       - name: Stage outputs
         run: |
           D=$([ "${{ matrix.arch }}" = "x64" ] && echo Linux/x86_64 || echo Linux/ARM64)
@@ -117,6 +110,23 @@ jobs:
         with:
           name: native-linux-${{ matrix.arch }}
           path: out/
+      - name: Parity (native x64 only)
+        if: matrix.arch == 'x64'
+        run: |
+          cp Plugins/Linux/x86_64/libunitext_native.so "$RUNNER_TEMP/libunitext_native_orig.so"
+          # Build-then-run (same pattern on all three OSes): build the harness, then run the
+          # built parity.dll with `dotnet <dll>` so no per-arch apphost is launched.
+          dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$RUNNER_TEMP/parity-bin"
+          # Hard gate: parity compares the committed Plugins/ binary (the accepted rebuilt
+          # baseline) against the freshly built .so and must pass with 0 failures. Variable-font
+          # checks use the tracked RobotoFlex-VF.ttf; Defaults/ stays the fonts dir for static
+          # coverage. No `|| true` — the job fails on a non-zero harness exit (bash -e + the
+          # explicit check below).
+          dotnet "$RUNNER_TEMP/parity-bin/parity.dll" \
+            "$RUNNER_TEMP/libunitext_native_orig.so" \
+            "build/libunitext_native.so" \
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
+          rc=$?; if [ $rc -ne 0 ]; then echo "parity failed (exit $rc)"; exit $rc; fi
 
   # ---------------------------------------------------------------- macOS universal
   # Built as TWO single-arch passes then lipo'd. Blend2D's JIT + embedded asmjit arch
@@ -145,15 +155,6 @@ jobs:
             -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON \
             "-DCMAKE_OSX_ARCHITECTURES=x86_64"
           cmake --build build-x64
-      - name: Parity (arm64 runner executes the arm64 slice)
-        run: |
-          cp Plugins/macOS/libunitext_native.dylib "$RUNNER_TEMP/orig.dylib"
-          # Hard gate: variable-font checks use the tracked RobotoFlex-VF.ttf; Defaults/
-          # stays the fonts dir for static coverage. No `|| true` — the job fails on a
-          # non-zero harness exit.
-          dotnet run -c Release --project "NativeSource~/tests/parity" -- \
-            "$RUNNER_TEMP/orig.dylib" "build-arm64/libunitext_native.dylib" \
-            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
       - name: Lipo universal + stage outputs
         run: |
           mkdir -p out/macOS
@@ -170,6 +171,22 @@ jobs:
         with:
           name: native-macos
           path: out/
+      - name: Parity (arm64 runner executes the arm64 slice)
+        run: |
+          cp Plugins/macOS/libunitext_native.dylib "$RUNNER_TEMP/orig.dylib"
+          # Build-then-run (same pattern on all three OSes): build the harness, then run the
+          # built parity.dll with `dotnet <dll>`. The csproj is AnyCPU, so parity.dll loads
+          # under the arm64 runner's .NET host (the old x64-pinned `dotnet run` apphost raised
+          # System.IO.FileLoadException 'parity', exit 134, and never ran a single check).
+          dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$RUNNER_TEMP/parity-bin"
+          # Hard gate: parity compares the committed Plugins/ binary (the accepted rebuilt
+          # baseline) against the freshly built arm64 .dylib and must pass with 0 failures.
+          # Variable-font checks use the tracked RobotoFlex-VF.ttf; Defaults/ stays the fonts
+          # dir for static coverage. No `|| true` — the job fails on a non-zero harness exit.
+          dotnet "$RUNNER_TEMP/parity-bin/parity.dll" \
+            "$RUNNER_TEMP/orig.dylib" "build-arm64/libunitext_native.dylib" \
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
+          rc=$?; if [ $rc -ne 0 ]; then echo "parity failed (exit $rc)"; exit $rc; fi
 
   # ---------------------------------------------------------------- Android (4 ABIs)
   android:
