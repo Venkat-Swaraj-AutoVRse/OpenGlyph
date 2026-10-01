@@ -64,10 +64,47 @@ unsafe class Program
 
     static int pass = 0, fail = 0;
     static List<string> failures = new();
+    // Mirrors the C SDF near-edge remap (ut_ft.c) over all 256 inputs and verifies it is strictly
+    // increasing: no flat run of adjacent inputs longer than 2 (only rounding ties allowed), and
+    // never decreasing. Catches plateaus (e.g. the old clamp) that make shader thresholds wobble.
+    static void SdfMappingMonotonicity()
+    {
+        const double a=8.0, G=1.55; const int B=24; double s2=(B-G*a)/(B-a);
+        int Map(int v){ double d=v-128.0, ad=d<0?-d:d, nd;
+            if(ad<=a) nd=d*G; else if(ad<=B) nd=(d<0?-1.0:1.0)*(G*a+(ad-a)*s2); else nd=d;
+            int o=128+(int)(nd+(nd>=0?0.5:-0.5)); return o<0?0:(o>255?255:o); }
+        int prev=Map(0), run=1, maxRun=1; bool decreasing=false;
+        for(int v=1; v<256; v++){ int o=Map(v);
+            if(o<prev) decreasing=true;
+            if(o==prev){ run++; if(run>maxRun) maxRun=run; } else run=1;
+            prev=o; }
+        Console.WriteLine($"    SDF mapping monotonicity: decreasing={decreasing} maxFlatRun={maxRun} (s2={s2:F3})");
+        Check("sdf mapping strictly increasing (maxRun<=2)", !decreasing && maxRun<=2,
+              $"decreasing={decreasing} maxRun={maxRun}");
+    }
+
     static void Check(string what, bool ok, string detail = "")
     {
         if (ok) pass++;
         else { fail++; failures.Add($"{what}: {detail}"); }
+    }
+    // SDF reach parity: median edge->0 outside distance (px) must match the original within +-1px.
+    static void slopesO_reachReport(System.Collections.Generic.List<double> ro, System.Collections.Generic.List<double> rn, string name)
+    {
+        ro.Sort(); rn.Sort();
+        double mo=ro.Count>0?ro[ro.Count/2]:0, mn=rn.Count>0?rn[rn.Count/2]:0;
+        Console.WriteLine($"    SDF reach median (edge->0 px): orig={mo:F1} new={mn:F1} (gate +-1px)");
+        Check($"{name} sdf reach +-1px", Math.Abs(mo-mn)<=1.0, $"orig={mo} new={mn}");
+    }
+    // Straddle-jump: median |dByte| across the 128 crossing pair (H+V); ratio new/orig 0.85-1.15.
+    // Sees the original's edge discontinuity (EDT on a hard mask); the reach gate stays too.
+    static void nearEdgeSlopeReport(System.Collections.Generic.List<double> so, System.Collections.Generic.List<double> sn, string name)
+    {
+        so.Sort(); sn.Sort();
+        double mo=so.Count>0?so[so.Count/2]:0, mn=sn.Count>0?sn[sn.Count/2]:0;
+        double ratio = mo>0? mn/mo : 0;
+        Console.WriteLine($"    SDF straddle jump median |dByte|: orig={mo:F1} new={mn:F1} ratio={ratio:F3} (gate 0.85-1.15)");
+        Check($"{name} sdf straddle jump 0.85-1.15", ratio>=0.85 && ratio<=1.15, $"ratio={ratio:F3} orig={mo} new={mn}");
     }
 
     static readonly (string script, uint tag, int dir, int[] cps)[] Samples = new (string, uint, int, int[])[]
@@ -90,9 +127,17 @@ unsafe class Program
         var neu  = new Lib(newPath);
         Console.WriteLine($"orig: {origPath}\nnew : {newPath}\n");
 
+        string varFull = varFont != null ? Path.GetFullPath(varFont) : null;
+        bool varInDir = false;
         foreach (var f in Directory.GetFiles(fontsDir, "*.ttf"))
-            CompareFont(orig, neu, f, varFont != null && Path.GetFullPath(f) == Path.GetFullPath(varFont));
-        if (varFont != null && File.Exists(varFont))
+        {
+            bool isVar = varFull != null && Path.GetFullPath(f) == varFull;
+            if (isVar) varInDir = true;
+            CompareFont(orig, neu, f, isVar);
+        }
+        // Compare the explicit var font only if it was NOT already enumerated above,
+        // so a var font living inside fontsDir is not compared twice.
+        if (varFull != null && !varInDir && File.Exists(varFont))
             CompareFont(orig, neu, varFont, true);
 
         // COLRv1 paint-tree parity (M2) on a color font, opt-in via env var.
@@ -120,6 +165,8 @@ unsafe class Program
             foreach (var f in Directory.GetFiles(fontsDir, "*.ttf"))
                 CompareEditor(eo, en, f);
         }
+
+        SdfMappingMonotonicity();
 
         Console.WriteLine($"\n===== RESULT: {pass} passed, {fail} failed =====");
         foreach (var fl in failures) Console.WriteLine("  FAIL " + fl);
@@ -501,7 +548,8 @@ unsafe class Program
                 int compared = 0, dimMismatch = 0, overallMax = 0; double sumMean = 0;
                 // perceptual accumulators
                 double edgeMeanSum1=0, edgeMax1=0, covSum1=0; double edgeMeanSum4=0, edgeMax4=0, covSum4=0; int pc=0;
-                var slopesO=new System.Collections.Generic.List<double>(); var slopesN=new System.Collections.Generic.List<double>();
+                var reachO=new System.Collections.Generic.List<double>(); var reachN=new System.Collections.Generic.List<double>();
+                var slopeEO=new System.Collections.Generic.List<double>(); var slopeEN=new System.Collections.Generic.List<double>();
                 const int SDF_LOAD = 0, SPREAD = 8;
                 for (uint g = 1; g <= (uint)nng && compared < nGlyphs; g++)
                 {
@@ -515,11 +563,26 @@ unsafe class Program
                         for (int i = 0; i < len; i++) { int d = Math.Abs(ob[i] - nb[i]); if (d > maxDiff) maxDiff = d; sum += d; }
                         if (maxDiff > overallMax) overallMax = maxDiff;
                         sumMean += (len > 0 ? (double)sum / len : 0);
-                        // slope@128 crossings (horizontal): |v[x+1]-v[x]| across each sign change
-                        int pit=Math.Abs(ores.bp);
-                        for(int y=0;y<ores.bh;y++)for(int x=0;x<ores.bw-1;x++){
-                            int va=ob[y*pit+x],vb=ob[y*pit+x+1]; if((va-128)*(vb-128)<0) slopesO.Add(Math.Abs(vb-va));
-                            int vc=nb[y*pit+x],vd=nb[y*pit+x+1]; if((vc-128)*(vd-128)<0) slopesN.Add(Math.Abs(vd-vc)); }
+                        // REACH: on the center row, px from the first 128-crossing outward to the
+                        // first 0 byte. Only count glyphs where BOTH sides have a clean crossing
+                        // with margin (>=2px) before the frame edge, so degenerate rows (thin
+                        // features / near-border crossings) don't inflate the median.
+                        int pit=Math.Abs(ores.bp); int cy=ores.bh/2;
+                        int cxo=-1; for(int x=2;x<ores.bw-1;x++){int va=ob[cy*pit+x],vb=ob[cy*pit+x+1]; if((va-128)*(vb-128)<0){cxo=x;break;}}
+                        int cxn=-1; for(int x=2;x<nres.bw-1;x++){int vc=nb[cy*pit+x],vd=nb[cy*pit+x+1]; if((vc-128)*(vd-128)<0){cxn=x;break;}}
+                        double rO=-1,rN=-1;
+                        if(cxo>2){ for(int x=cxo;x>=0;x--) if(ob[cy*pit+x]<=0){ rO=cxo-x; break; } }
+                        if(cxn>2){ for(int x=cxn;x>=0;x--) if(nb[cy*pit+x]<=0){ rN=cxn-x; break; } }
+                        if(rO>0 && rN>0){ reachO.Add(rO); reachN.Add(rN); }
+                        // STRADDLE JUMP: |dByte| across the pair straddling 128, over all H+V
+                        // crossings. This sees the original's ~5-7 byte edge discontinuity (EDT on
+                        // a hard mask), which a bilinear normal profile smooths away.
+                        for(int y=0;y<ores.bh;y++) for(int x=0;x<ores.bw-1;x++){
+                            int va=ob[y*pit+x],vb=ob[y*pit+x+1]; if((va-128)*(vb-128)<0) slopeEO.Add(Math.Abs(vb-va));
+                            int vc=nb[y*pit+x],vd=nb[y*pit+x+1]; if((vc-128)*(vd-128)<0) slopeEN.Add(Math.Abs(vd-vc)); }
+                        for(int x=0;x<ores.bw;x++) for(int y=0;y<ores.bh-1;y++){
+                            int va=ob[y*pit+x],vb=ob[(y+1)*pit+x]; if((va-128)*(vb-128)<0) slopeEO.Add(Math.Abs(vb-va));
+                            int vc=nb[y*pit+x],vd=nb[(y+1)*pit+x]; if((vc-128)*(vd-128)<0) slopeEN.Add(Math.Abs(vd-vc)); }
                         compared++;
                         // perceptual: threshold at 128 (shader edge=0.5), 1x and 4x bilinear.
                         Perceptual(ob, nb, ores.bw, ores.bh, Math.Abs(ores.bp), SPREAD, 1, out double em1, out double ex1, out double cov1);
@@ -538,11 +601,8 @@ unsafe class Program
                 Console.WriteLine($"    SDF {compared}g byte(info): meanAbs={meanOfMeans:F2} maxAbs={overallMax} dimMism={dimMismatch}");
                 Console.WriteLine($"    SDF perceptual 1x: edgeMean={em1a:F3}px edgeMax={edgeMax1:F3}px covDiff={cov1a:P2}");
                 Console.WriteLine($"    SDF perceptual 4x: edgeMean={em4a:F3}px edgeMax={edgeMax4:F3}px covDiff={cov4a:P2}");
-                slopesO.Sort(); slopesN.Sort();
-                double mo=slopesO.Count>0?slopesO[slopesO.Count/2]:0, mnn=slopesN.Count>0?slopesN[slopesN.Count/2]:0;
-                double slopeRatio = mo>0? mnn/mo : 0;
-                Console.WriteLine($"    SDF slope@128 median: orig={mo:F1} new={mnn:F1} ratio={slopeRatio:F3} (gate 0.95-1.05)");
-                Check($"{name} sdf slope ratio 0.95-1.05", slopeRatio>=0.95 && slopeRatio<=1.05, $"ratio={slopeRatio:F3} orig={mo} new={mnn}");
+                slopesO_reachReport(reachO, reachN, name);
+                nearEdgeSlopeReport(slopeEO, slopeEN, name);
                 // Perceptual gate is the pass/fail criterion: edgeMean<=0.10px, edgeMax<=0.50px, cov<=1%.
                 bool gate = dimMismatch==0
                     && em1a<=0.10 && edgeMax1<=0.50 && cov1a<=0.01

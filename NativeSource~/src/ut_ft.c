@@ -181,16 +181,33 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
     out->metricBearingY = (int)m->horiBearingY;
     out->metricAdvanceX = (int)m->horiAdvance;
 
-    /* The original computes the SDF from a rendered GRAYSCALE bitmap via a Euclidean
-     * Distance Transform. FreeType offers two routes; select via OPENGLYPH_SDF_MODE for
-     * A/B parity testing ("outline" = FT 'sdf' module on the outline; default/"bsdf" =
-     * render NORMAL then FT 'bsdf' bitmap-EDT). */
-    /* The original computes the SDF from a rendered GRAYSCALE bitmap. Reproduce with
-     * FreeType's bitmap-EDT ('bsdf'): render NORMAL first (slot -> FT_GLYPH_FORMAT_BITMAP),
-     * then FT_RENDER_MODE_SDF routes through 'bsdf'. The result is then Y-flipped below to
-     * match the original's top-down orientation. */
-    err = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
-    if (!err) err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+    /* SDF renderer variants (OPENGLYPH_SDF_MODE):
+     *   bsdf   (default): render NORMAL (AA gray) then SDF -> bsdf bitmap-EDT (smooth near edge)
+     *   mono   : render MONO (1-bit hard mask) then SDF -> EDT on a hard mask (edge discontinuity)
+     *   thresh : render NORMAL then binarize @128 in place, then SDF (hard mask, gray container)
+     *   outline: SDF on the outline directly ('sdf' module)
+     * The original shows a ~5-7 byte straddle-jump at the contour = EDT on a HARD mask; mono/thresh
+     * reproduce that, bsdf/outline do not. */
+    {
+        const char* mode = getenv("OPENGLYPH_SDF_MODE");
+        if (mode && mode[0]=='o') {                 /* outline */
+            err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+        } else if (mode && mode[0]=='m') {          /* mono -> sdf */
+            err = FT_Render_Glyph(slot, FT_RENDER_MODE_MONO);
+            if (!err) err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+        } else if (mode && mode[0]=='t') {          /* NORMAL, binarize @128 (hard mask), SDF */
+            err = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
+            if (!err && slot->bitmap.pixel_mode == FT_PIXEL_MODE_GRAY && slot->bitmap.buffer) {
+                FT_Bitmap* g = &slot->bitmap; int gp = g->pitch<0?-g->pitch:g->pitch;
+                for (unsigned yy=0; yy<g->rows; ++yy) for (unsigned xx=0; xx<g->width; ++xx)
+                    g->buffer[yy*gp+xx] = (g->buffer[yy*gp+xx] >= 128) ? 255 : 0;
+            }
+            if (!err) err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+        } else {                                    /* bsdf (default): AA-smooth curves */
+            err = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
+            if (!err) err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
+        }
+    }
     if (err) return (int)err;
 
     FT_Bitmap* b = &slot->bitmap;
@@ -204,19 +221,29 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
     if (sz > 0 && b->buffer) {
         unsigned char* copy = (unsigned char*)malloc(sz);
         if (!copy) return 1;
-        /* FreeType's SDF raster emits the buffer Y-flipped vs the original's EDT (top-down).
-         * Also, FreeType maps distance to bytes as 128+(dist/spread)*127 (slope ~127/spread),
-         * but the original uses a STEEPER distance->byte curve (measured slope ~190/spread), so
-         * FreeType text renders softer. Correct the slope by remapping around the 128 midpoint:
-         * v -> clamp(128 + (v-128)*k). Default k ~= 190/127; env-overridable for tuning. */
-        double k = 1.4961; const char* e = getenv("OPENGLYPH_SDF_SLOPE"); if (e) k = atof(e);
+        /* FreeType's SDF raster emits the buffer Y-flipped vs the original's EDT (top-down);
+         * flip rows back. FreeType's near-edge gradient is smoother than the original (hard-mask
+         * EDT: a ~5-7 byte discontinuity at the contour). Reproduce it WITHOUT touching reach and
+         * WITHOUT a flat plateau, via a continuous, strictly-monotonic piecewise-linear remap of
+         * the signed distance d = v-128:
+         *   |d| <= a      : d * G                       (steep near-edge segment)
+         *   a < |d| <= B  : sign(d)*(G*a + (|d|-a)*s2)   (s2 = (B - G*a)/(B - a), meets identity at B)
+         *   |d| >  B      : d                           (linear tail -> +-spread reach unchanged)
+         * s2 >= 0.5 keeps it monotonic with no plateau; the knee at a sets the straddle jump. */
+        const double a = 8.0;      /* knee: steep segment half-width in bytes */
+        const double G = 1.55;     /* near-edge gain (straddle jump ~orig) */
+        const int    B = 24;       /* band edge where the curve rejoins identity */
+        const double s2 = (B - G*a) / (B - a);   /* = 0.725 for a=8,G=1.55,B=24 (>=0.5) */
         for (unsigned r = 0; r < b->rows; ++r) {
             const unsigned char* src = (const unsigned char*)b->buffer + (size_t)(b->rows-1-r)*pitch;
             unsigned char* dst = copy + (size_t)r*pitch;
             for (int c = 0; c < pitch; ++c) {
-                double v = 128.0 + (src[c]-128.0)*k;
-                if (v<0) v=0; if (v>255) v=255;
-                dst[c] = (unsigned char)(v+0.5);
+                int v = src[c]; double d = v - 128.0; double ad = d<0?-d:d; double nd;
+                if (ad <= a)        nd = d * G;
+                else if (ad <= B)   nd = (d<0?-1.0:1.0) * (G*a + (ad - a)*s2);
+                else                nd = d;                 /* identity tail: reach preserved */
+                int o = 128 + (int)(nd + (nd>=0?0.5:-0.5));
+                dst[c] = (unsigned char)(o<0?0:(o>255?255:o));
             }
         }
         out->bmpBuffer = copy;

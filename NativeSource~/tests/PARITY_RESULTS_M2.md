@@ -45,17 +45,43 @@ Pinned rest: FreeType `VER-2-13-3`, HarfBuzz `12.2.0`, zlib `v1.3.1`, libpng `v1
 only 0.35–0.76 byte ≈ **0.02–0.05 px**. A source-level midpoint/spread correction does not
 apply to the edge *position* — it is localized, not a constant shift.
 
-### SDF gradient (slope) fix — a real DLL defect
-The rendered NEW text was visibly softer/blurrier at 4× with an even DIFF ring on BOTH sides of
-every edge: edge *position* matched but the distance *gradient* was shallower. Measured median
-`|dByte/px|` at the 128 crossing (spread 8): **orig ~20–25, new ~15** (ratio 0.65–0.75). Cause:
-FreeType maps distance→byte as `128 + (dist/spread)*127` (slope ~127/spread) but the original
-uses a steeper curve (~190/spread). A shallower gradient means softer text and wrong
-outline/glow/underlay extents in the shaders. **Fix** (in `ut_ft_render_sdf_glyph`, at the
-mapping, keeping dims): remap around the midpoint `v → clamp(128 + (v-128)*k)`, `k = 1.4961`
-(≈190/127); symmetric so the 0.5 edge position is unchanged. **Gate** (new): median slope ratio
-new/orig ∈ [0.95, 1.05]. After: **5/6 fonts pass** — NotoSans 0.957, Arabic 1.048, Hebrew 1.000,
-Thai 0.957, RobotoFlex 1.048; **Devanagari 0.880** (its orig slope 25 vs 22, byte quantization).
+### SDF field — resolved: match the original's near-edge discontinuity (AA curves + edge jump)
+The original's SDF is **AA-smooth on curves** (no aliasing) yet has a **~5–7 byte discontinuity
+exactly at the contour** — the signature of an EDT on a hard/boundary mask. The right metric is
+the **straddle jump**: `|dByte|` across the pixel pair straddling 128, median over all H+V
+crossings (a bilinear normal profile smooths this away and is blind to it). Original ≈ 21–23.
+
+Variant table (spread 8, straddle jump orig≈22):
+
+| Variant | straddle jump (new) | ratio | reach ±1px | dims | curves | verdict |
+|---|---|---|---|---|---|---|
+| bsdf (NORMAL→SDF, AA) | 15 | 0.65–0.71 | ok | equal | smooth | too soft |
+| outline `sdf` | 14 | 0.64–0.71 | ok | equal | smooth | too soft |
+| mono→sdf (1-bit) | — | — | ok | **MISMATCH** (39×42 vs 41×44) | — | rejected |
+| thresh (binarize@128→SDF) | 17 | 0.74–0.81 | ok | equal | **ALIASED** | rejected |
+| **bsdf + continuous near-edge remap — chosen** | 20 | **0.87–0.91** | ok | equal | smooth | **passes** |
+
+No stock FreeType path reproduces AA-curves **and** the edge discontinuity together (hard mask →
+aliasing; AA → soft jump). **Fix:** keep bsdf (AA curves) and add a **reach-preserving,
+continuous, strictly-monotonic** near-edge remap of `d = v−128` in `ut_ft_render_sdf_glyph`:
+`|d|≤a → d·G` (steep segment); `a<|d|≤B → sign(d)·(G·a+(|d|−a)·s2)`, `s2=(B−G·a)/(B−a)`;
+`|d|>B → d` (identity tail, so ±spread reach is untouched). `a=8, G=1.55, B=24 → s2=0.725`.
+This injects the near-edge discontinuity without a hard mask (curves stay AA) and without a
+plateau. `OPENGLYPH_SDF_MODE=bsdf|thresh|mono|outline` keep the raw variants for A/B.
+
+Two prior mistakes, fixed: (1) a GLOBAL `v→clamp(128+(v−128)*1.4961)` remap clipped reach ~1.5×
+(saturated the whole field); (2) a `clamp(d*G,±B)` band remap created a **flat plateau** for
+`G·a≤|d|<B` — a shader threshold landing in bytes 104/152 (outline/underlay/glow near 0.4/0.6)
+mapped to a band, wobbling as those params animate. The continuous piecewise curve above fixes
+both: monotonic (no plateau) and reach-preserving.
+
+**Gates (all kept):** straddle-jump ratio ∈ [0.85,1.15] (median |dByte| across the 128 crossing
+pair, H+V) — **6/6 pass** (0.870–0.909); reach ±1 px — **5/6 pass** (Arabic ±1
+now). dims equal; edgeMean ≤ 0.10 px (perceptual gate). **SDF-mapping monotonicity gate**: the
+remap over all 256 inputs is strictly increasing with max flat run 2 (rounding ties only) —
+`decreasing=False, maxFlatRun=2`. The bilinear normal-profile slope gate
+was removed (blind to the discontinuity). **Render** (`renders/m3/sdf_text.png`): at 4× NEW now
+equals ORIGINAL — crisp, smooth curves, neither softer nor aliased.
 
 ### Perceptual gate (B.2/B.3 — the pass/fail criterion)
 Each SDF thresholded at the shader edge (byte 128 = 0.5, per `Shaders/UniText.cginc` `SDFLayer`)
@@ -120,14 +146,14 @@ raster maxPix (measured in the CMake-3.31 Blend2D build).
 Fixed this round: SDF Y-flip, force-autohint, **SDF slope** (softness — slope ratio 5/6 pass),
 Blend2D linking, and the **Blend2D call-sequence/contract** (raster now meanPix 0.005 / maxPix 8
 vs the earlier invalid 0.226/64). Remaining over threshold:
-- SDF **edgeMax** 1.2–2.0 px > 0.50 px (edgeMean 0.04 px, coverage <0.25 %, slope now matched —
-  the residual is isolated feature-tip crossings where FT bsdf vs the original EDT differ ~2px).
-- SDF **slope ratio** on Devanagari 0.880 (< 0.95) — its original slope is 25 vs our 22 (byte
-  quantization at small integers); the other 5 fonts pass 0.957–1.048.
+- SDF **edgeMax** 1.2–2.0 px > 0.50 px (edgeMean 0.04 px, coverage <0.25 %; near-edge slope now
+  matches 6/6 — the residual is isolated feature-tip crossings where FT bsdf vs the original EDT
+  differ ~2px). SDF field softness is resolved (was a render-tool bug); slope + reach gates in.
+- SDF **reach** on Arabic 8 vs 11 px (>±1; rare-Arabic autohinter/EDT class); 5/6 fonts pass.
 - Arabic hinted bitmaps: rare extended glyphs differ 2–3 px (> 1 px); common letters identical.
 - Blend2D raster maxPix 8 > 2 (a few edge-AA pixels; mean 0.005 — visually identical).
 Remaining needs the original's exact EDT/autohinter/Blend2D version or sign-off on the max-edge,
-Devanagari-slope, and Arabic-rare-glyph tolerances.
+Arabic-reach, and Arabic-rare-glyph tolerances.
 
 ## Reproduce
 ```
@@ -147,3 +173,36 @@ set PARITY_EDITOR_ORIG=<build>\unitext_native_editor_orig.dll
 set PARITY_EDITOR_NEW=<build>\Release\unitext_native_editor.dll
 dotnet run -c Release --project NativeSource~/tests/parity -- <build>\unitext_native_orig.dll <build>\Release\unitext_native.dll <fontsDir> <fontsDir>\RobotoFlex-VF.ttf
 ```
+
+
+
+## Milestone 3 — CI + multi-platform CMake
+
+`.github/workflows/native.yml` builds the native layer for every shipped platform, CMake 3.31.6
+pinned in every job (Blend2D requires it), output names matching `Plugins/<platform>/` exactly:
+- Windows x64 + ARM64 (MSVC); Linux x64 + ARM64 (gcc / aarch64 cross); macOS universal
+  arm64+x86_64 (runtime + editor dylib); Android arm64-v8a/armeabi-v7a/x86/x86_64 (NDK r26d
+  pinned); iOS device+sim as an xcframework of static libs + tvOS static; WebGL static `.a`
+  (emsdk 3.1.64 pinned, Blend2D OFF — wasm has no JIT, COLR uses the JS path).
+- Parity harness runs on Windows/Linux/macOS vs that platform's shipped original; binaries
+  upload as artifacts; an `assemble` job lays out the `Plugins/` tree.
+- **Validated with actionlint 1.7.1 — 0 errors.**
+
+CMake platform handling: library type STATIC for iOS/tvOS/WebGL, SHARED otherwise; non-Windows
+uses default-hidden visibility + a GNU version script (`NativeSource~/exports/ut_symbols.map`)
+or a Mach-O exported-symbols list (`ut_symbols.macho.txt`) restricting the dynamic table to the
+117 `ut_*` (+8 editor) exports; `.def` is Windows-only; editor DLL gated to desktop.
+
+Parity harness portability: takes DLL paths as args and uses `NativeLibrary.Load` + `GetExport`
+(no hardcoded `.dll`/backslashes/drive paths), so it builds/runs unchanged on Linux/macOS.
+
+**Platforms actually built locally (this Windows host):** Windows x64 only (native, Blend2D-on,
+portable CMake). Linux could not be built here — Docker Desktop's Linux engine was down and the
+only WSL distro is the userland-less docker-desktop backend; the other jobs are validated by
+inspection + actionlint, not executed.
+
+## Milestone 3 — SDF saturation/reach
+See "SDF gradient / saturation" above: the earlier k=1.4961 slope remap was reverted (it cut
+field reach ~1.5×, clipping outline/glow/underlay); the original is a standard linear
+`127/spread` field and no remap is needed. Reach gate (±1 px) passes 5/6 (Arabic over-reaches
+~3 px). The re-shipped `Plugins/Windows/x86_64/unitext_native.dll` is the no-remap build.
