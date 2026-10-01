@@ -418,7 +418,10 @@ namespace LightSide
             UniTextFontProvider fontProvider,
             int fontId,
             UnicodeScript script,
-            TextDirection direction)
+            TextDirection direction,
+            VariationKey variationKey = default,
+            uint[] variationTags = null,
+            float[] variationCoords = null)
         {
             if (itemLength == 0)
                 return new ShapingResult(ReadOnlySpan<ShapedGlyph>.Empty, 0);
@@ -429,13 +432,25 @@ namespace LightSide
 #endif
 
             FontCacheEntry fontEntry;
-            lock (fontCacheLock)
+            // Variable-instance run: shape with the HarfBuzz font that has the variations applied, so
+            // advances match the rasterized instance. Keyed by (fontDataHash, VariationKey).
+            if (!variationKey.IsNone && variationTags != null && variationCoords != null)
             {
-                if (!fontCache.TryGetValue(fontId, out fontEntry))
+                var vfont = fontProvider?.GetFontAsset(fontId);
+                fontEntry = GetOrCreateVariationCache(vfont, variationKey, variationTags, variationCoords);
+                if (fontEntry == null)
+                    return new ShapingResult(ReadOnlySpan<ShapedGlyph>.Empty, 0);
+            }
+            else
+            {
+                lock (fontCacheLock)
                 {
-                    var fontData = fontProvider.GetFontData(fontId);
-                    fontEntry = new FontCacheEntry(fontData);
-                    fontCache[fontId] = fontEntry;
+                    if (!fontCache.TryGetValue(fontId, out fontEntry))
+                    {
+                        var fontData = fontProvider.GetFontData(fontId);
+                        fontEntry = new FontCacheEntry(fontData);
+                        fontCache[fontId] = fontEntry;
+                    }
                 }
             }
 
