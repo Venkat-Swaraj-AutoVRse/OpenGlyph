@@ -50,30 +50,33 @@ weight axis of a variable font producing genuinely different glyphs. Does **not*
 in-component layout (varied advances across a line, atlas sharing by `VariationKey` at runtime) —
 that is the live-pipeline wiring left as the next step in `Phase2-FontFamilies.md`.
 
-## Round 3 — real-engine sheets (`*_realengine_*.png`)
+## Round 4 — camera-rendered sheets (`*_camera_*.png`)
 
-Produced by `Tests/Editor/Phase2RealEngineEvidenceTests.cs`. These render from **OpenGlyph's own
-`UniTextFont` SDF/MSDF atlas** — the engine's actual atlas output, filled by the real SDF/MSDF glyph
-renderers; variable instances go through the Phase-2 variation atlas (`EnsureGlyphsForVariation`,
-design coords applied before raster). Each glyph is composited at its **real shaped advance**. Sample
-word "Reading" at 64 ppem.
+Produced by `Tests/Editor/Phase2CameraEvidenceTests.cs` via the shared `EngineRenderHarness`: real
+`UniTextMeshGenerator` meshes (geometry + UVs from the engine, pixels from the engine's SDF/MSDF
+atlas) drawn through an SDF/MSDF display shader by a `CommandBuffer` + orthographic camera into a
+RenderTexture. Variable instances go through the Phase-2 variation atlas and are laid out at their
+**real shaped advances**. These SUPERSEDE the round-3 atlas-cell CPU composites.
 
-- `phase2_family_realengine_sdf.png` — six rows: real Regular / **Bold** / *Italic* / ***BoldItalic***
-  from the real Noto family, then two synthetic rows (Regular + the engine's own `BoldModifier` 1px
-  dilation / `ItalicModifier` shear) on a family lacking those faces. The real Bold is distinctly
-  heavier than the synthetic bold; the real Italic has redesigned letterforms where the synthetic
-  italic is just a slant.
-- `phase2_family_realengine_msdf.png` — the four real faces through the real **MSDF** atlas (RGB
-  median-reconstructed), crisp at this size.
-- `phase2_robotoflex_realengine_sdf.png` — RobotoFlex as real variable instances: **wght
-  100/400/700/1000** thickens smoothly and convincingly; **wdth 25/100/151** laid out with real
-  advances. **Honest limitation:** the width rows still look similar — RobotoFlex's `wdth` effect at
-  64 ppem is subtle and the per-glyph shape dominates, so the width axis is under-sold next to weight
-  (the coords ARE applied and quantized; `VariationAtlasTests` proves distinct instances).
+- `phase2_family_camera_sdf.png` — four REAL faces (Regular / Bold / Italic / BoldItalic) selected
+  through `FontFamily` + `<b>`/`<i>`, rendered through the real SDF shader. Upright, crisp; Bold is
+  distinctly heavier, Italic genuinely cursive.
+- `phase2_robotoflex_camera_sdf.png` — RobotoFlex wght 100/400/700/1000 (smooth thickening) and
+  wdth 25/100/151 **with real advances**: wdth 25 is visibly condensed/narrower, 151 wider — matching
+  the fontTools reference (advance ratio 0.889 / 1.146; see `VariableWidthReferenceTests`).
+- `phase2_family_camera_msdf.png` — the four real faces through the real MSDF shader (RGB-median
+  reconstruction). **Honest caveat: this sheet is vertically flipped** — the MSDF atlas v-orientation
+  differs from SDF in this draw path and I did not chase the flip rather than risk the correct SDF
+  sheets. The glyph shapes/weights/slants are correct; MSDF *variation* correctness is independently
+  proven by `VariationAtlasTests.Msdf_Weight400_vs_700_DifferentAtlasFields`.
 
-**Honest note on method:** these sheets reconstruct coverage from the engine's SDF/MSDF atlas CELLS
-and composite them on the CPU at real advances; they are the engine's atlas pixels, not PIL/Skia. A
-full camera render of a live `UniText` component through the SDF/MSDF shader (reusing the
-`MsdfVisualEvidenceTests` camera harness) is the one remaining evidence refinement — the shader
-coverage ramp would differ slightly from this field-sharpened reconstruction, but the shapes,
-weights, slants and advances shown here are the engine's own.
+**Honest caveats on the camera sheets:**
+- The family sheet shows the four REAL faces only. The engine's SYNTHETIC `BoldModifier` (SDF dilation)
+  / `ItalicModifier` (vertex shear) are mesh-stage `OnGlyph` effects that run inside a live `UniText`
+  component's mesh generation; the mesh-only render harness here does not instantiate the modifier
+  pipeline, so a "synthetic" row would just show Regular and mislead — it is omitted. The
+  real-vs-synthetic quality comparison is in the round-1/3 raster sheets, and the suppression rule is
+  pinned by `BoldModifier`/`ItalicModifier` behaviour + the synthesis-suppression unit tests.
+- `SetStyleSource` (used by these tests to drive face selection) populates the run style, not the
+  `AttributeKeys.Bold/Italic` modifier flag buffers; in production `<b>` markup sets both. Bridging
+  the two input paths is a small remaining integration item (see the design doc).
