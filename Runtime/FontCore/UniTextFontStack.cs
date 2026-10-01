@@ -26,8 +26,40 @@ namespace LightSide
         /// <summary>Optional fallback stack. Searched after this stack's own fonts.</summary>
         public UniTextFontStack fallbackStack;
 
+        /// <summary>
+        /// Optional font family driving the main slot. When set, a styled request (weight/width/style
+        /// or <c>&lt;b&gt;</c>/<c>&lt;i&gt;</c> markup) selects the matching real face via
+        /// <see cref="FontFamily.Resolve"/>; the family's faces also serve as the main font for plain
+        /// codepoint fallback. Leave null to keep the classic <see cref="fonts"/>-list behaviour.
+        /// </summary>
+        public FontFamily family;
+
         /// <summary>Gets the main (primary) font, or null if the list is empty.</summary>
-        public UniTextFont MainFont => fonts is { Count: > 0 } ? fonts[0] : null;
+        public UniTextFont MainFont => fonts is { Count: > 0 } ? fonts[0]
+            : (family != null && family.Count > 0 ? family.Match(FontStyleSpec.Normal, out _) : null);
+
+        /// <summary>
+        /// Resolves the real face for a styled run: if a <see cref="family"/> is set, selects the
+        /// matching face (and reports whether synthetic bold/italic must still be layered on via
+        /// <paramref name="how"/>, per CSS font-synthesis — synthesize only when no real face). With
+        /// no family this returns <see cref="MainFont"/> and requests synthesis for the markup, exactly
+        /// matching the pre-family behaviour.
+        /// </summary>
+        /// <param name="spec">Base style request.</param>
+        /// <param name="markupBold">A <c>&lt;b&gt;</c> span covers the run.</param>
+        /// <param name="markupItalic">An <c>&lt;i&gt;</c> span covers the run.</param>
+        /// <param name="how">Output: exactness + synthetic-bold/italic flags.</param>
+        public UniTextFont ResolveStyledFont(FontStyleSpec spec, bool markupBold, bool markupItalic, out FaceMatch how)
+        {
+            if (family != null && family.Count > 0)
+                return family.Resolve(spec, markupBold, markupItalic, out how);
+
+            // No family: keep legacy behaviour — the single main face, with synthesis requested for
+            // whatever markup is present (there is no real bold/italic face to choose).
+            how = new FaceMatch(false, markupBold || spec.weight >= FontStyleSpec.BoldWeight,
+                markupItalic || spec.style != StyleAxis.Normal);
+            return MainFont;
+        }
 
         private UniTextFont[] resolvedFonts;
 
@@ -95,6 +127,12 @@ namespace LightSide
                 for (int i = 0; i < stack.fonts.Count; i++)
                     if (stack.fonts[i] != null)
                         list.Add(stack.fonts[i]);
+
+                // Family faces also participate in plain codepoint fallback (the regular member first).
+                if (stack.family != null)
+                    for (int i = 0; i < stack.family.faces.Count; i++)
+                        if (stack.family.faces[i].font != null && !list.Contains(stack.family.faces[i].font))
+                            list.Add(stack.family.faces[i].font);
 
                 stack = stack.fallbackStack;
             }
