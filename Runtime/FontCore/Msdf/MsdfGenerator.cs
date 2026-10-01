@@ -91,6 +91,10 @@ namespace LightSide.Msdf
                     if (b.NearEdge != null)
                         b.NearEdge.DistanceToPerpendicularDistance(ref b.MinDistance, p, b.NearParam);
 
+                    // Preserve each channel's OWN edge-relative sign (this per-channel independence is
+                    // what makes the median sharp at corners). A single global orientation sign is
+                    // applied afterwards, below, so overlapping/mis-oriented contours decode correctly
+                    // without flattening the three channels to one sign.
                     int i = (row * w + x) * 3;
                     output[i + 0] = (float)(r.MinDistance.Distance / range + 0.5);
                     output[i + 1] = (float)(g.MinDistance.Distance / range + 0.5);
@@ -98,6 +102,9 @@ namespace LightSide.Msdf
                 }
             }
 
+            // Contour orientation is resolved up-front by Shape.OrientContours() (called by
+            // MsdfBuilder before generation), so each edge's directed-distance sign already means
+            // "inside". No global field flip is applied here.
             if (cfg.ErrorCorrection)
                 ErrorCorrect(output, w, h);
 
@@ -194,6 +201,8 @@ namespace LightSide.Msdf
                     output[y * w + x] = (float)(min.Distance / range + 0.5);
                 }
             }
+
+            // Orientation already resolved by Shape.OrientContours() before generation.
             return output;
         }
 

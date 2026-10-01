@@ -46,13 +46,12 @@ namespace LightSide.Msdf
             if (shape.EdgeCount == 0)
                 return result;
 
-            // Ensure positive-is-inside: sum contour windings; if the dominant orientation is
-            // clockwise (TrueType), reverse the y-axis interpretation by negating distances via
-            // a global sign. msdfgen expects counter-clockwise outer contours to yield positive
-            // inside. We detect the outer winding by the sign of the total signed area.
-            int windingSum = 0;
-            foreach (var c in shape.Contours) windingSum += c.Winding();
-            bool flipSign = windingSum < 0; // clockwise-dominant -> flip so inside is positive
+            // ROOT fix for inside-out glyphs: make contour orientation consistent with the non-zero
+            // winding fill BEFORE edge-colouring and generation, so the generator's directed-edge
+            // sign already means "inside". No post-hoc global field flip is needed (that could only
+            // vote on a majority and could not fix glyphs whose polarity is wrong only in overlap
+            // regions, e.g. '&', 'g', '@').
+            shape.OrientContours();
 
             shape.Bounds(out double l, out double b, out double r, out double t);
             // Integer glyph box in pixels.
@@ -82,12 +81,6 @@ namespace LightSide.Msdf
             };
 
             float[] field = MsdfGenerator.Generate(shape, in cfg);
-
-            if (flipSign)
-            {
-                for (int i = 0; i < field.Length; i++)
-                    field[i] = 1f - field[i];
-            }
 
             // Encode to RGB24, converting bottom-up field to top-down bitmap rows.
             var rgb = new byte[w * h * 3];
@@ -139,9 +132,7 @@ namespace LightSide.Msdf
             Shape shape = Shape.FromOutline(outline);
             if (shape.EdgeCount == 0) return null;
 
-            int windingSum = 0;
-            foreach (var c in shape.Contours) windingSum += c.Winding();
-            bool flipSign = windingSum < 0;
+            shape.OrientContours();
 
             shape.Bounds(out double l, out double b, out double r, out double t);
             int gx0 = (int)Math.Floor(l), gy0 = (int)Math.Floor(b);
@@ -157,8 +148,6 @@ namespace LightSide.Msdf
                 ErrorCorrection = false,
             };
             float[] field = MsdfGenerator.GenerateSdf(shape, in cfg);
-            if (flipSign)
-                for (int i = 0; i < field.Length; i++) field[i] = 1f - field[i];
 
             width = w; height = h; range = cfg.Range;
             return field;
