@@ -1228,7 +1228,8 @@ namespace LightSide
                 // TexCoord1 lets the per-glyph data reach the shader.
                 var cv = canvas;
                 if (cv != null)
-                    cv.additionalShaderChannels |= AdditionalCanvasShaderChannels.TexCoord1;
+                    cv.additionalShaderChannels |= AdditionalCanvasShaderChannels.TexCoord1
+                                                 | AdditionalCanvasShaderChannels.Normal;
 
                 unifiedBuilder ??= new UnifiedRenderBuilder();
                 unifiedRenderData ??= new List<UniTextRenderData>(2);

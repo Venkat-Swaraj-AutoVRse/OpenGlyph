@@ -72,18 +72,20 @@ namespace LightSide
         private sealed class Group
         {
             public readonly List<Vector3> verts = new();
+            public readonly List<Vector3> normals = new();
             public readonly List<Color32> colors = new();
             public readonly List<Vector4> uv0 = new();
             public readonly List<Vector4> uv1 = new();
             public readonly List<int> tris = new();
             public Mesh mesh;
             public int pageSize;
-            public void ClearBuffers() { verts.Clear(); colors.Clear(); uv0.Clear(); uv1.Clear(); tris.Clear(); pageSize = 0; }
+            public void ClearBuffers() { verts.Clear(); normals.Clear(); colors.Clear(); uv0.Clear(); uv1.Clear(); tris.Clear(); pageSize = 0; }
         }
 
         private readonly Dictionary<TextureFormat, Group> _groups = new();
         private readonly List<Vector4> _tmpUv = new();
         private readonly List<Vector3> _tmpV = new();
+        private readonly List<Vector3> _tmpN = new();
         private readonly List<Color32> _tmpC = new();
         private readonly List<int> _tmpTri = new();
 
@@ -144,6 +146,7 @@ namespace LightSide
                 var m = g.mesh;
                 m.Clear();
                 m.SetVertices(g.verts);
+                m.SetNormals(g.normals);
                 m.SetColors(g.colors);
                 m.SetUVs(0, g.uv0);
                 m.SetUVs(1, g.uv1);
@@ -168,14 +171,17 @@ namespace LightSide
             // Non-allocating reads into reusable scratch lists (the .vertices/.colors32/.triangles
             // PROPERTIES allocate a fresh array every call — the per-frame GC the benchmark flagged).
             _tmpV.Clear(); src.GetVertices(_tmpV);
+            _tmpN.Clear(); src.GetNormals(_tmpN);
             _tmpC.Clear(); src.GetColors(_tmpC);
             _tmpUv.Clear(); src.GetUVs(0, _tmpUv);
             _tmpTri.Clear(); src.GetTriangles(_tmpTri, 0);
 
             bool haveColors = _tmpC.Count == _tmpV.Count;
+            bool haveNormals = _tmpN.Count == _tmpV.Count;
             for (int i = 0; i < _tmpV.Count; i++)
             {
                 g.verts.Add(_tmpV[i]);
+                g.normals.Add(haveNormals ? _tmpN[i] : new Vector3(0, 0, -1)); // UGUI forward normal
                 g.colors.Add(haveColors ? _tmpC[i] : (Color32)Color.white);
                 var uv0 = i < _tmpUv.Count ? _tmpUv[i] : Vector4.zero;
                 g.uv0.Add(uv0);
