@@ -221,6 +221,51 @@ namespace LightSide
             _ => UniTextSettings.UseUnifiedRenderer,
         };
 
+        [SerializeField]
+        [Tooltip("Render Architecture R2 sub-task 1: when ON, the unified render path shades every " +
+                 "glyph from the component Style below INSTEAD of synthesising one from a legacy " +
+                 "appearance/material via AppearanceStyleShim. OFF keeps the shim fallback so a " +
+                 "component still referencing a legacy UniTextAppearance keeps rendering unchanged.")]
+        private bool overrideStyle = false;
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2 sub-task 1: the component-authored text style (face / outline " +
+                 "/ underlay-shadow / glow). Replaces a UniTextAppearance + material asset. Active only " +
+                 "when Override Style is ON and the unified renderer is used.")]
+        private UniTextStyle style = UniTextStyle.Default;
+
+        /// <summary>
+        /// Render-Architecture R2 sub-task 1: whether this component shades from its own
+        /// <see cref="Style"/> (true) or falls back to the <see cref="AppearanceStyleShim"/> reading a
+        /// legacy appearance/material (false). Only consulted on the unified render path.
+        /// </summary>
+        public bool OverrideStyle
+        {
+            get => overrideStyle;
+            set
+            {
+                if (overrideStyle == value) return;
+                overrideStyle = value;
+                SetVerticesDirty();
+            }
+        }
+
+        /// <summary>
+        /// The component-authored <see cref="UniTextStyle"/>. Used by the unified render path when
+        /// <see cref="OverrideStyle"/> is true. Setting it marks the component dirty so the next
+        /// rebuild re-shades.
+        /// </summary>
+        public UniTextStyle Style
+        {
+            get => style;
+            set
+            {
+                if (style.Equals(value)) return;
+                style = value;
+                if (overrideStyle) SetVerticesDirty();
+            }
+        }
+
         /// <summary>R2 unified path: per-component builder + its merged (≤2) output. Lazy; disposed in OnDestroy.</summary>
         private UnifiedRenderBuilder unifiedBuilder;
         private List<UniTextRenderData> unifiedRenderData;
@@ -1233,7 +1278,12 @@ namespace LightSide
 
                 unifiedBuilder ??= new UnifiedRenderBuilder();
                 unifiedRenderData ??= new List<UniTextRenderData>(2);
-                var style = AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
+                // R2 sub-task 1: prefer the component-authored style when Override Style is ON;
+                // otherwise fall back to the shim synthesising one from the legacy appearance/material
+                // (so old assets still render identically during the deprecation window).
+                var style = overrideStyle
+                    ? this.style.ToGlyphStyle()
+                    : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
                 unifiedBuilder.Build(renderData, style, unifiedRenderData);
                 UpdateSubMeshes(unifiedRenderData);
                 UniTextDebug.EndSample();
