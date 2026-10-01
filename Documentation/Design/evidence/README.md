@@ -80,3 +80,38 @@ RenderTexture. Variable instances go through the Phase-2 variation atlas and are
 - `SetStyleSource` (used by these tests to drive face selection) populates the run style, not the
   `AttributeKeys.Bold/Italic` modifier flag buffers; in production `<b>` markup sets both. Bridging
   the two input paths is a small remaining integration item (see the design doc).
+
+## Round 5 — ACTUAL UniText component through a camera (`*_component_*.png`)
+
+Produced by `Tests/Editor/Phase2ComponentEvidenceTests.cs`: real `UniText` MonoBehaviours on a
+WorldSpace `Canvas`, driven by `Canvas.ForceUpdateCanvases()` and captured by a dedicated
+orthographic camera to a RenderTexture. This runs the FULL component pipeline — attribute parse,
+itemization, shaping, the Phase-2 face resolution, AND the synthetic `BoldModifier`/`ItalicModifier`
+(`OnGlyph`) — using the new `UniText.FontWeight`/`FontStyleAxis` component properties. The round-1
+`SetStyleSource`↔modifier-buffer gap is now closed (`PopulateStyleAttributeBuffers`), proven by
+`SynthesisBridgeTests`.
+
+- `phase2_family_component_sdf.png` — six rows: Regular, real Bold, real Italic, real BoldItalic
+  (FontWeight/FontStyleAxis select the real faces via the family), then two Regular-only rows at
+  FontWeight 700 / FontStyleAxis Italic (synthetic path).
+- `phase2_robotoflex_component_sdf.png` — RobotoFlex at FontWeight 100/400/700/1000 through the live
+  component + variation atlas: convincing monotonic thickening.
+- `phase2_family_component_msdf.png` — the same family in MSDF mode.
+
+**Honest findings from the real-component capture (reported, not hidden):**
+1. **MSDF renders as solid blocks through this WorldSpace-component capture** (SDF renders correctly
+   through the identical path). This is NOT the shared harness — it is the component's MSDF render
+   path in this capture setup; the MSDF material/shader is not reconstructing the RGB field here.
+   This is a product-side MSDF-through-WorldSpace issue to chase next; MSDF *variation correctness*
+   (fields differ wght 400 vs 700) is independently proven by
+   `VariationAtlasTests.Msdf_Weight400_vs_700_DifferentAtlasFields`.
+2. **Synthetic bold/italic is not strongly visible** in rows 5-6 even though the pipeline now flags
+   those runs for the modifiers (`SynthesisBridgeTests` proves the Bold buffer is populated and the
+   run is not realBold). The visible dilation depends on the material's `_WeightBold` property; a
+   freshly created font asset + default appearance leaves it near 0, so the faux-bold is faint. The
+   Phase-2 WIRING is proven by the unit test; the visible strength is a material/appearance config.
+3. **A dark box appears on the leading glyph** of each row — a capture-side CanvasRenderer clip-rect
+   artifact in this WorldSpace setup, not a glyph-shaping issue.
+
+The earlier round-4 `*_camera_*.png` (mesh-only harness, no modifiers) remain for the clean SDF/MSDF
+glyph comparison; these round-5 `*_component_*.png` are the full-component-path evidence.
