@@ -64,6 +64,23 @@ namespace LightSide
         {
             _provider = provider ?? throw new ArgumentNullException(nameof(provider));
             _graphemeBreaker = new GraphemeBreaker(provider);
+            // Re-resolve dictionaries if the project's segmentation assignment changes at
+            // runtime (e.g. UniTextSettings.SetInstance, or an edit in Project Settings). Without
+            // this the first per-script resolution would be cached forever, so assigning a
+            // dictionary after a script had already fallen back — or clearing one — would have
+            // no effect until domain reload.
+            UniTextSettings.Changed += ResetDictionaries;
+        }
+
+        /// <summary>
+        /// Drops the cached per-script dictionaries so the next SA run re-resolves them from
+        /// <see cref="UniTextSettings"/> (re-emitting the one-time warning for a script that is
+        /// still unassigned). Invoked automatically on <see cref="UniTextSettings.Changed"/>.
+        /// </summary>
+        public void ResetDictionaries()
+        {
+            _thai = _lao = _khmer = _myanmar = null;
+            _thaiTried = _laoTried = _khmerTried = _myanmarTried = false;
         }
 
         /// <summary>True if the codepoint's line-break class is SA (complex-context).</summary>
