@@ -17,6 +17,11 @@ namespace LightSide
         private static readonly FastIntDictionary<int> instanceIdToFontHash = new();
         private static readonly object fontCacheLock = new();
 
+        // Variation-instance cache: one HarfBuzz font (with hb variations applied) per
+        // (fontDataHash, VariationKey). Keyed by a composite so wght 400 and wght 700 of the SAME
+        // face never share an entry, their glyph/advance sub-caches, or their shaped advances.
+        private static readonly System.Collections.Generic.Dictionary<(int fontHash, VariationKey key), FontCacheEntry> variationCache = new();
+
         [ThreadStatic] private static ShapedGlyph[] outputBuffer;
         [ThreadStatic] private static IntPtr reusableBuffer;
 
@@ -38,6 +43,10 @@ namespace LightSide
                     kvp.Value?.Dispose();
                 fontCache.Clear();
                 instanceIdToFontHash.Clear();
+
+                foreach (var kvp in variationCache)
+                    kvp.Value?.Dispose();
+                variationCache.Clear();
             }
 
             outputBuffer = null;
@@ -85,6 +94,19 @@ namespace LightSide
                 hbFont = HB.CreateFont(IntPtr.Zero, unmanagedData, dataLength, out hbBlob, out hbFace, out upem);
                 if (hbFont == IntPtr.Zero)
                     throw new Exception("[HarfBuzz] Failed to create font");
+            }
+
+            /// <summary>
+            /// Creates an entry whose HarfBuzz font is pinned to a variable-font instance by applying
+            /// <paramref name="tags"/>/<paramref name="values"/> (user-space) via the native variations
+            /// passthrough. Used for the per-(face,VariationKey) cache so wght 400 and wght 700 shape
+            /// with genuinely different advances. Non-variable fonts simply ignore the variations.
+            /// </summary>
+            public FontCacheEntry(byte[] fontData, uint[] tags, float[] values)
+                : this(fontData)
+            {
+                if (tags != null && values != null && tags.Length == values.Length && tags.Length > 0)
+                    FTVar.SetHbVariations(hbFont, tags, values);
             }
 
             public void Dispose()
@@ -163,6 +185,42 @@ namespace LightSide
             }
         }
 
+        /// <summary>
+        /// Gets or creates the HarfBuzz cache entry for a specific variable-font instance of
+        /// <paramref name="font"/>, identified by <paramref name="key"/>. The returned entry's
+        /// hb_font has the given axis <paramref name="tags"/>/<paramref name="values"/> applied, so
+        /// its shaped advances and glyph caches are specific to that instance. When
+        /// <paramref name="key"/> is <see cref="VariationKey.None"/> this falls back to the plain
+        /// per-face cache (identical to <see cref="GetOrCreateCacheByInstanceId"/>).
+        /// </summary>
+        internal static FontCacheEntry GetOrCreateVariationCache(UniTextFont font, VariationKey key, uint[] tags, float[] values)
+        {
+            if (font == null || !font.HasFontData)
+                return null;
+
+            if (key.IsNone)
+                return GetOrCreateCacheByInstanceId(font);
+
+            var fontHash = font.FontDataHash;
+            if (fontHash == 0)
+                return null;
+
+            lock (fontCacheLock)
+            {
+                var ck = (fontHash, key);
+                if (variationCache.TryGetValue(ck, out var cached))
+                    return cached;
+
+                var fontData = font.FontData;
+                if (fontData == null || fontData.Length == 0)
+                    return null;
+
+                var entry = new FontCacheEntry(fontData, tags, values);
+                variationCache[ck] = entry;
+                return entry;
+            }
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static bool TryGetCacheByHash(int fontHash, out FontCacheEntry entry)
         {
@@ -222,6 +280,31 @@ namespace LightSide
             advance = 0;
 
             var cache = GetOrCreateCacheByInstanceId(font);
+            if (cache == null)
+                return false;
+
+            if (!cache.TryGetGlyph(codepoint, out glyphIndex))
+                return false;
+
+            var advanceUnits = cache.GetGlyphAdvance(glyphIndex);
+            advance = advanceUnits * fontSize * font.FontScale / cache.upem;
+            return true;
+        }
+
+        /// <summary>
+        /// Variation-aware variant of <see cref="TryGetGlyphInfo"/>: resolves glyph index and advance
+        /// against a specific variable-font instance (<paramref name="key"/> + axis
+        /// <paramref name="tags"/>/<paramref name="values"/>). Different instances of the same face
+        /// return advances that genuinely differ (shaped through a HarfBuzz font with the variations
+        /// applied). With <see cref="VariationKey.None"/> this equals <see cref="TryGetGlyphInfo"/>.
+        /// </summary>
+        public static bool TryGetGlyphInfoVaried(UniTextFont font, uint codepoint, float fontSize,
+            VariationKey key, uint[] tags, float[] values, out uint glyphIndex, out float advance)
+        {
+            glyphIndex = 0;
+            advance = 0;
+
+            var cache = GetOrCreateVariationCache(font, key, tags, values);
             if (cache == null)
                 return false;
 
@@ -304,6 +387,10 @@ namespace LightSide
                     kvp.Value?.Dispose();
                 fontCache.Clear();
                 instanceIdToFontHash.Clear();
+
+                foreach (var kvp in variationCache)
+                    kvp.Value?.Dispose();
+                variationCache.Clear();
             }
         }
 
