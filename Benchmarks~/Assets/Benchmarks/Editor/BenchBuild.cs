@@ -29,6 +29,12 @@ namespace OpenGlyph.Benchmarks.Editor
         [MenuItem("OpenGlyph/Build Benchmark Scene")]
         public static void BuildScene()
         {
+            // Set product/company up front so persistentDataPath is stable
+            // (<LocalLow>/OpenGlyph/OpenGlyphBench) in editor AND player.
+            PlayerSettings.productName = "OpenGlyphBench";
+            PlayerSettings.companyName = "OpenGlyph";
+            EnsureTmpEssentials();
+
             Directory.CreateDirectory(SceneDir);
             Directory.CreateDirectory(GenDir);
             Directory.CreateDirectory(FontDir);
@@ -165,6 +171,43 @@ namespace OpenGlyph.Benchmarks.Editor
                         if (msg.type == LogType.Error || msg.type == LogType.Exception)
                             Debug.LogError($"[BenchBuild] {name}: {msg.content}");
                 EditorApplication.Exit(2);
+            }
+        }
+
+        // Import TMP Essential Resources non-interactively so no modal window opens
+        // in batchmode. Idempotent: skips if the essentials settings asset exists.
+        private static void EnsureTmpEssentials()
+        {
+            try
+            {
+                if (File.Exists("Assets/TextMesh Pro/Resources/TMP Settings.asset"))
+                    return;
+                string pkg = Path.Combine(
+                    EditorApplication.applicationContentsPath,
+                    "Resources/PackageManager/BuiltInPackages/com.unity.ugui/Package Resources/TMP Essential Resources.unitypackage");
+                if (File.Exists(pkg))
+                {
+                    AssetDatabase.ImportPackage(pkg, false); // interactive=false
+                    AssetDatabase.Refresh();
+                    Debug.Log("[BenchBuild] imported TMP Essential Resources (non-interactive)");
+                }
+                else Debug.LogWarning("[BenchBuild] TMP essentials unitypackage not found: " + pkg);
+            }
+            catch (System.Exception ex) { Debug.LogWarning("[BenchBuild] TMP essentials import skipped: " + ex.Message); }
+        }
+
+        // ---------------- guarded batchmode entry points (always Exit) ----------------
+        public static void BuildWindowsCI() => Guard(BuildWindows);
+        public static void BuildAndroidCI() => Guard(BuildAndroid);
+        public static void BuildSceneCI()   => Guard(BuildScene);
+
+        private static void Guard(System.Action body)
+        {
+            try { body(); EditorApplication.Exit(0); }
+            catch (System.Exception ex)
+            {
+                Debug.LogError("[BenchBuild] FAILED: " + ex);
+                EditorApplication.Exit(3);
             }
         }
     }
