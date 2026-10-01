@@ -86,11 +86,15 @@ namespace LightSide.Msdf
 
             float[] field = MsdfGenerator.Generate(shape, in cfg);
 
-            // Encode to RGB24, converting bottom-up field to top-down bitmap rows.
+            // Encode to RGB24. The atlas pack (CopySdfBitmapToAtlas) and the mesh UVs use ONE
+            // convention shared with the SDF path, whose FreeType SDF buffer is copied row-straight.
+            // The generator fills `field` bottom-up (row 0 = bottom); emitting it row-straight here
+            // matches the SDF renderer's orientation so MSDF glyphs are upright in the atlas (verified
+            // by MsdfOrientationTests). (A previous (h-1-y) flip here inverted MSDF relative to SDF.)
             var rgb = new byte[w * h * 3];
             for (int y = 0; y < h; y++)
             {
-                int srcRow = (h - 1 - y) * w * 3;
+                int srcRow = y * w * 3;
                 int dstRow = y * w * 3;
                 for (int x = 0; x < w * 3; x++)
                 {
