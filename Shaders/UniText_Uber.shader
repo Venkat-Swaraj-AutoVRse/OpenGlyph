@@ -24,6 +24,7 @@ Shader "UniText/Uber"
         _ScaleY ("Scale Y", Float) = 1
         _PerspectiveFilter ("Perspective Correction", Range(0,1)) = 0.875
         _Sharpness ("Sharpness", Range(-1,1)) = 0
+        _AtlasSize ("Atlas Slice Size (px)", Float) = 1024
 
         // UI / masking plumbing (matches UGUI expectations so it works under a CanvasRenderer).
         _Color ("Tint", Color) = (1,1,1,1)
@@ -64,6 +65,7 @@ Shader "UniText/Uber"
             fixed4 _Color;
             float4 _ClipRect;
             float _WeightNormal, _WeightBold, _ScaleX, _ScaleY, _PerspectiveFilter, _Sharpness;
+            float _AtlasSize;
 
             struct appdata
             {
@@ -81,7 +83,7 @@ Shader "UniText/Uber"
                 float4 uv0      : TEXCOORD0;
                 float4 uv1      : TEXCOORD1;
                 float4 worldPos : TEXCOORD2;
-                float4 cov      : TEXCOORD3; // x=scale, y=baseWeight, z=normFactor (legacy coverage)
+                float4 cov      : TEXCOORD3; // x=baseWeight, y=normFactor (scale is computed in frag)
             };
 
             v2f vert(appdata v)
@@ -94,21 +96,13 @@ Shader "UniText/Uber"
                 o.uv0 = v.uv0;
                 o.uv1 = v.uv1;
 
-                // Legacy SDF scale term (ported verbatim from UniText/SDF-Face VertShader).
+                // baseWeight + normFactor (legacy coverage); `scale` is derived in the fragment from
+                // ddx/ddy of the atlas UV, matching UniText/SDF-SSD (the combined display shader).
                 float bold = step(v.uv0.w, 0);
-                float2 pixelSize = vPosition.w;
-                pixelSize /= float2(_ScaleX, _ScaleY) * abs(mul((float2x2)UNITY_MATRIX_P, _ScreenParams.xy));
-                float baseScale = rsqrt(dot(pixelSize, pixelSize)) * (_Sharpness + 1);
-                if (UNITY_MATRIX_P[3][3] == 0)
-                    baseScale = lerp(abs(baseScale) * (1 - _PerspectiveFilter), baseScale,
-                                     abs(dot(UnityObjectToWorldNormal(v.normal.xyz), normalize(WorldSpaceViewDir(v.vertex)))));
-                float xScaleVal = abs(v.uv0.w);
-                float gradientScale = v.uv0.z;
                 float spreadRatio = v.uv1.x;
-                float scale = baseScale * xScaleVal * gradientScale;
                 float normFactor = 0.1 /*REFERENCE_SPREAD_RATIO*/ / max(spreadRatio, 0.001);
                 float baseWeight = lerp(_WeightNormal, _WeightBold, bold) / 4.0 * 1.0 /*_ScaleRatioA*/ * 0.5;
-                o.cov = float4(scale, baseWeight, normFactor, 0);
+                o.cov = float4(baseWeight, normFactor, 0, 0);
                 return o;
             }
 
@@ -175,11 +169,15 @@ Shader "UniText/Uber"
                 {
                     // Faithful port of legacy UniText/SDF-Face (face) + SDF-Base (outline):
                     //   d = sample * scale;  coverage = saturate(d - bias)  [linear ramp, SDFLayer]
-                    // Face uses `scale` DIRECTLY (SDF-Face has no softness divisor on the face);
-                    // outline uses scaleSoftness = scale/(1+softness*normFactor) (SDF-Base). _ScaleRatioA=1.
-                    float scale = i.cov.x;
-                    float baseWeight = i.cov.y;
-                    float normFactor = i.cov.z;
+                    // scale is derived in-frag EXACTLY as UniText/SDF-SSD: baseScale from the atlas-UV
+                    // screen-space derivative, times per-vertex xScaleVal (UV0.w) and gradientScale (UV0.z).
+                    float baseWeight = i.cov.x;
+                    float normFactor = i.cov.y;
+                    float pxSize = (abs(ddx(i.uv0.y)) + abs(ddy(i.uv0.y))) * _AtlasSize * 0.75;
+                    float baseScale = (1.0 / max(pxSize, 1e-8)) * (_Sharpness + 1);
+                    float xScaleVal = abs(i.uv0.w);
+                    float gradientScale = i.uv0.z;
+                    float scale = baseScale * xScaleVal * gradientScale;
 
                     float normFaceEffect = (baseWeight + faceDilate * 0.5) * normFactor;
                     float faceBias = (0.5 - normFaceEffect) * scale - 0.5;
@@ -203,11 +201,15 @@ Shader "UniText/Uber"
                 col.rgb = outline.rgb * (1 - face.a) + face.rgb;
                 col.a = saturate(outline.a + face.a);
 
-                // Underlay / drop shadow (offset sample of the SAME slice), legacy ramp (SDF-Base).
+                // Underlay / drop shadow (offset sample of the SAME slice), legacy ramp (SDF-SSD).
                 if (underlayColor.a > 0 && mode != 2)
                 {
-                    float scale = i.cov.x; float baseWeight = i.cov.y; float normFactor = i.cov.z;
-                    float2 uOff = float2(scal1.x, scal1.y) * 0.01;
+                    float baseWeight = i.cov.x; float normFactor = i.cov.y;
+                    float pxSize = (abs(ddx(i.uv0.y)) + abs(ddy(i.uv0.y))) * _AtlasSize * 0.75;
+                    float scale = (1.0 / max(pxSize, 1e-8)) * (_Sharpness + 1) * abs(i.uv0.w) * i.uv0.z;
+                    // SSD underlay offset: _UnderlayOffset * offsetFactor * texelSize. Approximate the
+                    // offsetFactor with a texel step (1/_AtlasSize) scaled by the slider; sign negated.
+                    float2 uOff = float2(scal1.x, scal1.y) * (10.0 / max(_AtlasSize, 1.0));
                     half4 ut = UNITY_SAMPLE_TEX2DARRAY(_MainTexArray, float3(i.uv0.xy - uOff, slice));
                     half uDist = (mode == 1) ? Median3(ut.rgb) : ut.a;
                     float layerScale = scale / (1.0 + max(scal1.w, 0.0) * normFactor);
