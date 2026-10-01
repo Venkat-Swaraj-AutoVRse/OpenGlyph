@@ -19,9 +19,22 @@ namespace LightSide
     /// </para>
     /// </remarks>
     /// <seealso cref="UniTextFontProvider"/>
+    [Obsolete(UniTextAppearance.DeprecationMessage, false)]
     [CreateAssetMenu(fileName = "UniTextAppearance", menuName = "UniText/Appearance")]
     public class UniTextAppearance : ScriptableObject, ISerializationCallbackReceiver
     {
+        /// <summary>
+        /// Render-Architecture R2 sub-task 4: the deprecation notice. UniTextAppearance + its material
+        /// API are superseded by the component UniTextStyle (and per-span style markup). It is a WARNING
+        /// (error=false) so existing assets still compile, load, and render through the shim during the
+        /// deprecation window; removal is a later phase.
+        /// </summary>
+        public const string DeprecationMessage =
+            "UniTextAppearance and the material API are deprecated; style is now on the UniText " +
+            "component (UniTextStyle) + per-span markup. Migrate with Tools/OpenGlyph/Migrate Appearance " +
+            "to Styles. Old assets still load and render through the compatibility shim during the " +
+            "deprecation window.";
+
         /// <summary>
         /// Associates a font with materials for rendering.
         /// </summary>
@@ -122,6 +135,13 @@ namespace LightSide
 
             return mats;
         }
+
+        /// <summary>
+        /// Render-Architecture R2 sub-task 3: the appearance's DEFAULT material array (the materials
+        /// used when a font has no override). Used by the migration tool to synthesise a component style
+        /// when no font is assigned on the component. Returns an empty array when none are set.
+        /// </summary>
+        public Material[] GetDefaultMaterials() => defaultMaterialsArr ?? Array.Empty<Material>();
 
         [NonSerialized] private Dictionary<Material[], Material[]> msdfVariantCache;
         [NonSerialized] private Shader cachedMsdfShader;

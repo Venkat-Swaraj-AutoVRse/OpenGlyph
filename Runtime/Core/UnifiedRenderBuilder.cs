@@ -109,14 +109,23 @@ namespace LightSide
         public static bool DiagLog = false;
 
         public void Build(List<UniTextRenderData> segments, in GlyphStyle style, List<UniTextRenderData> output)
+            => Build(segments, style, null, output);
+
+        /// <summary>
+        /// R2 sub-task 2 overload: when a per-component <paramref name="spanStyles"/> collector is
+        /// supplied, each glyph's LOCAL style id (written into source UV1.w by the component's span-style
+        /// coordinator) is mapped to the collector's composed <see cref="GlyphStyle"/> and then to a
+        /// shared <see cref="StyleTable"/> row — so distinct per-span styles each get their own deduped
+        /// row chosen per vertex, still one renderer. Local id 0 (no span) uses the base <paramref name="style"/>.
+        /// </summary>
+        public void Build(List<UniTextRenderData> segments, in GlyphStyle style, SpanStyleCollector spanStyles, List<UniTextRenderData> output)
         {
             using var _ = s_BuildMarker.Auto();
             output.Clear();
             if (segments == null || segments.Count == 0) return;
 
             // Shared style table (dedups identical styles across all components) -> stable styleIdx.
-            int styleIdx = SharedStyles.GetOrAdd(style);
-            var styleTex = SharedStyles.Apply();
+            int baseStyleIdx = SharedStyles.GetOrAdd(style);
 
             foreach (var kv in _groups) kv.Value.ClearBuffers();
 
@@ -134,8 +143,11 @@ namespace LightSide
 
                 if (!_groups.TryGetValue(dstFormat, out var g)) { g = new Group(); _groups[dstFormat] = g; }
                 g.pageSize = page.width;
-                AppendSegment(g, seg.mesh, slice, (int)mode, styleIdx);
+                AppendSegment(g, seg.mesh, slice, (int)mode, baseStyleIdx, spanStyles);
             }
+
+            // Build/refresh the shared style texture AFTER span rows have been added above.
+            var styleTex = SharedStyles.Apply();
 
             foreach (var kv in _groups)
             {
@@ -168,7 +180,7 @@ namespace LightSide
             }
         }
 
-        private void AppendSegment(Group g, Mesh src, int slice, int glyphMode, int styleIdx)
+        private void AppendSegment(Group g, Mesh src, int slice, int glyphMode, int baseStyleIdx, SpanStyleCollector spanStyles)
         {
             int baseIndex = g.verts.Count;
             // Non-allocating reads into reusable scratch lists (the .vertices/.colors32/.triangles
@@ -183,6 +195,8 @@ namespace LightSide
             bool haveColors = _tmpC.Count == _tmpV.Count;
             bool haveNormals = _tmpN.Count == _tmpV.Count;
             bool haveUv1 = _tmpUv1.Count == _tmpV.Count;
+            // Small cache so repeated local ids within a segment don't re-walk the shared table.
+            int lastLocal = -1, lastShared = baseStyleIdx;
             for (int i = 0; i < _tmpV.Count; i++)
             {
                 g.verts.Add(_tmpV[i]);
@@ -192,9 +206,22 @@ namespace LightSide
                 g.uv0.Add(uv0);
                 // UV1.x MUST be the real spreadRatio (Padding/PointSize) from the source mesh's
                 // TEXCOORD1.x — NOT uv0.z (gradientScale). normFactor = 0.1/spreadRatio, and getting
-                // this wrong (≈0.01 instead of ≈1) makes the outline/underlay offset ~100x too small
-                // (outline ring vanished).
+                // this wrong (≈0.01 instead of ≈1) makes the outline/underlay offset ~100x too small.
                 float spreadRatio = haveUv1 ? _tmpUv1[i].x : 0.1f;
+                // UV1.w carries the per-glyph LOCAL span-style id (0 = base) written by the component
+                // coordinator. Map it to a shared StyleTable row; 0 maps straight to baseStyleIdx.
+                int styleIdx = baseStyleIdx;
+                if (spanStyles != null && haveUv1)
+                {
+                    int local = (int)(_tmpUv1[i].w + 0.5f);
+                    if (local == lastLocal) styleIdx = lastShared;
+                    else if (local <= 0) { styleIdx = baseStyleIdx; lastLocal = local; lastShared = baseStyleIdx; }
+                    else
+                    {
+                        styleIdx = SharedStyles.GetOrAdd(spanStyles.StyleAt(local));
+                        lastLocal = local; lastShared = styleIdx;
+                    }
+                }
                 g.uv1.Add(new Vector4(spreadRatio, slice, glyphMode, styleIdx));
             }
             for (int i = 0; i < _tmpTri.Count; i++)
