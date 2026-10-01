@@ -748,6 +748,28 @@ jobs:
             "${{ matrix.lib }}" \
             "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf" \
             "winref-dump" --gate | tee "$RUNNER_TEMP/compare-${{ matrix.os }}.txt"
+      # TEMP PERTURBATION PROOF (linux only): re-run compare but feed a DIFFERENT local font set
+      # than the Windows reference dump used (NotoSansArabic as the "varFont", and a one-font dir),
+      # so the local re-dump's records deliberately diverge from the reference. The gate MUST fail
+      # here; the step asserts a NON-ZERO exit (if the gate wrongly passed, we fail the job). This
+      # proves the gate actually bites. REVERTED in the next commit.
+      - name: PERTURBATION PROOF — gate must FAIL on a wrong comparison (linux only, temporary)
+        if: matrix.os == 'linux'
+        run: |
+          set -uo pipefail
+          mkdir -p "$RUNNER_TEMP/wrongfonts"
+          cp "Defaults/NotoSansArabic-Regular.ttf" "$RUNNER_TEMP/wrongfonts/"
+          echo "=== deliberately-wrong compare (expect gate to FAIL) ==="
+          set +e
+          dotnet "$RUNNER_TEMP/parity-bin/parity.dll" compare \
+            "${{ matrix.lib }}" \
+            "$RUNNER_TEMP/wrongfonts" "Defaults/NotoSansArabic-Regular.ttf" \
+            "winref-dump" --gate
+          rc=$?
+          set -e
+          echo "perturbed compare exit=$rc (expected non-zero)"
+          if [ "$rc" -eq 0 ]; then echo "GATE DID NOT BITE — perturbation passed, which is a bug"; exit 1; fi
+          echo "OK: gate correctly failed on the wrong comparison"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
