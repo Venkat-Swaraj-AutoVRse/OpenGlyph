@@ -1381,6 +1381,21 @@ namespace LightSide
 
         /// <summary>EDITOR/TEST: number of merged unified-path draw groups produced on the last rebuild.</summary>
         internal int UnifiedGroupCountForTests => unifiedRenderData?.Count ?? 0;
+
+        /// <summary>EDITOR/TEST: the (mesh, material, texture) tuples this component built for the
+        /// ACTIVE path. For the legacy path the atlas is the per-entry texture (the component binds it
+        /// via CanvasRenderer.SetTexture, not on the material); for the unified path the array is on
+        /// the material and this texture is null.</summary>
+        internal List<(Mesh mesh, Material mat, Texture tex)> GetDrawnMeshMaterialsForTests()
+        {
+            var result = new List<(Mesh, Material, Texture)>();
+            var src = UseUnifiedRenderer ? unifiedRenderData : renderData;
+            if (src == null) return result;
+            foreach (var rd in src)
+                if (rd.mesh != null && rd.mesh.vertexCount > 0)
+                    result.Add((rd.mesh, rd.material, rd.texture));
+            return result;
+        }
 #endif
 
         private void CollectExistingSubMeshRenderers()

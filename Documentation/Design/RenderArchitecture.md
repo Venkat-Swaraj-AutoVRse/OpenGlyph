@@ -492,3 +492,56 @@ merged mesh stays per component (its own geometry); only the batched GPU state i
 shared. Absolute counts are from a 320×240 dev player with trivial geometry —
 *relative* evidence of batching, not absolute budgets; atlas-budget defaults
 (decision §5.5) still want numbers from representative scenes.
+
+
+### 8.4 Draw-event attribution + CPU (standalone dev player, 320×240)
+
+A per-renderer dump and an empty-canvas baseline make the "scenario (a) 2→3 draws"
+unambiguous — it is **not** a regression:
+
+| Row | GPU draws | setpass | CanvasRenderers | first-renderer dump | CPU main-thread median (ms) |
+|-----|----------:|--------:|----------------:|---------------------|-----------------------------:|
+| baseline (empty canvas) | 2 | 2 | 0 | — | — |
+| (a) legacy | 2 | 2 | 3 | — | 0.31 |
+| (a) unified | 3 | 3 | **1** | `[matCount=1 shader=UniText/Uber submeshes=1]` | 0.31 |
+| (b) legacy | 2 | 2 | 150 | — | 1.78 |
+| (b) unified | 3 | 3 | **50** | `[matCount=1 shader=UniText/Uber submeshes=1]` | 2.09 |
+
+- **The empty canvas already costs 2 draws.** Legacy text folds into those existing
+  UI draws via dynamic batching (same atlas+material), so its *total* stays 2.
+  Unified adds **exactly one** uber draw (its material differs from the baseline
+  UI, so it cannot fold in) → 3. One marginal draw for one text is the floor; the
+  "3rd draw" is that single irreducible uber draw, not an extra pass (the dump
+  shows `matCount=1`, one submesh, `UniText/Uber`).
+- **Build fix found by this measurement:** `UniText/Uber` has no referencing
+  material asset, so it was **stripped from the player** and the unified path fell
+  back to `UI/Default` (the first dump showed `shader=UI/Default`).
+  `UniTextBuildProcessor` now pins it into Always-Included Shaders; the dump then
+  shows `UniText/Uber`.
+- **CPU:** the unified path is currently a *slight CPU regression* under
+  text-changing-every-frame (a: 0.31≈0.31; b: 1.78→2.09 ms median over 120
+  frames), because the per-frame segment→merged-mesh repack + page publish adds
+  work. The renderer-count drop (150→50) does **not** yet convert to a CPU win in
+  this micro-benchmark; a real win needs the repack cached across frames when the
+  text is unchanged (future step). Reported straight, flat-to-slightly-worse.
+
+### 8.5 Pixel equivalence — status (honest)
+
+- **Geometry equivalence: PROVEN.** `UnifiedRendererEquivalenceTests` (SDF + MSDF)
+  shows the unified path submits a **vertex-identical** mesh to the legacy path
+  (max positional delta < 1e-3; the merge copies positions verbatim) and draws
+  through one `UniText/Uber` renderer. The only variable left is the fragment
+  shader, and the uber shader's SDF (`.a`) and MSDF (`median3`) reconstruction
+  mirrors the legacy display shaders.
+- **Camera PIXEL equivalence: NOT YET SUBSTANTIATED.** Rendering the **legacy**
+  multi-CanvasRenderer path to an offscreen `RenderTexture` (both via a batchmode
+  CommandBuffer replay and via a real `cam.Render()` in the standalone player)
+  produces a **black** legacy image (`nonBg_off = 0`) while the unified path
+  renders (`nonBg_on > 0`). The legacy per-child-CanvasRenderer UI submission does
+  not reproduce under offscreen capture here, so a legacy-vs-unified pixel diff
+  would compare unified against black — misleading, so it is **not** asserted and
+  no evidence PNG is published. The EditMode pixel cases are `Assert.Ignore`d with
+  this reason. Substantiating true pixel equivalence needs an on-screen capture
+  path (or a neutral array-sampling reference shader applied to BOTH paths' meshes
+  over the same atlas) — a follow-up. The geometry proof above plus the shared
+  SDF/MSDF reconstruction math is the evidence available this round.
