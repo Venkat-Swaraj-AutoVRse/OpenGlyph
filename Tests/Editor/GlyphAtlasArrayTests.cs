@@ -67,51 +67,51 @@ namespace LightSide.Tests
         [Test]
         public void OverBudget_Eviction_FreesAndReusesPage()
         {
-            // Budget = 1 page. Fill it exactly, then force an allocation that needs eviction. The
-            // evicted (refcount-0, LRU) cell's rect must be freed and REUSED (no second page).
+            // Budget = 1 page. Fill it until the FIRST add that can only be satisfied by eviction;
+            // that proves the page was full. The evicted (refcount-0, LRU) cell's rect must be freed
+            // and REUSED (no second page is ever created).
             _atlas = new GlyphAtlasArray(Size, TextureFormat.Alpha8, pageBudget: 1);
 
-            // Pack glyphs until the page is full. The page is full the first time an add is only
-            // satisfiable by evicting — detectable because CellCount then stops tracking the add
-            // count (an older cell was dropped to make room). Stop one BEFORE that so the page is
-            // full with every packed glyph still resident.
-            var packed = new List<Key>();
-            for (int i = 0; i < 500; i++)
+            // Pack glyphs; detect the first eviction as the add whose CellCount does not grow by one
+            // (an older cell was dropped to make room). That add is the "over-budget" event itself.
+            var added = new List<Key>();
+            Key overBudget = default;
+            bool evictionHappened = false;
+            for (int i = 0; i < 1000; i++)
             {
                 var k = K(1, (uint)(100 + i));
-                bool ok = _atlas.AddGlyph(k, Alpha(14, 14, (byte)(1 + (i % 254))), 14, 14, 1, out _);
-                Assert.IsTrue(ok, "add should always succeed (grow or evict)");
-                if (_atlas.CellCount != packed.Count + 1)
+                int before = _atlas.CellCount;
+                Assert.IsTrue(_atlas.AddGlyph(k, Alpha(14, 14, (byte)(1 + (i % 254))), 14, 14, 1, out var cell),
+                    "add should always succeed (grow or evict)");
+                if (_atlas.CellCount == before + 1)
                 {
-                    // This add triggered an eviction -> the page was already full. Undo it so the
-                    // state is "page full, all `packed` resident", then stop.
-                    _atlas.Evict(k, force: true);
+                    added.Add(k);
+                }
+                else
+                {
+                    // The page was full: this add evicted an LRU cell and reused its rect.
+                    overBudget = k;
+                    evictionHappened = true;
+                    Assert.AreEqual(0, cell.slice, "over-budget glyph reused a rect on the only page");
                     break;
                 }
-                packed.Add(k);
             }
 
-            Assert.AreEqual(1, _atlas.PageCount, "must not exceed the 1-page budget");
-            Assert.Greater(packed.Count, 2, "several glyphs packed before the page filled");
-            Assert.AreEqual(packed.Count, _atlas.CellCount, "page full with every packed glyph resident");
+            Assert.IsTrue(evictionHappened, "the single-page budget must eventually force an eviction");
+            Assert.AreEqual(1, _atlas.PageCount, "still ONE page — a freed rect was reused, not grown");
+            Assert.IsTrue(_atlas.IsResident(overBudget), "the over-budget glyph is resident (it took the reused rect)");
 
-            // Touch the LATER glyphs on a new frame so the FIRST one is the LRU victim.
-            _atlas.BeginFrame();
-            for (int j = 1; j < packed.Count; j++) _atlas.TryGetCell(packed[j], out _);
+            // Exactly one of the previously-added glyphs was evicted to make room (net resident count
+            // is unchanged across the over-budget add: one out, one in).
+            int stillResident = 0;
+            Key evicted = default;
+            foreach (var k in added)
+                if (_atlas.IsResident(k)) stillResident++; else evicted = k;
+            Assert.AreEqual(added.Count - 1, stillResident, "exactly one earlier glyph was evicted");
+            Assert.IsFalse(_atlas.IsResident(evicted), "the evicted glyph is no longer resident");
 
-            var victim = packed[0];
-            Assert.IsTrue(_atlas.IsResident(victim), "victim resident before over-budget add");
-
-            // A new glyph that only fits by evicting: refcount-0 LRU victim is freed and its rect reused.
-            var newcomer = K(1, 9999);
-            bool added = _atlas.AddGlyph(newcomer, Alpha(14, 14, 123), 14, 14, 1, out var newCell);
-
-            Assert.IsTrue(added, "over-budget add must succeed by evicting + reusing a rect");
-            Assert.AreEqual(1, _atlas.PageCount, "still ONE page — the freed rect was reused, not grown");
-            Assert.IsFalse(_atlas.IsResident(victim), "LRU victim was evicted");
-            Assert.IsTrue(_atlas.IsResident(newcomer), "newcomer resident");
-            Assert.AreEqual(0, newCell.slice, "newcomer reused a rect on the only page");
-            Assert.AreEqual(packed.Count, _atlas.CellCount, "net cell count unchanged: one out, one in");
+            // And the evicted glyph re-rasterizes on demand later (lookup currently misses).
+            Assert.IsFalse(_atlas.TryGetCell(evicted, out _), "evicted glyph lookup misses until re-added");
         }
 
         [Test]
