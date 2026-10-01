@@ -234,6 +234,7 @@ namespace LightSide
         private static Stack<HashSet<uint>> glyphSetPool;
         private static Stack<List<(uint, uint)>> charEntryPool;
         private static List<uint> tempGlyphList;
+        private static List<uint> variedGlyphList; // Phase 2: per-run varied glyph indices
 
         private static int CollectGlyphRequestsFromAllComponents(PooledBuffer<UniText> components, int count)
         {
@@ -269,6 +270,30 @@ namespace LightSide
                     ref readonly var run = ref shapedRuns[r];
                     var fontAsset = fontProvider.GetFontAsset(run.fontId);
                     if (fontAsset == null) continue;
+
+                    // Phase 2: a run bound to a variable-font instance rasterizes into the per-
+                    // VariationKey atlas store (coords applied before raster) rather than the shared
+                    // glyph set. Done here on the main thread, before the parallel render pass.
+                    if (!run.variationKey.IsNone)
+                    {
+                        variedGlyphList ??= new List<uint>(64);
+                        variedGlyphList.Clear();
+                        var vend = run.glyphStart + run.glyphCount;
+                        for (int g = run.glyphStart; g < vend; g++)
+                        {
+                            var gi = (uint)shapedGlyphs[g].glyphId;
+                            if (gi == 0) continue;
+                            if (fontAsset.HasGlyphInAtlas(gi, run.variationKey)) continue;
+                            variedGlyphList.Add(gi);
+                        }
+                        if (variedGlyphList.Count > 0)
+                        {
+                            fontProvider.GetVariationCoords(run.fontId, run.styleSpec,
+                                tp.buf.shapingFontSize, out var vtags, out var vcoords);
+                            fontAsset.EnsureGlyphsForVariation(variedGlyphList, run.variationKey, vtags, vcoords);
+                        }
+                        continue; // varied glyphs handled; do not add to the plain set
+                    }
 
                     var codepoints = tp.buf.codepoints;
                     var provider = UnicodeData.Provider;

@@ -212,6 +212,9 @@ namespace LightSide
         /// <summary>The variable-font instance key for this run; <see cref="VariationKey.None"/> for a static face (Phase 2).</summary>
         public VariationKey variationKey;
 
+        /// <summary>The resolved style request (weight/width/style) for this run (Phase 2).</summary>
+        public FontStyleSpec styleSpec;
+
         /// <summary>True when a real styled (bold) face was used, so synthetic bold must be suppressed (Phase 2).</summary>
         public bool realBold;
         /// <summary>True when a real italic/oblique face was used, so synthetic italic must be suppressed (Phase 2).</summary>

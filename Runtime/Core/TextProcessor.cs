@@ -1283,6 +1283,7 @@ namespace LightSide
                     bidiLevel = run.bidiLevel,
                     fontId = run.fontId,
                     variationKey = run.variationKey,
+                    styleSpec = run.styleSpec,
                     realBold = run.realBold,
                     realItalic = run.realItalic
                 });
