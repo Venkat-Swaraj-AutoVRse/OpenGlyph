@@ -602,23 +602,26 @@ jobs:
           magic="$(head -c 4 "$member" | od -An -tx1 | tr -d ' \n')"
           echo "member magic: $magic (wasm = 0061736d)"
           if [ "$magic" != "0061736d" ]; then echo "ARCH FAIL: member not WebAssembly (\\0asm)"; exit 1; fi
-          # Count defined ut_* symbols. llvm-nm's archive/wasm output layout varies, so dump a
-          # sample and extract ut_ identifiers by regex anywhere on the line (then dedup).
-          llvm-nm --defined-only "$f" > "$RUNNER_TEMP/wnm.txt" 2>/dev/null || true
-          echo "--- llvm-nm --defined-only sample (first 5 lines, $(wc -l < "$RUNNER_TEMP/wnm.txt") total):"
+          # llvm-nm over the emscripten AR archive emits nothing on this toolchain, so extract
+          # every member object and run nm on the objects (nm reads a wasm .o reliably). Count
+          # ut_ identifiers deduped. Try emnm, then llvm-nm, as the symbol lister.
+          rm -rf "$RUNNER_TEMP/allobj"; mkdir -p "$RUNNER_TEMP/allobj"
+          ( cd "$RUNNER_TEMP/allobj" && emar x "$f" )
+          NMTOOL=""
+          for cand in emnm llvm-nm; do if command -v "$cand" >/dev/null 2>&1; then NMTOOL="$cand"; break; fi; done
+          echo "nm tool: $NMTOOL"
+          : > "$RUNNER_TEMP/wnm.txt"
+          for o in "$RUNNER_TEMP/allobj"/*.o; do
+            "$NMTOOL" --defined-only "$o" 2>/dev/null >> "$RUNNER_TEMP/wnm.txt" || "$NMTOOL" "$o" 2>/dev/null >> "$RUNNER_TEMP/wnm.txt" || true
+          done
+          echo "--- nm sample (first 5 of $(wc -l < "$RUNNER_TEMP/wnm.txt") lines):"
           sed -n '1,5p' "$RUNNER_TEMP/wnm.txt" || true
-          if [ ! -s "$RUNNER_TEMP/wnm.txt" ]; then
-            # Fallback: some llvm-nm builds need the symbols listed without --defined-only;
-            # drop undefined (type U/u/w) lines explicitly instead.
-            llvm-nm "$f" 2>/dev/null | grep -viE ' [Uuw] ' > "$RUNNER_TEMP/wnm.txt" || true
-            echo "--- fallback llvm-nm sample ($(wc -l < "$RUNNER_TEMP/wnm.txt") total):"
-            sed -n '1,5p' "$RUNNER_TEMP/wnm.txt" || true
-          fi
-          n="$(grep -oE '\but_[A-Za-z0-9_]+\b' "$RUNNER_TEMP/wnm.txt" | sort -u | wc -l | tr -d ' ')"
+          # Keep only DEFINED symbols (drop type U/u/w = undefined/weak-undef), then pull ut_ names.
+          n="$(grep -viE '^[0-9a-fA-F ]* [Uuw] ' "$RUNNER_TEMP/wnm.txt" | grep -oE '\but_[A-Za-z0-9_]+\b' | sort -u | wc -l | tr -d ' ')"
           echo "  defined ut_* symbols: $n (expect $UT_RUNTIME_SYMS)"
           if [ "$n" != "$UT_RUNTIME_SYMS" ]; then
             echo "--- actual ut_* symbols:"
-            grep -oE '\but_[A-Za-z0-9_]+\b' "$RUNNER_TEMP/wnm.txt" | sort -u
+            grep -viE '^[0-9a-fA-F ]* [Uuw] ' "$RUNNER_TEMP/wnm.txt" | grep -oE '\but_[A-Za-z0-9_]+\b' | sort -u
             echo "SYMBOL COUNT FAIL"; exit 1
           fi
 
