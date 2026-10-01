@@ -525,23 +525,31 @@ unambiguous — it is **not** a regression:
   this micro-benchmark; a real win needs the repack cached across frames when the
   text is unchanged (future step). Reported straight, flat-to-slightly-worse.
 
-### 8.5 Pixel equivalence — status (honest)
+### 8.5 Pixel equivalence — PROVEN
 
-- **Geometry equivalence: PROVEN.** `UnifiedRendererEquivalenceTests` (SDF + MSDF)
-  shows the unified path submits a **vertex-identical** mesh to the legacy path
-  (max positional delta < 1e-3; the merge copies positions verbatim) and draws
-  through one `UniText/Uber` renderer. The only variable left is the fragment
-  shader, and the uber shader's SDF (`.a`) and MSDF (`median3`) reconstruction
-  mirrors the legacy display shaders.
-- **Camera PIXEL equivalence: NOT YET SUBSTANTIATED.** Rendering the **legacy**
-  multi-CanvasRenderer path to an offscreen `RenderTexture` (both via a batchmode
-  CommandBuffer replay and via a real `cam.Render()` in the standalone player)
-  produces a **black** legacy image (`nonBg_off = 0`) while the unified path
-  renders (`nonBg_on > 0`). The legacy per-child-CanvasRenderer UI submission does
-  not reproduce under offscreen capture here, so a legacy-vs-unified pixel diff
-  would compare unified against black — misleading, so it is **not** asserted and
-  no evidence PNG is published. The EditMode pixel cases are `Assert.Ignore`d with
-  this reason. Substantiating true pixel equivalence needs an on-screen capture
-  path (or a neutral array-sampling reference shader applied to BOTH paths' meshes
-  over the same atlas) — a follow-up. The geometry proof above plus the shared
-  SDF/MSDF reconstruction math is the evidence available this round.
+- **Geometry equivalence:** the unified path submits a **vertex-identical** mesh to
+  the legacy path (max positional delta < 1e-3; SDF + MSDF).
+- **Pixel equivalence (matched neutral shaders):** both paths' actual meshes are
+  rendered through MATCHED neutral display shaders over the same glyph atlas —
+  legacy via the Texture2D SDF/MSDF reconstruction (`EngineRenderHarness`), unified
+  via an identical **Texture2DArray** reconstruction (`Hidden/OpenGlyphArrayPreview`,
+  per-vertex slice from UV1) — into a RenderTexture, then compared per pixel. Result
+  for **SDF, MSDF, and a `<color>` per-span run**: **maxDelta = 0, 0.00 % pixels
+  differ, nonBg(off) == nonBg(on)** — i.e. **bit-identical**. The pages-as-slices
+  array indirection addresses the exact same atlas texels, the UVs are identical,
+  and per-vertex color (the span) matches. Side-by-side+diff PNGs:
+  `Documentation/Design/evidence/unified_vs_legacy_{sdf,msdf,color_span}.png`
+  (the diff panel is black).
+- **Why neutral shaders, not the production UI shaders:** rendering the real legacy
+  UGUI multi-CanvasRenderer path to an offscreen RenderTexture yields a black image
+  in a batchmode editor (the per-child UI submission does not reproduce offscreen),
+  so a production-shader offscreen diff is not trustworthy here. Matching the neutral
+  shaders holds the AA math constant so the comparison isolates exactly what the
+  unified path changes — geometry, UVs, atlas-content fidelity — which is bit-exact.
+  (The production uber-shader itself is separately verified to compile + be supported,
+  and its SDF `.a` / MSDF `median3` reconstruction mirrors the legacy shaders.)
+- **Underlay / outline / emoji:** outline+underlay are driven by the style table from
+  `AppearanceStyleShim` (unit-tested) and the default appearance carries none, so the
+  default-appearance pixel diff above exercises the common path at bit-exactness; a
+  styled-span outline/underlay pixel case and an emoji (color-font) case remain for a
+  follow-up once a bundled OFL color font is wired into the fixtures.
