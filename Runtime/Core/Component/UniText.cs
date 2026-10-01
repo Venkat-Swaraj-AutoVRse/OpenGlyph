@@ -1220,6 +1220,16 @@ namespace LightSide
             // UpdateSubMeshes exactly as before (default — guards the existing test suite).
             if (UseUnifiedRenderer)
             {
+                // CRITICAL: the uber shader reads per-glyph (sliceIdx, glyphMode, styleIdx) from UV1
+                // (TEXCOORD1). A Canvas only uploads the vertex channels in additionalShaderChannels —
+                // UV1 is NOT included by default, so without this the shader reads UV1 = 0 →
+                // glyphMode = 0 (SDF) for EVERY glyph, and an MSDF glyph on the RGBA32 array then
+                // samples .a (= 255 from the RGB24→RGBA32 copy) → a SOLID WHITE BLOCK. Enabling
+                // TexCoord1 lets the per-glyph data reach the shader.
+                var cv = canvas;
+                if (cv != null)
+                    cv.additionalShaderChannels |= AdditionalCanvasShaderChannels.TexCoord1;
+
                 unifiedBuilder ??= new UnifiedRenderBuilder();
                 unifiedRenderData ??= new List<UniTextRenderData>(2);
                 var style = AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
