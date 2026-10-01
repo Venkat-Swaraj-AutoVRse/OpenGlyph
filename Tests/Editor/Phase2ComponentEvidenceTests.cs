@@ -68,6 +68,13 @@ namespace LightSide.Tests
             var t = go.AddComponent<UniText>();
             t.FontStack = stack;
             t.FontSize = FontSize;
+            // Register the synthetic Bold/Italic modifiers (as a real app does for <b>/<i> support);
+            // without them the component has no modifier to apply the bold/italic flags the Phase-2
+            // property path (or markup) sets. One ModRegister instance per component.
+            var boldReg = new ModRegister { Modifier = new BoldModifier(), Rule = new BoldParseRule() };
+            var italReg = new ModRegister { Modifier = new ItalicModifier(), Rule = new ItalicParseRule() };
+            t.RegisterModifier(boldReg);
+            t.RegisterModifier(italReg);
             if (weight != FontStyleSpec.NormalWeight) t.FontWeight = weight;
             if (style != StyleAxis.Normal) t.FontStyleAxis = style;
             t.Text = Sample;

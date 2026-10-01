@@ -96,7 +96,51 @@ namespace LightSide
                 return emojiMaterials;
             }
 
-            return materialsByFontId.TryGetValue(font.GetCachedInstanceId(), out var mats) ? mats : defaultMaterialsArr;
+            var mats = materialsByFontId.TryGetValue(font.GetCachedInstanceId(), out var m) ? m : defaultMaterialsArr;
+
+            // Phase 2 fix: an MSDF-mode font MUST be drawn with an MSDF shader. The default/assigned
+            // materials carry an SDF shader; sampling the RGB24 MSDF atlas with an SDF (alpha) shader
+            // renders solid blocks. When the chosen material is not already MSDF, substitute an
+            // MSDF-shader clone (created once, cached), so an MSDF font works on the default appearance.
+            if (mats != null && mats.Length > 0 && font.AtlasRenderMode == UniTextRenderMode.Msdf
+                && mats[0] != null && !IsMsdfShader(mats[0].shader))
+                mats = GetOrCreateMsdfVariant(mats);
+
+            return mats;
+        }
+
+        [NonSerialized] private Dictionary<Material[], Material[]> msdfVariantCache;
+        [NonSerialized] private Shader cachedMsdfShader;
+
+        private static bool IsMsdfShader(Shader s) =>
+            s != null && s.name != null && s.name.IndexOf("MSDF", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+        // Clones the given materials with their shader swapped to the matching MSDF variant, preserving
+        // the texture/color/property state. Cached per source array so we build each variant once.
+        private Material[] GetOrCreateMsdfVariant(Material[] source)
+        {
+            msdfVariantCache ??= new Dictionary<Material[], Material[]>();
+            if (msdfVariantCache.TryGetValue(source, out var cached)) return cached;
+
+            cachedMsdfShader ??= Shader.Find("UniText/MSDF SSD")
+                                 ?? Shader.Find("UniText/MSDF") ?? Shader.Find("UniText/MSDF Overlay");
+            if (cachedMsdfShader == null)
+            {
+                // No MSDF shader available (stripped build): leave as-is rather than render wrong.
+                msdfVariantCache[source] = source;
+                return source;
+            }
+
+            var variant = new Material[source.Length];
+            for (int i = 0; i < source.Length; i++)
+            {
+                if (source[i] == null) { variant[i] = null; continue; }
+                var mv = new Material(source[i]) { name = source[i].name + " (MSDF)" };
+                mv.shader = cachedMsdfShader;
+                variant[i] = mv;
+            }
+            msdfVariantCache[source] = variant;
+            return variant;
         }
 
         private Dictionary<int, float> cachedPropertyDeltas;
