@@ -565,10 +565,11 @@ namespace OpenGlyph.Benchmarks
                         sampler.Tick();
                         for (int i = 0; i < labels.Count; i++)
                         {
-                            float w = labels[i].resolvedStyle.width;
+                            // width is fixed by style (800); the TEXT-driven signal is the
+                            // resolved HEIGHT (wrapped text height). height>0 => generated.
                             float h = labels[i].resolvedStyle.height;
-                            if (w <= 0f || h <= 0f) valid = false;
-                            if (w < minW) minW = w;
+                            if (h <= 0f) valid = false;
+                            if (h < minW) minW = h; // reuse minW to carry min resolved height
                         }
                     }
                     ClearLabels(root, labels);
