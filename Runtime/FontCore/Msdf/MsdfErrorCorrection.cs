@@ -62,57 +62,18 @@ namespace LightSide.Msdf
             FindErrors(field, w, h, stencil);
 
             // 3) Apply: msdfgen MSDFErrorCorrection::apply sets each flagged texel to its own median
-            //    (a scalar cannot clash). For a texel whose median is DEGENERATE — pulled onto the
-            //    contour (~0.5) by a near-tangent wall or a pinned channel — a plain flatten is a
-            //    no-op (median is already ~0.5) and leaves the phantom edge. In that case we resolve
-            //    the texel to the side its neighbourhood unanimously agrees on, read from a SNAPSHOT
-            //    of the pre-apply field so the resolution is not biased by other texels corrected in
-            //    the same pass. This is the artifact-free value the correction is meant to produce.
-            var snap = (float[])field.Clone();
+            //    across all three channels — a single scalar cannot clash, so the phantom edge is
+            //    removed. With the round-6 generator root-cause fix (nonZeroSign in EdgeSegment), the
+            //    field no longer pins a whole column to the contour, so the earlier custom
+            //    "degenerate-median" resolution (neighbourhood averaging) is unnecessary and has been
+            //    removed; this is now exactly msdfgen's apply().
             for (int i = 0; i < w * h; i++)
             {
                 if ((stencil[i] & Stencil.Error) == 0) continue;
                 int o = i * 3;
                 float m = MsdfGenerator.Median(field[o], field[o + 1], field[o + 2]);
-                // A degenerate flagged texel (median pulled onto the contour ~0.5) cannot be fixed by
-                // msdfgen's plain flatten-to-median (it is already ~0.5), so resolve it to the
-                // unanimous neighbourhood value; otherwise fall back to flatten-to-median.
-                if (Math.Abs(m - 0.5f) <= 0.06f)
-                {
-                    float resolved = ResolveDegenerate(snap, w, h, i);
-                    if (resolved >= 0f) m = resolved;
-                }
                 field[o] = m; field[o + 1] = m; field[o + 2] = m;
             }
-        }
-
-        /// <summary>
-        /// For a degenerate flagged texel (median ~0.5), returns the value it should hold: the mean
-        /// of its 8-neighbour medians that lie firmly on the UNANIMOUS side (all firm neighbours on
-        /// one side of 0.5). Averaging the whole neighbourhood (not a single opposite pair) keeps the
-        /// correction 2D-smooth, so a column of resolved texels follows the surrounding gradient
-        /// instead of forming a vertical seam. Returns -1 when the neighbourhood is not unanimous
-        /// (leave the texel at its median).
-        /// </summary>
-        private static float ResolveDegenerate(float[] snap, int w, int h, int i)
-        {
-            int x = i % w, y = i / w;
-            const float firm = 0.03f;
-            int inside = 0, outside = 0; float sumIn = 0f, sumOut = 0f;
-            for (int dy = -1; dy <= 1; dy++)
-                for (int dx = -1; dx <= 1; dx++)
-                {
-                    if (dx == 0 && dy == 0) continue;
-                    int nx = x + dx, ny = y + dy;
-                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-                    float m = MedAt(snap, (ny * w + nx) * 3);
-                    if ((m - 0.5f) > firm) { inside++; sumIn += m; }
-                    else if ((0.5f - m) > firm) { outside++; sumOut += m; }
-                }
-            // Unanimous (no dissent) and enough support -> use that side's neighbourhood mean.
-            if (inside >= 3 && outside == 0) return sumIn / inside;
-            if (outside >= 3 && inside == 0) return sumOut / outside;
-            return -1f;
         }
 
         // ---------------------------------------------------------------------------------------
@@ -261,18 +222,16 @@ namespace LightSide.Msdf
                         }
                     }
 
-                    // OPPOSITE-NEIGHBOUR dip (msdfgen interpolatedMedianMinimum / -Maximum applied at
-                    // the texel): a texel whose median sits ON the contour (~0.5) while BOTH of a pair
-                    // of OPPOSITE neighbours agree firmly on one side is a false edge — the median was
-                    // pulled to the contour by a tangent edge or a pinned channel even though no real
-                    // contour passes between the two neighbours. This catches the all-0.5 tangent
-                    // column (the '@' inner-wall extremum) that the pairwise crossing/dip tests miss,
-                    // because an exact-0.5 median satisfies neither "crosses 0.5" nor "strictly on one
-                    // side". A genuine thin stroke never triggers it: its opposite neighbours straddle
-                    // 0.5 (one inside, one outside), so the firm-agreement condition fails.
+                    // msdfgen interpolatedMedianMinimum / interpolatedMedianMaximum
+                    // (core/MSDFErrorCorrection.cpp): the interpolated median along an axis through a
+                    // texel attains an interior EXTREMUM that lands on the opposite side of 0.5 from
+                    // both axis endpoints. msdfgen evaluates this per axis (H, V, and both diagonals);
+                    // it is the test that catches a median pulled toward the contour at a junction
+                    // (e.g. the 'W' middle vertex) where the pairwise crossing/same-side dip tests
+                    // alone do not flag it. A genuine thin stroke is NOT flagged: its opposite
+                    // neighbours straddle 0.5 (one in, one out), so the firm same-side condition fails.
                     if (!artifact)
                     {
-                        // The four opposite-neighbour axes through this texel: H, V, and both diagonals.
                         int[,] axes = { { 1, 0 }, { 0, 1 }, { 1, 1 }, { 1, -1 } };
                         for (int a = 0; a < 4 && !artifact; a++)
                         {
@@ -282,7 +241,7 @@ namespace LightSide.Msdf
                             if (px2 < 0 || px2 >= w || py2 < 0 || py2 >= h) continue;
                             float m1 = MedAt(field, (py1 * w + px1) * 3);
                             float m2 = MedAt(field, (py2 * w + px2) * 3);
-                            artifact = OppositeNeighbourDip(cm, m1, m2);
+                            artifact = InterpolatedMedianExtremum(cm, m1, m2);
                         }
                     }
 
@@ -294,15 +253,15 @@ namespace LightSide.Msdf
         private static float MedAt(float[] field, int o) => MsdfGenerator.Median(field[o], field[o + 1], field[o + 2]);
 
         /// <summary>
-        /// True when the centre median sits essentially ON the contour (within a small band of 0.5)
-        /// while BOTH opposite neighbour medians lie firmly on the SAME side of 0.5 — a phantom edge
-        /// pulled onto the contour between two texels that agree there is no edge there. The firm
-        /// margin keeps genuine thin strokes (whose opposite neighbours straddle 0.5) and real edges
-        /// (centre already off 0.5) from being flagged.
+        /// msdfgen interpolatedMedianMinimum / interpolatedMedianMaximum: the centre median sits on
+        /// the contour (within a small band of 0.5) while BOTH opposite neighbour medians lie firmly
+        /// on the SAME side — the interpolated median has an interior extremum crossing 0.5 where no
+        /// real contour passes. Firm margins keep genuine thin strokes (opposite neighbours straddle
+        /// 0.5) and real edges (centre already off 0.5) from being flagged.
         /// </summary>
-        private static bool OppositeNeighbourDip(float cm, float m1, float m2)
+        private static bool InterpolatedMedianExtremum(float cm, float m1, float m2)
         {
-            const float onEdge = 0.06f;  // |cm-0.5| this small == pulled toward the contour / a dip
+            const float onEdge = 0.06f;  // |cm-0.5| this small == median pulled toward the contour
             const float firm = 0.04f;    // a neighbour this far past 0.5 is a firm vote
             if (Math.Abs(cm - 0.5f) > onEdge) return false;
             bool bothInside = (m1 - 0.5f) > firm && (m2 - 0.5f) > firm;

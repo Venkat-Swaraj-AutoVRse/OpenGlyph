@@ -192,17 +192,21 @@ namespace LightSide.Tests
 
                     var msdf = MsdfBuilder.Build(outline, spread); // error correction ON (default)
                     Assert.IsTrue(msdf.IsValid, $"build failed '{ch}'");
-                    // Honest single-channel SDF of the SAME outline with IDENTICAL framing (same
-                    // w/h/spread/range/sign) — the artifact-free coverage reference. A single channel
-                    // cannot clash, so its decoded coverage is the correct smoothstep of the true
-                    // signed distance; any place the MSDF median decodes differently FAR from the
-                    // outline is a multi-channel streak/speck.
-                    float[] sdf = MsdfBuilder.BuildSdf(outline, spread, out int sw, out int sh, out _);
-                    Assert.IsNotNull(sdf, $"SDF build failed '{ch}'");
-                    Assert.AreEqual(msdf.Width, sw); Assert.AreEqual(msdf.Height, sh);
+
+                    // STEP-3 FIX: the coverage reference is now the INDEPENDENT brute-force exact
+                    // signed distance (min exact point-to-segment distance over the densely-flattened
+                    // outline, signed by Shape.Contains non-zero winding), NOT our own SDF. Our SDF
+                    // and MSDF share MinSignedDistance, so a defect in that shared code (the round-5
+                    // '@' column pin) was invisible to a test that used our SDF as its reference —
+                    // both agreed because both were wrong. The brute distance shares no code with the
+                    // generator, so it catches exactly that class of fault.
+                    var shape = Shape.FromOutline(outline);
+                    shape.OrientContours();
+                    int w0 = msdf.Width, h0 = msdf.Height;
+                    double[] bruteGrid = BruteSignedGrid(shape, msdf, spread, w0, h0);
 
                     var (worst, worstX, worstY, farOffenders) =
-                        CoverageStreakScan(msdf, sdf, up, coverageErrThreshold, farPx);
+                        CoverageStreakScan(msdf, bruteGrid, up, coverageErrThreshold, farPx);
 
                     rows.Add($"  '{ch}': far-from-edge pixels (>{farPx}px) with coverage err >{coverageErrThreshold:F2} = {farOffenders}; worst err {worst:F3} at ({worstX},{worstY})px/{up}x");
                     if (farOffenders > 0)
@@ -210,7 +214,7 @@ namespace LightSide.Tests
                     evaluated++;
                 }
 
-                string table = $"Decoded-coverage streak/speck scan (MSDF vs honest SDF, same bilinear + shader smoothstep, {up}x):\n" + string.Join("\n", rows);
+                string table = $"Decoded-coverage streak/speck scan (MSDF vs BRUTE-FORCE exact distance, same bilinear + shader smoothstep, {up}x):\n" + string.Join("\n", rows);
                 TestContext.WriteLine(table);
                 Assert.GreaterOrEqual(evaluated, 5, "Too few glyphs evaluable:\n" + table);
                 Assert.IsEmpty(offenders,
@@ -234,7 +238,7 @@ namespace LightSide.Tests
         /// <paramref name="thr"/> is a phantom edge.
         /// </summary>
         private static (float worst, int wx, int wy, int farOffenders) CoverageStreakScan(
-            MsdfGlyphResult msdf, float[] sdf, int up, float thr, float farPx)
+            MsdfGlyphResult msdf, double[] brutePx, int up, float thr, float farPx)
         {
             int w = msdf.Width, h = msdf.Height;
             double range = msdf.Range <= 0 ? 1 : msdf.Range;
@@ -252,20 +256,19 @@ namespace LightSide.Tests
                 {
                     double fx = (double)ux / up, fy = (double)uy / up;
 
-                    // AA-band guard: the honest single-channel SDF is monotone in true distance, so
-                    // |sdf-0.5|*range is a clean distance-to-outline. Skip the whole soft-edge band
-                    // (|dist| <= farPx) where sub-pixel coverage legitimately ramps.
-                    float sdfVal = BilinearScalarField(sdf, w, h, fx, fy);
-                    float distPx = Mathf.Abs(sdfVal - 0.5f) * (float)range;
+                    // AA-band guard from the INDEPENDENT brute-force exact signed distance (px),
+                    // bilinearly sampled. Skip the soft-edge band (|dist| <= farPx) where sub-pixel
+                    // coverage legitimately ramps.
+                    float distSigned = BilinearScalarField(brutePx, w, h, fx, fy);
+                    float distPx = Mathf.Abs(distSigned);
                     if (distPx <= farPx) continue;
 
-                    // Reference coverage is the UNAMBIGUOUS fill side far from the outline: the SDF
-                    // (and the true shape) say fully inside (1) or fully outside (0). A streak or
-                    // speck is where the MSDF median decodes toward the OPPOSITE side here — a phantom
-                    // edge in open field. Using the fill side (not the SDF's exact value) means a
-                    // sharp corner that MSDF legitimately keeps crisper than the rounded SDF is NOT
-                    // flagged: both still decode to the same (inside) side, so their error is ~0.
-                    float refCov = sdfVal > 0.5f ? 1f : 0f;
+                    // Reference coverage = the UNAMBIGUOUS true fill side far from the outline: brute
+                    // says fully inside (1) or fully outside (0). A streak/speck is where the MSDF
+                    // median decodes toward the OPPOSITE side here — a phantom edge in open field. A
+                    // sharp corner MSDF keeps crisper than a rounded SDF is NOT flagged: the brute
+                    // true fill side agrees with MSDF there, so their coverage error is ~0.
+                    float refCov = distSigned > 0f ? 1f : 0f;
                     float median = BilinearMedian(msdf.Field, w, h, fx, fy);
                     float msdfCov = Mathf.Clamp01((median - 0.5f) * scale + 0.5f);
                     float err = Mathf.Abs(msdfCov - refCov);
@@ -278,16 +281,57 @@ namespace LightSide.Tests
             return (worst, wx, wy, farOffenders);
         }
 
-        private static float BilinearScalarField(float[] field, int w, int h, double fx, double fy)
+        private static float BilinearScalarField(double[] field, int w, int h, double fx, double fy)
         {
             int x0 = Math.Max(0, Math.Min((int)Math.Floor(fx), w - 1));
             int y0 = Math.Max(0, Math.Min((int)Math.Floor(fy), h - 1));
             int x1 = Math.Min(x0 + 1, w - 1), y1 = Math.Min(y0 + 1, h - 1);
             double tx = fx - x0, ty = fy - y0;
-            float S(int x, int y) => field[y * w + x];
-            float top = (float)(S(x0, y0) * (1 - tx) + S(x1, y0) * tx);
-            float bot = (float)(S(x0, y1) * (1 - tx) + S(x1, y1) * tx);
+            double S(int x, int y) => field[y * w + x];
+            double top = S(x0, y0) * (1 - tx) + S(x1, y0) * tx;
+            double bot = S(x0, y1) * (1 - tx) + S(x1, y1) * tx;
             return (float)(top * (1 - ty) + bot * ty);
+        }
+
+        /// <summary>
+        /// Per-field-pixel BRUTE-FORCE exact signed distance (in px): for each pixel centre, the min
+        /// exact point-to-segment distance over the densely-flattened outline, signed by
+        /// Shape.Contains (non-zero winding). Shares no code with EdgeSegment.MinSignedDistance. The
+        /// shape must already be oriented (OrientContours) by the caller.
+        /// </summary>
+        private static double[] BruteSignedGrid(Shape shape, MsdfGlyphResult msdf, int spread, int w, int h)
+        {
+            shape.Bounds(out double l, out double b, out double r, out double t);
+            int gx0 = (int)Math.Floor(l), gy0 = (int)Math.Floor(b);
+            double tX = spread - gx0, tY = spread - gy0;
+
+            var spans = new List<(Vector2D a, Vector2D b)>();
+            foreach (var c in shape.Contours)
+                foreach (var e in c.Edges)
+                {
+                    int steps = (e is LinearSegment) ? 1 : 256;
+                    Vector2D prev = e.Point(0);
+                    for (int i = 1; i <= steps; i++) { Vector2D cur = e.Point((double)i / steps); spans.Add((prev, cur)); prev = cur; }
+                }
+
+            var grid = new double[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    var p = new Vector2D((x + 0.5) - tX, (y + 0.5) - tY);
+                    double best = double.MaxValue;
+                    foreach (var (a, bb) in spans)
+                    {
+                        Vector2D ab = bb - a;
+                        double len2 = Vector2D.Dot(ab, ab);
+                        double tt = len2 > 0 ? Vector2D.Dot(p - a, ab) / len2 : 0;
+                        if (tt < 0) tt = 0; else if (tt > 1) tt = 1;
+                        double d = (p - (a + ab * tt)).Length();
+                        if (d < best) best = d;
+                    }
+                    grid[y * w + x] = shape.Contains(p) ? best : -best;
+                }
+            return grid;
         }
 
         // ---------------- Issue 2: polarity vs winding ----------------
