@@ -29,6 +29,7 @@ namespace LightSide.Tests
         {
             foreach (var o in _junk) if (o != null) Object.DestroyImmediate(o);
             _junk.Clear();
+            UnifiedRenderBuilder.ResetShared();
             SharedGlyphAtlas.Clear();
             Shaper.ClearAllCaches();
         }

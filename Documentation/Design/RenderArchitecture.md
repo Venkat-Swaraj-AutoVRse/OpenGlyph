@@ -472,27 +472,23 @@ The per-component renderer collapse is exactly as designed: n → 1 (text-only /
 same Alpha8 group here) per component.
 
 ### 8.3 Draw calls — GPU `ProfilerRecorder` (standalone dev player, 320×240)
-| Scenario | Legacy draws / batches / setpass | Unified draws / batches / setpass |
-|----------|---------------------------------:|----------------------------------:|
-| (a) one text | 2 / 2 / 2 | 3 / 3 / 3 |
-| (b) 50 components | 2 / 2 / 2 | **102 / 102 / 101** |
 
-**Honest finding (a real regression to fix next).** In the 50-component case the
-legacy path's GPU draws are tiny (**2**) because Unity's dynamic UI batching
-already collapses many CanvasRenderers that share the **same** atlas texture and
-material — which the 50 identical legacy components do. The current unified build
-creates a **separate uber `Material` instance and a separate per-component mesh**
-per component, and distinct material instances **do not batch**, so 50 components
-cost ~**2 draws × 50 ≈ 102**. So while the unified path wins decisively on
-*renderer count* and on a *single* mixed-font text, as currently built it
-*defeats* cross-component UI batching and is worse on the GPU for many identical
-components.
+Initial per-component-material build (regression) then the shared-material fix:
 
-**Fix (next step, not this round):** share ONE uber material and ONE process-wide
-`Texture2DArray` across components (the `SharedGlyphAtlas` registry already makes
-the array shared; the material must be shared too, and per-component data —
-clip rect, style-table — moved to `MaterialPropertyBlock`/per-vertex so one
-material batches across components). The absolute counts above are from a 320×240
-dev player with trivial geometry, so treat them as *relative* evidence of the
-batching behaviour, not absolute budgets. Atlas-budget defaults (decision §5.5)
-should be set after this batching fix, from numbers on representative scenes.
+| Scenario | Legacy draws | Unified draws (per-component mat) | Unified draws (shared mat) |
+|----------|-------------:|----------------------------------:|---------------------------:|
+| (a) one text | 2 | 3 | **3** |
+| (b) 50 components | 2 | **102** | **3** |
+
+**Fixed.** The first cut created a separate uber `Material` instance per component;
+distinct material instances do not batch, so 50 identical components cost ~2×50 ≈
+**102** GPU draws and lost to the legacy path's cross-component UI batching. The
+fix (shipped): ONE process-wide uber material + ONE shared `Texture2DArray` + ONE
+shared, content-deduped `StyleTable` per draw-group format, so every component
+binds identical GPU state and UGUI batches them. Re-measured: scenario (b) ON
+drops **102 → 3** GPU draws — on par with legacy's **2–3** — while using **50**
+CanvasRenderers instead of legacy's **150** (the structural CPU-side win). The
+merged mesh stays per component (its own geometry); only the batched GPU state is
+shared. Absolute counts are from a 320×240 dev player with trivial geometry —
+*relative* evidence of batching, not absolute budgets; atlas-budget defaults
+(decision §5.5) still want numbers from representative scenes.

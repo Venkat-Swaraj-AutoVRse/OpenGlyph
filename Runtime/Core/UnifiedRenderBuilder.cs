@@ -6,23 +6,26 @@ namespace LightSide
 {
     /// <summary>
     /// Render-Architecture Round 2, sub-task 2 (live path): collapses the legacy per-segment
-    /// <see cref="UniTextRenderData"/> list (one entry per font/atlas-page/pass) into AT MOST TWO
-    /// merged entries — one per shared-array format (Alpha8 SDF/coverage, RGBA32 MSDF/color) — each a
-    /// single mesh bound to one <see cref="GlyphAtlasArray"/> and the <c>UniText/Uber</c> material.
-    /// This is what makes a <c>UniText</c> component draw in ≤2 CanvasRenderers. One instance is owned
-    /// per component so its meshes/materials/style table persist across rebuilds.
+    /// <see cref="UniTextRenderData"/> list into AT MOST TWO merged entries — one per shared-array
+    /// format (Alpha8 SDF/coverage, RGBA32 MSDF/color) — each a single mesh bound to one
+    /// <see cref="GlyphAtlasArray"/> and the <c>UniText/Uber</c> material.
     /// </summary>
     /// <remarks>
-    /// <para><b>Pages-as-slices.</b> Reuses the existing segment meshes/UVs wholesale: each legacy
-    /// atlas PAGE is published as a slice of the shared array (<see cref="GlyphAtlasArray.AddPage"/>),
-    /// so a vertex's existing page-local UV0.xy plus the per-glyph slice index addresses the same
-    /// texel — no re-layout, no re-rasterization. Per-glyph <c>(spreadRatio, sliceIdx, glyphMode,
-    /// styleIdx)</c> is written into UV1 for the uber-shader.</para>
-    /// <para><b>glyphMode</b> comes from the segment's atlas TEXTURE FORMAT: Alpha8 ⇒ SDF (coverage
-    /// samples .a identically), RGB24 ⇒ MSDF, RGBA32 ⇒ COLR color.</para>
-    /// <para><b>Style.</b> A single component-wide <see cref="GlyphStyle"/> (from
-    /// <see cref="AppearanceStyleShim"/>) occupies row 0; per-span styles are a later step but the
-    /// per-vertex styleIdx is already plumbed.</para>
+    /// <para><b>Batching (Round-2 §8 fix).</b> The uber <see cref="Material"/> and the
+    /// <see cref="StyleTable"/> are PROCESS-WIDE shared per draw-group format, not per component. A
+    /// first cut created a material per component, and distinct material instances do not batch, so
+    /// 50 identical components cost ~50× the draws and lost to the legacy path's cross-component UI
+    /// batching. Sharing one material + one array + one style texture across components lets UGUI
+    /// batch them again, so the renderer-count win (n→1 per component) is not paid back on the GPU.
+    /// The merged MESH stays per component (its geometry is the component's text); only the GPU state
+    /// the batcher keys on (material, textures) is shared.</para>
+    /// <para><b>Pages-as-slices.</b> Each legacy atlas PAGE is published as a slice of the shared
+    /// array (<see cref="GlyphAtlasArray.AddPage"/>); a vertex's existing page-local UV0.xy plus the
+    /// per-glyph slice index addresses the same texel. Per-glyph <c>(spreadRatio, sliceIdx, glyphMode,
+    /// styleIdx)</c> is written into UV1.</para>
+    /// <para><b>Style.</b> The shared style table dedups identical <see cref="GlyphStyle"/>s across
+    /// ALL components, so the default appearance occupies one shared row and every component's styleIdx
+    /// points at it — keeping the shared material's bound style texture identical for batching.</para>
     /// </remarks>
     public sealed class UnifiedRenderBuilder : IDisposable
     {
@@ -34,6 +37,32 @@ namespace LightSide
         private static Shader _uberShader;
         private static Shader UberShader => _uberShader != null ? _uberShader : (_uberShader = Shader.Find("UniText/Uber"));
 
+        // ---- Process-wide shared state (keyed by draw-group format) so components batch together ---
+        private static readonly Dictionary<TextureFormat, Material> SharedMaterials = new();
+        private static readonly StyleTable SharedStyles = new();
+
+        /// <summary>Shared uber material for a draw-group format, created once and reused by every component.</summary>
+        private static Material MaterialFor(TextureFormat format)
+        {
+            if (SharedMaterials.TryGetValue(format, out var m) && m != null) return m;
+            var sh = UberShader;
+            m = new Material(sh != null ? sh : Shader.Find("UI/Default"))
+            {
+                name = $"UniText Uber Shared [{format}]",
+                hideFlags = HideFlags.DontSave,
+            };
+            SharedMaterials[format] = m;
+            return m;
+        }
+
+        /// <summary>Drops the shared material + style table (test reset). Does not touch the arrays (SharedGlyphAtlas owns those).</summary>
+        public static void ResetShared()
+        {
+            foreach (var m in SharedMaterials.Values) if (m != null) UnityEngine.Object.DestroyImmediate(m);
+            SharedMaterials.Clear();
+            SharedStyles.Reset();
+        }
+
         private sealed class Group
         {
             public readonly List<Vector3> verts = new();
@@ -42,13 +71,11 @@ namespace LightSide
             public readonly List<Vector4> uv1 = new();
             public readonly List<int> tris = new();
             public Mesh mesh;
-            public Material material;
             public int pageSize;
             public void ClearBuffers() { verts.Clear(); colors.Clear(); uv0.Clear(); uv1.Clear(); tris.Clear(); pageSize = 0; }
         }
 
         private readonly Dictionary<TextureFormat, Group> _groups = new();
-        private readonly StyleTable _styleTable = new();
         private readonly List<Vector4> _tmpUv = new();
 
         private static UberDrawGroup.GlyphMode ModeFromFormat(TextureFormat f) => f switch
@@ -61,16 +88,16 @@ namespace LightSide
         /// <summary>
         /// Builds the merged render data (≤2 entries) into <paramref name="output"/> from the legacy
         /// per-segment <paramref name="segments"/>, shading every glyph with the component-wide
-        /// <paramref name="style"/> (styleIdx 0). Main-thread only.
+        /// <paramref name="style"/> (resolved to a shared style-table row). Main-thread only.
         /// </summary>
         public void Build(List<UniTextRenderData> segments, in GlyphStyle style, List<UniTextRenderData> output)
         {
             output.Clear();
             if (segments == null || segments.Count == 0) return;
 
-            _styleTable.Reset();
-            int styleIdx = _styleTable.GetOrAdd(style);
-            var styleTex = _styleTable.Apply();
+            // Shared style table (dedups identical styles across all components) -> stable styleIdx.
+            int styleIdx = SharedStyles.GetOrAdd(style);
+            var styleTex = SharedStyles.Apply();
 
             foreach (var kv in _groups) kv.Value.ClearBuffers();
 
@@ -105,16 +132,16 @@ namespace LightSide
                 m.SetUVs(1, g.uv1);
                 m.SetTriangles(g.tris, 0);
 
-                if (g.material == null) g.material = NewUberMaterial();
-                g.material.SetTexture(MainTexArray, arr.Texture);
-                g.material.SetTexture(StyleTex, styleTex);
-                g.material.SetFloat(StyleTexWidth, _styleTable.Width);
-                g.material.SetFloat(StyleTexHeight, Mathf.Max(1, _styleTable.Count));
+                // SHARED material (batches across components) carrying the shared array + style texture.
+                var mat = MaterialFor(kv.Key);
+                mat.SetTexture(MainTexArray, arr.Texture);
+                mat.SetTexture(StyleTex, styleTex);
+                mat.SetFloat(StyleTexWidth, SharedStyles.Width);
+                mat.SetFloat(StyleTexHeight, Mathf.Max(1, SharedStyles.Count));
 
-                // IMPORTANT: the atlas is a Texture2DArray bound via the material's _MainTexArray.
-                // Do NOT pass it as the CanvasRenderer main texture (SetTexture expects a 2D texture
-                // and asserts otherwise). The render-data texture is null; the material carries the array.
-                output.Add(new UniTextRenderData(m, g.material, (Texture)null, 0));
+                // Array bound via material _MainTexArray; CanvasRenderer texture MUST be null (a
+                // Texture2DArray trips a native kTexDim2D assert in CanvasRenderer.SetTexture).
+                output.Add(new UniTextRenderData(m, mat, (Texture)null, 0));
             }
         }
 
@@ -146,25 +173,12 @@ namespace LightSide
             return m;
         }
 
-        private static Material NewUberMaterial()
-        {
-            var sh = UberShader;
-            return new Material(sh != null ? sh : Shader.Find("UI/Default"))
-            {
-                name = "UniText Uber (runtime)",
-                hideFlags = HideFlags.DontSave,
-            };
-        }
-
+        /// <summary>Disposes this component's per-component meshes. The shared material/style table are process-wide (freed via <see cref="ResetShared"/>).</summary>
         public void Dispose()
         {
             foreach (var kv in _groups)
-            {
                 if (kv.Value.mesh != null) UnityEngine.Object.DestroyImmediate(kv.Value.mesh);
-                if (kv.Value.material != null) UnityEngine.Object.DestroyImmediate(kv.Value.material);
-            }
             _groups.Clear();
-            _styleTable.Dispose();
         }
     }
 }
