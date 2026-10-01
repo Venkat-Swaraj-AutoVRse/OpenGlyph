@@ -385,7 +385,7 @@ namespace LightSide
     #endif
 
                 appearance = value;
-                fontProvider.Appearance = value; 
+                if (fontProvider != null) fontProvider.Appearance = value;
     #if UNITY_EDITOR
                 ListenConfigChanged();
     #endif
