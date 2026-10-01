@@ -54,5 +54,23 @@ fixture is the **Regular static instance** of that family (the `wght=400`,
 `wdth=100` default master), which is why its `name` ID 3 is `NotoSansThai-Regular`;
 the upstream copyright, version and OFL licence are carried unchanged. The `.pin`
 file records the exact upstream commit so the fixture's provenance is auditable.
-No Khmer/Myanmar/Lao font fixture is bundled; the real-layout test only renders a
-script for which a font is present (Thai), and skips the others cleanly.
+
+## Font fixtures — `NotoSansKhmer-Regular.ttf`, `NotoSansMyanmar-Regular.ttf`
+
+Used by `RealLayoutTests.ComplexScript_NarrowWidth_WrapsAtWordBoundaries` to run the
+same real-layout wrap check over Khmer and Myanmar. Test data only, like the Thai
+fixture. **License: OFL-1.1**, confirmed by each font's `name` ID 13/14.
+
+Each is the **Regular static instance** (`wght=400`, `wdth=100`) of the upstream
+`wdth,wght` variable font, produced with fontTools 4.55.0
+`varLib.instancer.instantiateVariableFont(..., updateFontNames=True)`; copyright,
+version and licence strings are carried unchanged. The sibling `.pin` files record
+the upstream commit.
+
+| File | Family / version (`name` ID 3) | Copyright | Pinned source | SHA-256 |
+|------|------|-----------|---------------|---------|
+| `NotoSansKhmer-Regular.ttf` | `2.004;GOOG;NotoSansKhmer-Regular` | 2022 The Noto Project Authors (https://github.com/notofonts/khmer) | `google/fonts@9710da1eacb3be272583c3224dcb70f9da6eadbb`, `ofl/notosanskhmer/NotoSansKhmer[wdth,wght].ttf` | `ee16e8c5ea63ea0719d2ccdb60f3897c394ba588eceb4b07224f69a543bb72b9` |
+| `NotoSansMyanmar-Regular.ttf` | `2.107;GOOG;NotoSansMyanmar-Regular` | 2022 The Noto Project Authors (https://github.com/notofonts/myanmar) | `google/fonts@9710da1eacb3be272583c3224dcb70f9da6eadbb`, `ofl/notosansmyanmar/NotoSansMyanmar[wdth,wght].ttf` | `f2818c9605f439f245e81ccc33d33b4d7b37fafad9449687ab16e74c2d39cdb8` |
+
+No Lao font fixture is bundled yet; Lao segmentation is covered by the
+natural-text accuracy tests only.
