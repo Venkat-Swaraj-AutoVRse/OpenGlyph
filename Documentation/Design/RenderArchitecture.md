@@ -475,55 +475,43 @@ same Alpha8 group here) per component.
 
 Initial per-component-material build (regression) then the shared-material fix:
 
-| Scenario | Legacy draws | Unified draws (per-component mat) | Unified draws (shared mat) |
-|----------|-------------:|----------------------------------:|---------------------------:|
-| (a) one text | 2 | 3 | **3** |
-| (b) 50 components | 2 | **102** | **3** |
+### 8.3 / 8.4 Draw calls + CPU — CORRECTED (world-space canvas → camera → 1280×720 RT, dev player)
 
-**Fixed.** The first cut created a separate uber `Material` instance per component;
-distinct material instances do not batch, so 50 identical components cost ~2×50 ≈
-**102** GPU draws and lost to the legacy path's cross-component UI batching. The
-fix (shipped): ONE process-wide uber material + ONE shared `Texture2DArray` + ONE
-shared, content-deduped `StyleTable` per draw-group format, so every component
-binds identical GPU state and UGUI batches them. Re-measured: scenario (b) ON
-drops **102 → 3** GPU draws — on par with legacy's **2–3** — while using **50**
-CanvasRenderers instead of legacy's **150** (the structural CPU-side win). The
-merged mesh stays per component (its own geometry); only the batched GPU state is
-shared. Absolute counts are from a 320×240 dev player with trivial geometry —
-*relative* evidence of batching, not absolute budgets; atlas-budget defaults
-(decision §5.5) still want numbers from representative scenes.
+An earlier version of this section reported "(a) 2→3, (b) 2" with legacy allegedly
+adding **zero** draws over an empty canvas. That was wrong, for two compounding
+reasons the reviewer caught: (1) the harness captured a **Screen-Space-Overlay**
+canvas, which a camera does **not** draw into its `targetTexture`; and (2) a **bare
+`UniTextAppearance` has no material**, so the LEGACY path drew nothing at all. Both
+are fixed here: a **World-Space** canvas rendered by a camera into a 1280×720 RT,
+and a face material assigned to the appearance (as any real scene has). Legacy now
+renders (`nonBg > 0` in every row), so the numbers compare like-for-like.
 
+| Scenario | Legacy draws / renderers / CPU static·changing ms | Unified draws / renderers / CPU static·changing ms |
+|----------|---------------------------------------------------:|----------------------------------------------------:|
+| (a) one text, 3 SDF + MSDF | **18** / 3 / 0.32 · 0.48 | **5** / **1** / 0.34 · 0.53 |
+| (b) 50 components | **455** / 150 / 0.62 · 2.76 | **5** / **50** / **0.44 · 2.45** |
+| baseline (empty canvas) | 3 draws | — |
 
-### 8.4 Draw-event attribution + CPU (standalone dev player, 320×240)
-
-A per-renderer dump and an empty-canvas baseline make the "scenario (a) 2→3 draws"
-unambiguous — it is **not** a regression:
-
-| Row | GPU draws | setpass | CanvasRenderers | first-renderer dump | CPU main-thread median (ms) |
-|-----|----------:|--------:|----------------:|---------------------|-----------------------------:|
-| baseline (empty canvas) | 2 | 2 | 0 | — | — |
-| (a) legacy | 2 | 2 | 3 | — | 0.31 |
-| (a) unified | 3 | 3 | **1** | `[matCount=1 shader=UniText/Uber submeshes=1]` | 0.31 |
-| (b) legacy | 2 | 2 | 150 | — | 1.78 |
-| (b) unified | 3 | 3 | **50** | `[matCount=1 shader=UniText/Uber submeshes=1]` | 2.09 |
-
-- **The empty canvas already costs 2 draws.** Legacy text folds into those existing
-  UI draws via dynamic batching (same atlas+material), so its *total* stays 2.
-  Unified adds **exactly one** uber draw (its material differs from the baseline
-  UI, so it cannot fold in) → 3. One marginal draw for one text is the floor; the
-  "3rd draw" is that single irreducible uber draw, not an extra pass (the dump
-  shows `matCount=1`, one submesh, `UniText/Uber`).
-- **Build fix found by this measurement:** `UniText/Uber` has no referencing
-  material asset, so it was **stripped from the player** and the unified path fell
-  back to `UI/Default` (the first dump showed `shader=UI/Default`).
-  `UniTextBuildProcessor` now pins it into Always-Included Shaders; the dump then
-  shows `UniText/Uber`.
-- **CPU:** the unified path is currently a *slight CPU regression* under
-  text-changing-every-frame (a: 0.31≈0.31; b: 1.78→2.09 ms median over 120
-  frames), because the per-frame segment→merged-mesh repack + page publish adds
-  work. The renderer-count drop (150→50) does **not** yet convert to a CPU win in
-  this micro-benchmark; a real win needs the repack cached across frames when the
-  text is unchanged (future step). Reported straight, flat-to-slightly-worse.
+- **Draw calls — the real win.** Once legacy actually draws, the unified path is a
+  large reduction: **(a) 18 → 5**, **(b) 455 → 5** GPU draws, and 3→1 / 150→50
+  CanvasRenderers. The 50-component canvas collapses to **5 draws total** (one
+  shared uber material + shared array batches all 50) vs legacy's 455.
+- **CPU regression FIXED (not deferred).** The repack now reads meshes with the
+  non-allocating `Mesh.GetVertices/GetColors/GetTriangles/GetUVs(list)` into reused
+  scratch lists (the `.vertices/.colors32/.triangles` *properties* allocated a fresh
+  array every frame — the GC the +17 % came from). Result: scenario **(b) unified
+  now BEATS legacy on both static (0.44 < 0.62 ms) and changing (2.45 < 2.76 ms)**.
+  Scenario (a), a single trivial component, is within noise and a hair higher
+  (0.34 vs 0.32 static) — the per-component repack overhead marginally exceeds a
+  3-renderer legacy path at n=1, but the at-scale case (b), which is the point of
+  the renderer-count drop, is a clear win. A `ProfilerMarker("UniText.Unified.Build")`
+  wraps the repack for attribution.
+- **Build fix (shipped):** `UniText/Uber` had no referencing material and was
+  **stripped from the player** (first dump showed `UI/Default`); `UniTextBuildProcessor`
+  now pins it into Always-Included Shaders, and every `Shader.Find` null logs the
+  name + FAILs instead of `new Material(null)` throwing.
+- Absolute counts are from a 1280×720 dev player with simple content — treat as
+  *relative* evidence; atlas-budget defaults (§5.5) still want representative scenes.
 
 ### 8.5 Pixel equivalence — two layers, one honest gap
 

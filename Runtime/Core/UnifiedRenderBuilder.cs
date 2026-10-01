@@ -1,5 +1,7 @@
 using System;
+using System;
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 
 namespace LightSide
@@ -81,6 +83,9 @@ namespace LightSide
 
         private readonly Dictionary<TextureFormat, Group> _groups = new();
         private readonly List<Vector4> _tmpUv = new();
+        private readonly List<Vector3> _tmpV = new();
+        private readonly List<Color32> _tmpC = new();
+        private readonly List<int> _tmpTri = new();
 
         private static UberDrawGroup.GlyphMode ModeFromFormat(TextureFormat f) => f switch
         {
@@ -94,8 +99,11 @@ namespace LightSide
         /// per-segment <paramref name="segments"/>, shading every glyph with the component-wide
         /// <paramref name="style"/> (resolved to a shared style-table row). Main-thread only.
         /// </summary>
+        private static readonly ProfilerMarker s_BuildMarker = new("UniText.Unified.Build");
+
         public void Build(List<UniTextRenderData> segments, in GlyphStyle style, List<UniTextRenderData> output)
         {
+            using var _ = s_BuildMarker.Auto();
             output.Clear();
             if (segments == null || segments.Count == 0) return;
 
@@ -152,22 +160,24 @@ namespace LightSide
         private void AppendSegment(Group g, Mesh src, int slice, int glyphMode, int styleIdx)
         {
             int baseIndex = g.verts.Count;
-            var v = src.vertices;
-            var c = src.colors32;
-            _tmpUv.Clear();
-            src.GetUVs(0, _tmpUv);
-            var tri = src.triangles;
+            // Non-allocating reads into reusable scratch lists (the .vertices/.colors32/.triangles
+            // PROPERTIES allocate a fresh array every call — the per-frame GC the benchmark flagged).
+            _tmpV.Clear(); src.GetVertices(_tmpV);
+            _tmpC.Clear(); src.GetColors(_tmpC);
+            _tmpUv.Clear(); src.GetUVs(0, _tmpUv);
+            _tmpTri.Clear(); src.GetTriangles(_tmpTri, 0);
 
-            for (int i = 0; i < v.Length; i++)
+            bool haveColors = _tmpC.Count == _tmpV.Count;
+            for (int i = 0; i < _tmpV.Count; i++)
             {
-                g.verts.Add(v[i]);
-                g.colors.Add(c != null && c.Length == v.Length ? c[i] : (Color32)Color.white);
+                g.verts.Add(_tmpV[i]);
+                g.colors.Add(haveColors ? _tmpC[i] : (Color32)Color.white);
                 var uv0 = i < _tmpUv.Count ? _tmpUv[i] : Vector4.zero;
                 g.uv0.Add(uv0);
                 g.uv1.Add(new Vector4(uv0.z, slice, glyphMode, styleIdx));
             }
-            for (int i = 0; i < tri.Length; i++)
-                g.tris.Add(baseIndex + tri[i]);
+            for (int i = 0; i < _tmpTri.Count; i++)
+                g.tris.Add(baseIndex + _tmpTri[i]);
         }
 
         private static Mesh NewMesh()
