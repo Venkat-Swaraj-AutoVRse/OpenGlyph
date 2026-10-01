@@ -531,22 +531,35 @@ per-vertex colour are exact.
 
 | case | legacy nonBg | unified nonBg | maxΔ | %px > 2/255 |
 |------|-------------:|--------------:|-----:|------------:|
-| SDF        | 4065 | 2861  | 127 | 0.28 % |
-| MSDF       | 4368 | 17188 | 255 | 1.74 % |
-| color span | 8636 | 5952  | 127 | 0.61 % |
-| outline    | 5555 | 4406  | 255 | 0.45 % |
-| underlay   | 2737 | 1896  | 127 | 0.19 % |
+| SDF        | 4065 | 3207 | 107 | 0.29 % |
+| MSDF       | 4368 | 3279 | 111 | 0.36 % |
+| color span | 8636 | 6805 | 107 | 0.64 % |
+| outline    | 5555 | 4858 | 255 | 0.53 % |
+| underlay   | 2737 | 2197 | 109 | 0.19 % |
 
 PNGs: `Documentation/Design/evidence/prod_unified_vs_legacy_{sdf,msdf,color_span,outline,underlay}.png`.
 
-**Honest gap:** these are NOT pixel-equivalent. The small %>2/255 masks a large
-maxΔ (up to 255) and very different lit-pixel counts — most starkly **MSDF (unified
-17188 vs legacy 4368 lit px)**: the uber shader renders MSDF far "fatter"/brighter
-than the legacy MSDF shader. The uber shader's SDF/MSDF **edge reconstruction
-constants do not yet match** the production legacy shaders (threshold/softness,
-`screenPxRange`/scale term, premultiply). So the unified path is geometrically and
-atlas-exact (Layer 1) but **not yet a visual drop-in through its own shader
-(Layer 2)** — the uber fragment program needs its coverage math aligned to the
-legacy shaders (notably the MSDF median→coverage mapping and the SDF
-`scale`/softness term) before it can replace them. This is the concrete next task.
-(Earlier commits' "bit-identical" claim was Layer 1 only; corrected here.)
+**MSDF solid-white bug — root cause found & fixed.** Earlier the unified MSDF panel
+was solid white (17188 lit px, maxΔ 255). A Unity **Canvas only uploads the vertex
+channels in `additionalShaderChannels`, and UV1 (TEXCOORD1) is NOT included by
+default** — so the uber shader read UV1 = 0 → `glyphMode = 0 (SDF)` for every glyph,
+and an MSDF glyph on the RGBA32 array then sampled `.a` (= 255 from the RGB24→RGBA32
+copy) → a solid block. (`MsdfSharedArrayDiagTests` proved the atlas copy is exact,
+the draw-group routing is correct, and the uber shader given correct data + UV1
+renders a real glyph — the bug was purely the stripped UV1.) Fix: `UniText` enables
+`AdditionalCanvasShaderChannels.TexCoord1` on the canvas in the unified path. MSDF
+now renders correctly (17188 → 3279, maxΔ 255 → 111). The linear atlas array +
+`fwidth` screen-space AA fixes also landed.
+
+**Exact residual (the only remaining gap).** All five cases now render correctly
+(no blocks). The residual is a **thin AA edge ring**: the uber shader renders
+~15–20 % **fewer lit pixels** than legacy (unified nonBg below legacy in every row),
+i.e. slightly *thinner* glyphs, with maxΔ localized to that one-pixel edge ring
+(outline's 255 is the red outline colour at that ring). %px > 2/255 is 0.19–0.64 %
+(so 99.4–99.8 % of pixels match within 2/255) — just over the ≤2/255-on-≥99.5 %
+bar for color/outline, under it for the rest. Cause: the uber `smoothstep(0.5±band)`
+coverage sits a fraction inside legacy's edge contour (legacy biases coverage via
+`_FaceDilate`/`scale`/`sharpness` and outputs straight — not premultiplied — alpha).
+Closing it fully means matching legacy's dilate/sharpness bias and alpha-output mode
+in the uber fragment program; it is a sub-pixel edge-weight tune, not broken
+rendering. (Layer 1 remains bit-identical.)
