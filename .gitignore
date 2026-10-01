@@ -64,3 +64,6 @@ Benchmarks~/.utmp/
 Benchmarks~/.gradle/
 Benchmarks~/.vs/
 # Keep committed results + raw JSON under Benchmarks~/Results/ (added explicitly).
+
+# TMP imported examples (bulky, not a deliverable)
+Benchmarks~/Assets/TextMesh Pro/Examples & Extras/
