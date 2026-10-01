@@ -779,6 +779,92 @@ re-dumping the aligned scanline and the five-case pixel harness, not by a swept 
 width constant. All `_UberDebug` uniforms and the `[GEN-SPREAD]` log are reverted
 before commit.
 
+### 8.8 Outline/underlay — CLOSED. §8.7's normFactor fix direction was WRONG; two real causes found & fixed
+
+Following §8.7's "fix direction" (bump the effect-layer normFactor to ≈`1/spreadRatio`)
+was tried as the WIP candidate `effectNormFactor = 1.0/max(uv1.x,0.001)` on the outline
+layer. **Measured result: it over-drew the ring** — `pixel_outline` nonBg jumped to
+**9750** vs legacy 5555 (fracOver2 0.0075), and the outline sweep pegged at 9750 for
+every k. So §8.7's prescription was rejected, and both production shaders were re-read
+line-by-line and re-measured through the real harness. The actual story is two separate
+things, neither a normFactor formula bug:
+
+**(1) The "legacy" outline/underlay baseline in the harness was a `TexCoord1`-upload
+artifact — not real legacy behaviour.** Both `UniText/SDF SSD` and `UniText/Uber`
+compute `normFactor = REFERENCE_SPREAD_RATIO / spreadRatio` identically
+(`UniText.cginc` defines `REFERENCE_SPREAD_RATIO 0.1`; legacy reads `spreadRatio` from
+`texcoord1.x`, which `GlyphRenderHelper` fills with `gen.spreadRatio = padding/pointSize
+= 0.25`). The merged mesh carries the SAME 0.25 (confirmed: `[GEN-SPREAD]` logs 0.25 for
+every generate). The divergence was that **the harness never pumps `MonoBehaviour.Update()`**
+(it drives `cam.Render()` directly), and `UniText.Update()` is the only caller of
+`EnsureCanvasShaderChannels`, which enables `AdditionalCanvasShaderChannels.TexCoord1` on
+the canvas. The UNIFIED path enables TexCoord1 **inline** during its build block, so it
+always had `spreadRatio = 0.25 → normFactor 0.4`. The LEGACY path relied on `Update()`,
+which never ran, so its canvas lacked TexCoord1, the SDF-SSD fragment read
+`texcoord1.x = 0 → normFactor = 0.1/0.001 ≈ 100`, and it drew a spuriously WIDE outline
+ring (nonBg 5555, vs the correct 3690). Proof (`BenchmarkBoot.DumpFrameAdvance`,
+`frame_advance_outline`): legacy `adv0 lit=5555 uv1=False`, `adv6 lit=5555 uv1=False`
+(even 6 direct renders never pump Update), **`forcedUV1 lit=3690 uv1=True`** — i.e. the
+moment the legacy canvas is given the TexCoord1 it has in **every real scene**, legacy
+renders **3690, bit-for-bit equal to unified**. In production (where `Update()` runs each
+frame) the two paths were ALREADY pixel-equivalent on the outline. §8.6/§8.7's "legacy
+spreadRatio ≈ 0.025 / normFactor ≈ 4" was the SDF-SSD fragment reading an interpolated
+near-zero (TexCoord1-absent) `texcoord1.x`, misread as a real formula. Fix: the harness's
+`MakeWorldStage` now sets `TexCoord1|Normal` on the canvas (as `EnsureCanvasShaderChannels`
+does in production), making the five-case comparison reflect real legacy behaviour. This
+changes nothing for SDF/MSDF/`<color>` (face layer is normFactor-independent → still maxΔ 0).
+
+**(2) Underlay had a GENUINE shader bug — composite + offset — fixed in `UniText/Uber`.**
+After (1), outline went bit-identical (maxΔ 0) but underlay still differed (maxΔ 64,
+nonBg 2397 vs 2737): a real divergence. The uber underlay used `uOff = scal1.xy *
+(10/_AtlasSize)` (a flat texel step, the code even called it an approximation) and
+composited via `outCol.rgb = lerp(underlay, col, col.a); outCol.a = max(col.a, uA)` — a
+non-premultiplied max, not legacy's layered blend. Legacy `UniText/SDF SSD` offsets by
+`ComputeUnderlayOffsetFactor(gradientScale, normFactor) = sqrt(72·gradientScale·normFactor/
+REFERENCE_SPREAD_RATIO)/9` × texel, and composites the underlay as a premultiplied
+`SDFLayer` **behind** face+outline via `BlendOver`. The uber underlay was rewritten to use
+that exact `offsetFactor` and the premultiplied `SDFLayer`+`BlendOver` order (underlay
+first, face+outline over). No magic constant: the offset is legacy's own formula, which
+scales with `gradientScale`/`normFactor`.
+
+**Result — all five production-shader cases BIT-IDENTICAL (the acceptance harness):**
+
+| case | legacy nonBg | unified nonBg | maxΔ | %px > 2/255 |
+|------|-------------:|--------------:|-----:|------------:|
+| SDF        | 4065 | **4065** | **0** | **0.00 %** |
+| MSDF       | 4368 | **4368** | **0** | **0.00 %** |
+| color span | 8636 | **8636** | **0** | **0.00 %** |
+| outline    | 3690 | **3690** | **0** | **0.00 %** |
+| underlay   | 2737 | **2737** | **0** | **0.00 %** |
+
+**Multi-size / multi-padding verification** (STEP A — not tuned to 48pt/padding-12;
+`spreadRatio = padding/pointSize`, `normFactor = 0.1/spreadRatio`):
+
+| config | spreadRatio | normFactor | outline off/on, maxΔ | underlay off/on, maxΔ |
+|--------|------------:|-----------:|----------------------|------------------------|
+| pt48 sp0.25 render24  | 0.250 | 0.40  | 1521/1521, 0 | 1436/1436, 16 |
+| pt48 sp0.25 render96  | 0.250 | 0.40  | 11106/11106, 1 | 8326/8326, 0 |
+| pt96 sp0.125 render48 | 0.125 | 0.80  | 3804/3804, 0 | 2928/2928, 0 |
+| pt32 sp0.375 render48 | 0.375 | 0.267 | 3467/3467, 0 | 2713/2713, 0 |
+
+Lit counts are EQUAL in every row; the two non-zero maxΔ (1 and 16) are a single
+sub-pixel AA edge pixel at the smallest render size — inside the ≤2/255-on-≥99.5 % bar.
+Equivalence holds across normFactor 0.267→0.80, confirming the real legacy formula.
+
+**Tests.** EditMode flag OFF: 215 passed / 0 failed / 1 skipped (baseline). EditMode
+`UNITEXT_FORCE_UNIFIED=1`: 215 / 0 / 1. PlayMode `DrawCallBenchmarkPlayTests`: 1 / 1
+passed. Renderer/draw structure unchanged (scenario a: 5 draws, 1 renderer unified vs 9
+draws, 3 renderers legacy; draws stay 5). The fix is GPU-only (one shader), so no new
+per-frame CPU allocations.
+
+**Change set.** Production: `Shaders/UniText_Uber.shader` — underlay offset uses legacy
+`ComputeUnderlayOffsetFactor`, underlay composited via premultiplied `SDFLayer`+`BlendOver`.
+`Shaders/UniText_SDF-SSD.shader` and `Runtime/Core/UniTextMeshGenerator.cs` are byte-identical
+to the pre-WIP HEAD (all `_UberDebug`/`[GEN-SPREAD]` debug reverted). Harness-only (host
+scratch, not shipped): `BenchmarkBoot.MakeWorldStage` enables the production canvas channels;
+`DumpFrameAdvance`/`MultiSizePixel` diagnostics added. Evidence PNGs (side-by-side + diff,
+all five cases) under `D:\OpenGlyphWork\scratch\uber-outline\evidence`.
+
 ---
 
 ## 9. Component styles, per-span markup, migration & deprecation (Round-2 steps 1–4)
