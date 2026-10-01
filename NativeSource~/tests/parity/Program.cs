@@ -127,9 +127,17 @@ unsafe class Program
         var neu  = new Lib(newPath);
         Console.WriteLine($"orig: {origPath}\nnew : {newPath}\n");
 
+        string varFull = varFont != null ? Path.GetFullPath(varFont) : null;
+        bool varInDir = false;
         foreach (var f in Directory.GetFiles(fontsDir, "*.ttf"))
-            CompareFont(orig, neu, f, varFont != null && Path.GetFullPath(f) == Path.GetFullPath(varFont));
-        if (varFont != null && File.Exists(varFont))
+        {
+            bool isVar = varFull != null && Path.GetFullPath(f) == varFull;
+            if (isVar) varInDir = true;
+            CompareFont(orig, neu, f, isVar);
+        }
+        // Compare the explicit var font only if it was NOT already enumerated above,
+        // so a var font living inside fontsDir is not compared twice.
+        if (varFull != null && !varInDir && File.Exists(varFont))
             CompareFont(orig, neu, varFont, true);
 
         // COLRv1 paint-tree parity (M2) on a color font, opt-in via env var.
