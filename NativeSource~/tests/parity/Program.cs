@@ -119,7 +119,16 @@ unsafe class Program
 
     static int Main(string[] args)
     {
-        if (args.Length < 3) { Console.Error.WriteLine("usage: parity <origDll> <newDll> <fontsDir> [varFont]"); return 2; }
+        // Cross-platform (vs Windows reference) modes. `parity dump …` serialises reference
+        // outputs to a portable artifact; `parity compare …` diffs a dump against the local
+        // library. The legacy two-DLL side-by-side path (args[0]=orig, args[1]=new) is unchanged.
+        if (args.Length >= 1 && (args[0] == "dump" || args[0] == "compare"))
+        {
+            var rest = new string[args.Length - 1];
+            Array.Copy(args, 1, rest, 0, rest.Length);
+            return DumpCompare.Run(args[0], rest);
+        }
+        if (args.Length < 3) { Console.Error.WriteLine("usage: parity <origDll> <newDll> <fontsDir> [varFont]\n   or: parity dump    <dll> <fontsDir> <varFont> <outDir>\n   or: parity compare <dll> <fontsDir> <varFont> <dumpDir> [--gate]"); return 2; }
         string origPath = args[0], newPath = args[1], fontsDir = args[2];
         string varFont = args.Length > 3 ? args[3] : null;
 
