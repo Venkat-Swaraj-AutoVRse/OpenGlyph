@@ -57,10 +57,43 @@ namespace OpenGlyph.Benchmarks
         public PhaseStat layout;          // re-layout only (width change)
         public PhaseStat meshRebuild;     // color/size change, mesh regen only
 
-        public int gcCollectionsDuringCreation;   // GC.CollectionCount(0) delta
-        public double allocatedMBDuringCreation;   // bytes delta / 1MB
-        public double kbPerFullRebuildOp;          // alloc per op, KB
+        public int gcCollectionsDuringCreation;   // GC.CollectionCount(0) delta (legacy)
+        public double allocatedMBDuringCreation;   // ProfilerRecorder GC Allocated In Frame, summed (MB)
+        public double kbPerFullRebuildOp;          // alloc per op, KB (ProfilerRecorder)
         public bool shapingFairForThisSystem;      // false for TMP on Arabic/Hebrew/Mixed
+        public string note;
+
+        // ---- VALIDITY GATE ----
+        // A phase is VALID only if every object actually produced output in the
+        // timed window. If not, the timing is reported but flagged INVALID.
+        public bool creationValid;
+        public bool fullRebuildValid;
+        public bool layoutValid;
+        public bool meshRebuildValid;
+        public int expectedChars;        // per-object expected character count
+        public int observedCharsMin;     // min observed across objects (0 => something empty)
+        public long observedVerticesMin; // min mesh/vertex/glyph count across objects
+        public string validityNote;      // why invalid, if so
+
+        // ---- allocation detail (ProfilerRecorder, whole-phase) ----
+        public double gcAllocCreationKB;     // GC Allocated In Frame summed over creation
+        public double gcReservedCreationKB;  // GC Reserved Memory (end-of-phase)
+        public int gcGen0Delta, gcGen1Delta, gcGen2Delta;
+        public double totalMemoryDeltaKB;    // GC.GetTotalMemory delta
+    }
+
+    // OpenGlyph-only: where the time goes (Stopwatch splits around pipeline stages),
+    // averaged per object over the creation phase, so the rendering team knows what to fix.
+    [Serializable]
+    public class OpenGlyphProfileSplit
+    {
+        public string textSet;
+        public bool parallel;
+        public double shapeMsPerObj;    // HarfBuzz shaping (TextProcessor)
+        public double layoutMsPerObj;   // line breaking + positioning
+        public double rasterMsPerObj;   // FreeType/SDF glyph add to atlas
+        public double meshMsPerObj;     // mesh generation
+        public double totalMsPerObj;
         public string note;
     }
 
@@ -99,6 +132,8 @@ namespace OpenGlyph.Benchmarks
         public string graphicsDevice;
         public string timestampUtc;
         public bool representative;        // false for editor runs
+        public bool incrementalGCEnabled;  // Application.incrementalGCTimeSlice-ish; recorded
+        public int randomSeed;             // fixed seed for reproducibility
     }
 
     [Serializable]
@@ -111,6 +146,7 @@ namespace OpenGlyph.Benchmarks
         public List<SystemTextResult> perSystemText = new List<SystemTextResult>();
         public List<GlyphRasterResult> glyphRaster = new List<GlyphRasterResult>();
         public List<BuildSizeResult> buildSize = new List<BuildSizeResult>();
+        public List<OpenGlyphProfileSplit> openGlyphSplits = new List<OpenGlyphProfileSplit>();
 
         public string ToJson() => JsonUtility.ToJson(this, true);
     }
