@@ -41,6 +41,7 @@ namespace OpenGlyph.Benchmarks.Editor
 
             var fontStack = BuildFontStack();
             var appearance = AssetDatabase.LoadAssetAtPath<UniTextAppearance>(AppearancePkg);
+            EnsureFontResources();
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -100,6 +101,26 @@ namespace OpenGlyph.Benchmarks.Editor
             AssetDatabase.SaveAssets();
             Debug.Log("[BenchBuild] built TMP font asset: " + path);
             return fa;
+        }
+
+        // Copy the Noto TTFs into Assets/Benchmarks/Resources/Fonts/*.bytes so the
+        // runner can Resources.Load<TextAsset> them on any platform (Android StreamingAssets
+        // lives inside the APK and is not File-readable).
+        private static void EnsureFontResources()
+        {
+            const string resFontDir = "Assets/Benchmarks/Resources/Fonts";
+            Directory.CreateDirectory(resFontDir);
+            foreach (var f in new[] { "NotoSans-Regular.ttf", "NotoSansArabic-Regular.ttf", "NotoSansHebrew-Regular.ttf" })
+            {
+                string src = Path.Combine(Application.streamingAssetsPath, "Fonts", f);
+                string dst = resFontDir + "/" + Path.GetFileNameWithoutExtension(f) + ".bytes";
+                if (File.Exists(src) && !File.Exists(dst))
+                {
+                    File.Copy(src, dst, true);
+                    AssetDatabase.ImportAsset(dst, ImportAssetOptions.ForceSynchronousImport);
+                }
+            }
+            AssetDatabase.SaveAssets();
         }
 
         private static UniTextFontStack BuildFontStack()

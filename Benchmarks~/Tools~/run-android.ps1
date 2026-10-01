@@ -1,24 +1,26 @@
 <#
 .SYNOPSIS
   Install, run, and collect results from the OpenGlyph Android benchmark APK on a
-  connected device (Quest / Android phone). The agent cannot run this (no device
-  in the build host) — it is left ready for you.
+  connected device (Quest 3S / Android phone) via adb.
+
+.USAGE
+  powershell -ExecutionPolicy Bypass -File Benchmarks~\Tools~\run-android.ps1
+  (Windows PowerShell 5.1 compatible: ASCII only, no bash-style '&&' in adb shell.)
 
 .PREREQUISITES
-  - adb on PATH (Android platform-tools), device in developer mode + USB debugging.
-  - APK already built: Benchmarks~/Build/Android/OpenGlyphBench.apk
-    (build it with: pwsh Tools~/run-benchmarks.ps1 -Do android
-     or directly: Unity -batchmode -nographics -projectPath Benchmarks~ \
-       -executeMethod OpenGlyph.Benchmarks.Editor.BenchBuild.BuildAndroid -quit -logFile build.log)
+  - adb on PATH; device in developer mode + USB debugging; 'adb devices' shows it.
+  - APK built: Benchmarks~\Build\Android\OpenGlyphBench.apk (or on D: scratch).
+    Build: Unity -batchmode -nographics -projectPath Benchmarks~ ^
+      -executeMethod OpenGlyph.Benchmarks.Editor.BenchBuild.BuildAndroidCI -logFile build.log
 
-.PARAMETER Apk      Path to the APK. Default: Build/Android/OpenGlyphBench.apk
+.PARAMETER Apk      Path to the APK. Default: D: scratch, else in-project Build dir.
 .PARAMETER Package  App id. Default: com.openglyph.bench
-.PARAMETER WaitSec  Seconds to wait for the benchmark to finish. Default: 180
+.PARAMETER WaitSec  Seconds to wait for the benchmark to finish. Default: 240
 #>
 param(
   [string]$Apk = "",
   [string]$Package = "com.openglyph.bench",
-  [int]$WaitSec = 180
+  [int]$WaitSec = 240
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,35 +34,38 @@ $Results = Join-Path $Proj "Results"
 New-Item -ItemType Directory -Force -Path $Results | Out-Null
 
 if (-not (Get-Command adb -ErrorAction SilentlyContinue)) { throw "adb not found on PATH. Install Android platform-tools." }
-if (-not (Test-Path $Apk)) { throw "APK not found: $Apk  (build it first — see header)." }
+if (-not (Test-Path $Apk)) { throw "APK not found: $Apk  (build it first - see header)." }
 
-Write-Host "Devices:"; adb devices
-Write-Host "`nInstalling $Apk ..."
+Write-Host "Devices:"
+adb devices
+Write-Host ""
+Write-Host "Installing $Apk ..."
 adb install -r -g "$Apk"
 
 Write-Host "Launching $Package ..."
 adb shell monkey -p $Package -c android.intent.category.LAUNCHER 1 | Out-Null
 
-Write-Host "Waiting up to $WaitSec s for the benchmark to finish..."
-# The runner writes to Application.persistentDataPath =
-#   /sdcard/Android/data/<pkg>/files/openglyph_benchmark_results.json
 $remote = "/sdcard/Android/data/$Package/files/openglyph_benchmark_results.json"
+Write-Host "Waiting up to $WaitSec s for results at $remote ..."
 $deadline = (Get-Date).AddSeconds($WaitSec)
 $found = $false
 while ((Get-Date) -lt $deadline) {
-  $exists = (adb shell "[ -f $remote ] && echo yes || echo no").Trim()
-  if ($exists -eq "yes") { $found = $true; break }
-  Start-Sleep 5
+  # PS5.1-safe existence check: 'adb shell ls <path>' prints the path if present,
+  # or 'No such file' if not. No bash '&&'/'||' in the remote string.
+  $out = (adb shell ls $remote) 2>$null
+  if ($out -and ($out -notmatch "No such file")) { $found = $true; break }
+  Start-Sleep -Seconds 5
 }
 
 if (-not $found) {
   Write-Warning "Results file not found on device after $WaitSec s."
-  Write-Warning "Check logcat:  adb logcat -s Unity:* | Select-String Bench"
+  Write-Warning "Check logs:  adb logcat -d -s Unity:* > $Results\android_logcat.txt"
   exit 1
 }
 
 $local = Join-Path $Results "android_il2cpp_results.json"
 Write-Host "Pulling results -> $local"
 adb pull "$remote" "$local"
-Write-Host "`nDone. Android results: $local"
-Write-Host "Tip: for the device log, run:  adb logcat -d -s Unity:* > $Results\android_logcat.txt"
+Write-Host ""
+Write-Host "Done. Android results: $local"
+Write-Host "Device log:  adb logcat -d -s Unity:* > $Results\android_logcat.txt"
