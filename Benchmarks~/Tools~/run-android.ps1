@@ -24,7 +24,10 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Proj = (Resolve-Path (Join-Path $ScriptDir "..")).Path
-if ([string]::IsNullOrEmpty($Apk)) { $Apk = Join-Path $Proj "Build\Android\OpenGlyphBench.apk" }
+if ([string]::IsNullOrEmpty($Apk)) {
+  $dApk = "D:\OpenGlyphWork\scratch\benchmarks\build\Android\OpenGlyphBench.apk"
+  if (Test-Path $dApk) { $Apk = $dApk } else { $Apk = (Join-Path $Proj "Build\Android\OpenGlyphBench.apk") }
+}
 $Results = Join-Path $Proj "Results"
 New-Item -ItemType Directory -Force -Path $Results | Out-Null
 
