@@ -531,13 +531,40 @@ per-vertex colour are exact.
 
 | case | legacy nonBg | unified nonBg | maxΔ | %px > 2/255 |
 |------|-------------:|--------------:|-----:|------------:|
-| SDF        | 4065 | 3207 | 107 | 0.29 % |
-| MSDF       | 4368 | 3279 | 111 | 0.36 % |
-| color span | 8636 | 6805 | 107 | 0.64 % |
-| outline    | 5555 | 4858 | 255 | 0.53 % |
-| underlay   | 2737 | 2197 | 109 | 0.19 % |
+| SDF        | 4065 | 3623 | 36  | 0.23 % |
+| MSDF       | 4368 | 3942 | 36  | 0.30 % |
+| color span | 8636 | 7850 | 36  | 0.52 % |
+| outline    | 5555 | 2262 | 255 | 0.50 % |
+| underlay   | 2737 | 2475 | 36  | 0.16 % |
 
 PNGs: `Documentation/Design/evidence/prod_unified_vs_legacy_{sdf,msdf,color_span,outline,underlay}.png`.
+
+**Legacy coverage ported (batching-safe).** `UniText/SDF-Face` + `SDF-Base` coverage
+is now ported into `UniText/Uber` WITHOUT per-component material state (so the 5/5
+draw batching is preserved): per-vertex `scale = baseScale(vPosition.w,_ScreenParams,
+_Sharpness)·xScaleVal(UV0.w)·gradientScale(UV0.z)`; shared-constant uniforms
+`_WeightNormal/_WeightBold/_ScaleX/_ScaleY/_Sharpness` at legacy defaults; per-style
+dilate/outline/underlay from the StyleTable. Face uses the legacy linear ramp
+`saturate(dist·scale − faceBias)`; the composite matches legacy `BlendOver` with
+PREMULTIPLIED alpha (outline fills the full extent, face over), and the stray final
+double-premultiply was removed. Normals are copied in the merge and the canvas
+enables `TexCoord1|Normal` for world-space perspective. **Result: face, MSDF,
+`<color>`, and underlay now match legacy to maxΔ = 36 (from 107–111) with nonBg
+within ~10 %** and 0.16–0.52 % of pixels over 2/255. Draws remain 5/5 (a/b); CPU (b)
+unified 0.86/2.31 ms still beats legacy 1.30/2.43 (static/changing).
+
+**Outline — still diverges (the one remaining case).** nonBg 2262 vs legacy 5555,
+maxΔ 255: the unified single-pass outline under-draws the red ring, where legacy
+renders the outline via a **2-pass** SDF-Base(behind)+SDF-Face(over) material. The
+outline data reaches the style table correctly (`AppearanceStyleShim` maps
+`_OutlineColor/_OutlineWidth`; StyleTable packs them at col 1 / col 4.z, which the
+shader reads), so this is a **compositing** mismatch, not a data gap: a single-pass
+`saturate(dist·scaleSoft − outlineBias)` ring does not reproduce the 2-pass legacy
+outline extent/blend. Bisected to the outline term (face/MSDF/underlay all match at
+maxΔ 36 with the same scale/ramp; only outline's extent is short). Next: reproduce
+the 2-pass outline weight exactly (the SDF-Base `scaleSoftness`/`_OutlineSoftness`
+path and the premultiplied `SDFLayer`+`BlendOver` order for the outline layer
+specifically). The other four cases are within target; outline is the exact residual.
 
 **MSDF solid-white bug — root cause found & fixed.** Earlier the unified MSDF panel
 was solid white (17188 lit px, maxΔ 255). A Unity **Canvas only uploads the vertex
