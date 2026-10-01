@@ -72,24 +72,48 @@ namespace LightSide
             s.faceDilate = GetFloat(face, FaceDilate, s.faceDilate);
             s.softness = GetFloat(face, OutlineSoftness, s.softness);
 
-            s.outlineColor = GetColor(outline, OutlineColor, s.outlineColor);
-            s.outlineWidth = GetFloat(outline, OutlineWidth, s.outlineWidth);
-            s.outlineDilate = GetFloat(outline, OutlineDilate, s.outlineDilate);
+            // Legacy gates UNDERLAY/GLOW behind #pragma shader_feature keywords; a material's
+            // SERIALIZED default for a DISABLED effect (e.g. SSD's _UnderlayColor a=0.5) is NOT
+            // rendered, so it must not be synthesized here (it would darken the glyph). Outline in the
+            // combined SSD shader is NOT keyword-gated — it draws whenever it has visible colour+width
+            // (or a dedicated 2-pass outline material is supplied).
+            bool twoPass = mats.Length >= 2 && mats[0] != mats[mats.Length - 1];
+            float oColA = GetColor(outline, OutlineColor, new Color(0,0,0,0)).a;
+            float oW = GetFloat(outline, OutlineWidth, 0f);
+            bool outlineOn = twoPass || (oColA > 0f && oW > 0f);
+            bool underlayOn = HasKeyword(face, "UNDERLAY_ON") || HasKeyword(face, "UNDERLAY_INNER");
+            bool glowOn = HasKeyword(face, "GLOW_ON");
 
-            s.underlayColor = GetColor(face, UnderlayColor, s.underlayColor);
-            s.underlayOffsetX = GetFloat(face, UnderlayOffsetX, s.underlayOffsetX);
-            s.underlayOffsetY = GetFloat(face, UnderlayOffsetY, s.underlayOffsetY);
-            s.underlayDilate = GetFloat(face, UnderlayDilate, s.underlayDilate);
-            s.underlaySoftness = GetFloat(face, UnderlaySoftness, s.underlaySoftness);
+            if (outlineOn)
+            {
+                s.outlineColor = GetColor(outline, OutlineColor, s.outlineColor);
+                s.outlineWidth = GetFloat(outline, OutlineWidth, s.outlineWidth);
+                s.outlineDilate = GetFloat(outline, OutlineDilate, s.outlineDilate);
+            }
 
-            s.glowColor = GetColor(face, GlowColor, s.glowColor);
-            s.glowOffset = GetFloat(face, GlowOffset, s.glowOffset);
-            s.glowOuter = GetFloat(face, GlowOuter, s.glowOuter);
-            s.glowInner = GetFloat(face, GlowInner, s.glowInner);
-            s.glowPower = GetFloat(face, GlowPower, s.glowPower);
+            if (underlayOn)
+            {
+                s.underlayColor = GetColor(face, UnderlayColor, s.underlayColor);
+                s.underlayOffsetX = GetFloat(face, UnderlayOffsetX, s.underlayOffsetX);
+                s.underlayOffsetY = GetFloat(face, UnderlayOffsetY, s.underlayOffsetY);
+                s.underlayDilate = GetFloat(face, UnderlayDilate, s.underlayDilate);
+                s.underlaySoftness = GetFloat(face, UnderlaySoftness, s.underlaySoftness);
+            }
+
+            if (glowOn)
+            {
+                s.glowColor = GetColor(face, GlowColor, s.glowColor);
+                s.glowOffset = GetFloat(face, GlowOffset, s.glowOffset);
+                s.glowOuter = GetFloat(face, GlowOuter, s.glowOuter);
+                s.glowInner = GetFloat(face, GlowInner, s.glowInner);
+                s.glowPower = GetFloat(face, GlowPower, s.glowPower);
+            }
 
             return s;
         }
+
+        private static bool HasKeyword(Material m, string kw) =>
+            m != null && m.IsKeywordEnabled(kw);
 
         private static Color GetColor(Material m, int id, Color fallback) =>
             m != null && m.HasProperty(id) ? m.GetColor(id) : fallback;
