@@ -65,26 +65,35 @@ jobs:
           if (-not $dumpbin) { $dumpbin = (Get-ChildItem -Path "$vsroot\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Select-Object -First 1 -Expand FullName) }
           Write-Output "dumpbin: $dumpbin"
 
-          function Check-Dll($path, $expectArch, $expectSyms) {
+          function Check-Dll($path, $expectArch, $expectSyms, $kind) {
             Write-Output "=== $path ==="
             $hdr = & $dumpbin /headers $path | Select-String -Pattern 'machine \(' | Select-Object -First 1
             Write-Output "  arch: $hdr"
             if ($hdr -notmatch $expectArch) { throw "arch mismatch: expected $expectArch in '$hdr'" }
-            # Exported symbols from the DLL export table.
-            $exports = & $dumpbin /exports $path
-            $ut = ($exports | Select-String -Pattern '\b(ut_[A-Za-z0-9_]+|get_glyph_count|shape_text|subset_font\w*|unitext_\w+|get_font_codepoints)\b' -AllMatches |
-                   ForEach-Object { $_.Matches.Value }) | Sort-Object -Unique
-            Write-Output ("  exported ut_* / editor symbols: " + $ut.Count)
-            if ($ut.Count -ne $expectSyms) {
-              $ut | ForEach-Object { Write-Output "    $_" }
-              throw "symbol count mismatch: expected $expectSyms, got $($ut.Count)"
+            # Parse ONLY the export-table data rows: "<ordinal> <hint> <RVA> <name>". Taking the
+            # 4th column as the symbol name avoids matching the DLL's own file name (e.g.
+            # 'unitext_native.dll' in the summary) that a broad word-regex would wrongly count.
+            $names = & $dumpbin /exports $path |
+              Select-String -Pattern '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]{8}\s+(\S+)' |
+              ForEach-Object { $_.Matches[0].Groups[1].Value }
+            if ($kind -eq 'runtime') {
+              $set = $names | Where-Object { $_ -match '^ut_[A-Za-z0-9_]+$' }
+            } else {
+              $editor = 'get_font_codepoints','get_glyph_count','shape_text','subset_font','subset_font_remove_codepoints','subset_font_remove_glyphs','unitext_free_dialog_result','unitext_open_files_dialog'
+              $set = $names | Where-Object { $editor -contains $_ }
+            }
+            $set = $set | Sort-Object -Unique
+            Write-Output ("  exported $kind symbols: " + $set.Count)
+            if ($set.Count -ne $expectSyms) {
+              $set | ForEach-Object { Write-Output "    $_" }
+              throw "symbol count mismatch: expected $expectSyms, got $($set.Count)"
             }
           }
           $d = if ('${{ matrix.arch }}' -eq 'x64') { 'Windows/x86_64' } else { 'Windows/ARM64' }
           $expectArch = if ('${{ matrix.arch }}' -eq 'x64') { 'x64' } else { 'ARM64|AA64' }
-          Check-Dll "out/$d/unitext_native.dll" $expectArch ([int]$env:UT_RUNTIME_SYMS)
+          Check-Dll "out/$d/unitext_native.dll" $expectArch ([int]$env:UT_RUNTIME_SYMS) 'runtime'
           if ('${{ matrix.arch }}' -eq 'x64') {
-            Check-Dll "out/$d/unitext_native_editor.dll" 'x64' ([int]$env:UT_EDITOR_SYMS)
+            Check-Dll "out/$d/unitext_native_editor.dll" 'x64' ([int]$env:UT_EDITOR_SYMS) 'editor'
           }
       - uses: actions/upload-artifact@v4
         with:
@@ -158,14 +167,28 @@ jobs:
             local f="$1" expect="$2"
             echo "=== $f ==="
             file "$f"
-            $OBJDUMP -f "$f" | grep -E 'architecture' || true
-            if ! file "$f" | grep -qiE "$EXPECT_ARCH"; then echo "ARCH FAIL: $f"; exit 1; fi
-            # Exported DEFINED symbols from the .dynsym table: T/t (text), plus any defined (not U).
-            # Restrict to the dynamic table (-D) so only truly exported symbols are counted.
+            # Capture arch descriptors to a variable first; piping into `grep -q` under
+            # `set -o pipefail` makes grep's early exit SIGPIPE the producer and fail the
+            # pipeline on a genuine MATCH.
+            local arch_info
+            arch_info="$(file "$f"; $OBJDUMP -f "$f" 2>/dev/null | grep -E 'architecture' || true)"
+            echo "$arch_info"
+            if ! printf '%s' "$arch_info" | grep -qiE "$EXPECT_ARCH"; then echo "ARCH FAIL: $f"; exit 1; fi
+            # Exported DEFINED symbols from the .dynsym table (-D). The version script tags
+            # dynamic symbols as `name@@OPENGLYPH_1.0`, so take the last field, strip the
+            # @version suffix, then match the bare name and dedup.
             local n
-            n=$($NM -D --defined-only "$f" | grep -cE ' (ut_[A-Za-z0-9_]+|get_glyph_count|shape_text|subset_font[A-Za-z_]*|unitext_[A-Za-z_]+|get_font_codepoints|ut_version)$' || true)
+            n=$($NM -D --defined-only "$f" \
+                 | awk '{print $NF}' | sed 's/@.*//' \
+                 | grep -E '^(ut_[A-Za-z0-9_]+|get_glyph_count|shape_text|subset_font([A-Za-z_]*)?|unitext_[A-Za-z_]+|get_font_codepoints)$' \
+                 | sort -u | wc -l | tr -d ' ')
             echo "  exported symbols: $n (expect $expect)"
-            if [ "$n" -ne "$expect" ]; then $NM -D --defined-only "$f" | grep -E ' (ut_|get_glyph_count|shape_text|subset_font|unitext_|get_font_codepoints)'; echo "SYMBOL COUNT FAIL"; exit 1; fi
+            if [ "$n" -ne "$expect" ]; then
+              echo "--- actual matching symbols:"
+              $NM -D --defined-only "$f" | awk '{print $NF}' | sed 's/@.*//' \
+                | grep -E '^(ut_|get_glyph_count|shape_text|subset_font|unitext_|get_font_codepoints)' | sort -u
+              echo "SYMBOL COUNT FAIL"; exit 1
+            fi
           }
           check_so "out/$D/libunitext_native.so" "$UT_RUNTIME_SYMS"
           if [ "${{ matrix.arch }}" = "x64" ]; then check_so "out/$D/libunitext_native_editor.so" "$UT_EDITOR_SYMS"; fi
@@ -238,15 +261,26 @@ jobs:
             echo "=== $f ==="
             file "$f"
             lipo -info "$f"
-            # universal: must carry both arm64 and x86_64
-            lipo -info "$f" | grep -q "arm64"  || { echo "ARCH FAIL: no arm64 in $f"; exit 1; }
-            lipo -info "$f" | grep -q "x86_64" || { echo "ARCH FAIL: no x86_64 in $f"; exit 1; }
-            # Exported DEFINED symbols from the dynamic table (-gU on Mach-O gives external
-            # defined). Mach-O symbols carry a leading underscore -> match _ut_ / _<editor>.
+            # universal: must carry both arm64 and x86_64 (capture first; grep -q + pipefail
+            # SIGPIPE's lipo and would fail on a MATCH).
+            local li
+            li="$(lipo -info "$f")"
+            printf '%s' "$li" | grep -q "arm64"  || { echo "ARCH FAIL: no arm64 in $f"; exit 1; }
+            printf '%s' "$li" | grep -q "x86_64" || { echo "ARCH FAIL: no x86_64 in $f"; exit 1; }
+            # Exported DEFINED external symbols (-gU). A universal binary lists each symbol
+            # once PER ARCH, so take the name field, strip the Mach-O leading underscore, and
+            # dedup before counting.
             local n
-            n=$(nm -gU "$f" | grep -cE ' _(ut_[A-Za-z0-9_]+|get_glyph_count|shape_text|subset_font[A-Za-z_]*|unitext_[A-Za-z_]+|get_font_codepoints|ut_version)$' || true)
+            n=$(nm -gU "$f" | awk '{print $NF}' | sed 's/^_//' \
+                 | grep -E '^(ut_[A-Za-z0-9_]+|get_glyph_count|shape_text|subset_font([A-Za-z_]*)?|unitext_[A-Za-z_]+|get_font_codepoints)$' \
+                 | sort -u | wc -l | tr -d ' ')
             echo "  exported symbols: $n (expect $expect)"
-            if [ "$n" -ne "$expect" ]; then nm -gU "$f" | grep -E ' _(ut_|get_glyph_count|shape_text|subset_font|unitext_|get_font_codepoints)'; echo "SYMBOL COUNT FAIL"; exit 1; fi
+            if [ "$n" -ne "$expect" ]; then
+              echo "--- actual matching symbols:"
+              nm -gU "$f" | awk '{print $NF}' | sed 's/^_//' \
+                | grep -E '^(ut_|get_glyph_count|shape_text|subset_font|unitext_|get_font_codepoints)' | sort -u
+              echo "SYMBOL COUNT FAIL"; exit 1
+            fi
           }
           check_dylib out/macOS/libunitext_native.dylib "$UT_RUNTIME_SYMS"
           check_dylib out/macOS/libunitext_native_editor.dylib "$UT_EDITOR_SYMS"
@@ -316,10 +350,20 @@ jobs:
             x86)         EXPECT='i386|elf32-i386' ;;
             x86_64)      EXPECT='x86-64|x86_64|elf64-x86-64' ;;
           esac
-          if ! { file "$f"; "$OBJDUMP" -f "$f"; } | grep -qiE "$EXPECT"; then echo "ARCH FAIL for ${{ matrix.abi }}"; exit 1; fi
-          n=$("$NM" -D --defined-only "$f" | grep -cE ' (ut_[A-Za-z0-9_]+|ut_version)$' || true)
+          # Capture to a var first — `grep -q` early-exit + `set -o pipefail` fails the
+          # pipeline on a MATCH when the producer is SIGPIPE'd mid-stream.
+          arch_info="$(file "$f"; "$OBJDUMP" -f "$f" 2>/dev/null | grep -iE 'architecture|file format' || true)"
+          echo "$arch_info"
+          if ! printf '%s' "$arch_info" | grep -qiE "$EXPECT"; then echo "ARCH FAIL for ${{ matrix.abi }}"; exit 1; fi
+          n=$("$NM" -D --defined-only "$f" \
+               | awk '{print $NF}' | sed 's/@.*//' \
+               | grep -E '^(ut_[A-Za-z0-9_]+)$' | sort -u | wc -l | tr -d ' ')
           echo "  exported ut_* symbols: $n (expect $UT_RUNTIME_SYMS)"
-          if [ "$n" -ne "$UT_RUNTIME_SYMS" ]; then "$NM" -D --defined-only "$f" | grep -E ' ut_'; echo "SYMBOL COUNT FAIL"; exit 1; fi
+          if [ "$n" -ne "$UT_RUNTIME_SYMS" ]; then
+            echo "--- actual ut_* symbols:"
+            "$NM" -D --defined-only "$f" | awk '{print $NF}' | sed 's/@.*//' | grep -E '^ut_' | sort -u
+            echo "SYMBOL COUNT FAIL"; exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: native-android-${{ matrix.abi }}
@@ -368,7 +412,12 @@ jobs:
           bundle() {
             local tree="$1" out="$2"
             local libs
+            # Bundle exactly what the runtime STATIC target links: libunitext_native.a +
+            # freetype + harfbuzz + libpng + zlib. Exclude harfbuzz-subset (editor-only, and
+            # it duplicates the CFF/number TUs already in libharfbuzz.a) and blend2d/asmjit
+            # (disabled for these targets).
             libs=$(find "$tree" -name '*.a' \
+                     ! -iname '*harfbuzz-subset*' \
                      ! -iname '*blend2d*' ! -iname '*asmjit*' | sort -u)
             echo "--- bundling into $out from:"; echo "$libs"
             # shellcheck disable=SC2086
@@ -399,13 +448,19 @@ jobs:
             local sdk="$1" arch="$2" lib="$3" tag="$4"
             local sysroot; sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
             echo "=== link smoke: $tag ($sdk/$arch) against $lib ==="
-            # Link an executable against ONLY the bundled archive. -all_load forces every object
-            # (and therefore every undefined dependency symbol) to be pulled and resolved, so a
-            # missing FreeType/HarfBuzz/libpng/zlib symbol fails HERE.
+            # Link an executable against ONLY the bundled archive. main() references three ut_*
+            # entry points, so the linker pulls their objects and must resolve every transitive
+            # FreeType/HarfBuzz/libpng/zlib symbol they reach from the SAME archive — a missing
+            # BUNDLED dependency symbol fails HERE. HarfBuzz's Apple CoreText backend references
+            # CoreFoundation/CoreGraphics/CoreText (OS frameworks a real Unity player links too;
+            # they are NOT bundled), so provide them. (No -all_load: forcing every object in
+            # surfaces harfbuzz's benign internal duplicate TUs, which on-demand linking never
+            # pulls, and is not what a Unity player link does.)
             clang -isysroot "$sysroot" -arch "$arch" \
               -target "$arch-apple-$tag" \
               "$RUNNER_TEMP/smoke.c" -o "$RUNNER_TEMP/smoke_$tag" \
-              -Wl,-all_load "$lib" -lc++ \
+              "$lib" -lc++ \
+              -framework CoreFoundation -framework CoreGraphics -framework CoreText \
               2> "$RUNNER_TEMP/smoke_$tag.err" || { echo "LINK SMOKE FAIL ($tag):"; cat "$RUNNER_TEMP/smoke_$tag.err"; exit 1; }
             if grep -qiE 'undefined symbol|Undefined symbols' "$RUNNER_TEMP/smoke_$tag.err"; then
               echo "LINK SMOKE FAIL ($tag): undefined symbols"; cat "$RUNNER_TEMP/smoke_$tag.err"; exit 1
@@ -423,17 +478,23 @@ jobs:
             echo "=== $f ($tag) ==="
             file "$f"
             lipo -info "$f" || true
-            # Count DEFINED external ut_* symbols. nm over the archive lists per-object; use
-            # the merged defined-external set, dedup by symbol name.
+            # Count DEFINED external ut_* symbols across the archive. A fat archive lists each
+            # symbol once per arch, so strip the Mach-O leading underscore and dedup by name.
             local n
-            n=$(nm -gU "$f" 2>/dev/null | grep -E ' _(ut_[A-Za-z0-9_]+|ut_version)$' | awk '{print $NF}' | sort -u | wc -l | tr -d ' ')
+            n=$(nm -gU "$f" 2>/dev/null | awk '{print $NF}' | sed 's/^_//' \
+                 | grep -E '^ut_[A-Za-z0-9_]+$' | sort -u | wc -l | tr -d ' ')
             echo "  defined ut_* symbols: $n (expect $UT_RUNTIME_SYMS)"
-            if [ "$n" -ne "$UT_RUNTIME_SYMS" ]; then nm -gU "$f" 2>/dev/null | grep -E ' _ut_' | awk '{print $NF}' | sort -u; echo "SYMBOL COUNT FAIL ($tag)"; exit 1; fi
+            if [ "$n" -ne "$UT_RUNTIME_SYMS" ]; then
+              nm -gU "$f" 2>/dev/null | awk '{print $NF}' | sed 's/^_//' | grep -E '^ut_' | sort -u
+              echo "SYMBOL COUNT FAIL ($tag)"; exit 1
+            fi
           }
           verify_a "$RUNNER_TEMP/bundled/libunitext_native_device.a" ios-device
           verify_a "$RUNNER_TEMP/bundled/libunitext_native_sim.a"    ios-sim
-          # device slice is arm64-only, sim is arm64+x86_64
-          lipo -info "$RUNNER_TEMP/bundled/libunitext_native_sim.a" | grep -q x86_64 || { echo "sim archive missing x86_64"; exit 1; }
+          # device slice is arm64-only, sim is arm64+x86_64 (capture; grep -q + pipefail would
+          # SIGPIPE lipo and fail on a MATCH).
+          sim_arch="$(lipo -info "$RUNNER_TEMP/bundled/libunitext_native_sim.a")"
+          printf '%s' "$sim_arch" | grep -q x86_64 || { echo "sim archive missing x86_64"; exit 1; }
           verify_a "$RUNNER_TEMP/bundled/libunitext_native_tvos.a"   tvos
       - name: Package xcframework + stage outputs
         run: |
@@ -476,7 +537,7 @@ jobs:
       - name: Bundle self-contained archive (emar MRI)
         run: |
           set -euo pipefail
-          LIBS=$(find build -name '*.a' ! -iname '*blend2d*' ! -iname '*asmjit*' | sort -u)
+          LIBS=$(find build -name '*.a' ! -iname '*harfbuzz-subset*' ! -iname '*blend2d*' ! -iname '*asmjit*' | sort -u)
           echo "--- merging into libunitext_native.a from:"; echo "$LIBS"
           # Build an MRI script: create the output, add every member archive, save.
           MRI="$RUNNER_TEMP/merge.mri"
@@ -502,10 +563,13 @@ jobs:
             return (a && b && c) ? 0 : 1;
           }
           EOF
-          # Link against ONLY the bundled archive. -Wl,--whole-archive forces every object in
-          # so any undefined FreeType/HarfBuzz/libpng/zlib symbol fails the link here.
+          # Link against ONLY the bundled archive. main() references three ut_* entry points,
+          # so wasm-ld pulls their objects and must resolve every transitive FreeType/HarfBuzz/
+          # libpng/zlib symbol from the SAME archive; a missing dependency symbol fails here.
+          # (No --whole-archive: forcing every object in surfaces harfbuzz's benign internal
+          # duplicate TUs, which on-demand linking never pulls.)
           emcc "$RUNNER_TEMP/smoke.c" -o "$RUNNER_TEMP/smoke.js" \
-            -Wl,--whole-archive "$RUNNER_TEMP/libunitext_native.a" -Wl,--no-whole-archive \
+            "$RUNNER_TEMP/libunitext_native.a" \
             2> "$RUNNER_TEMP/smoke.err" || { echo "LINK SMOKE FAIL (webgl):"; cat "$RUNNER_TEMP/smoke.err"; exit 1; }
           if grep -qiE 'undefined symbol' "$RUNNER_TEMP/smoke.err"; then
             echo "LINK SMOKE FAIL (webgl): undefined symbols"; cat "$RUNNER_TEMP/smoke.err"; exit 1
@@ -518,10 +582,13 @@ jobs:
           echo "=== $f ==="
           file "$f"
           # emar archives hold wasm objects; llvm-objdump -f reports the file format per member.
-          llvm-objdump -f "$f" 2>/dev/null | grep -iE 'file format|architecture' | head -5 || true
-          llvm-objdump -f "$f" 2>/dev/null | grep -qi 'wasm' || { echo "ARCH FAIL: not wasm"; exit 1; }
-          # Count defined (not undefined) ut_* symbols across the archive, deduped.
-          n=$(llvm-nm --defined-only "$f" 2>/dev/null | grep -E ' (ut_[A-Za-z0-9_]+|ut_version)$' | awk '{print $NF}' | sort -u | wc -l | tr -d ' ')
+          fmt="$(llvm-objdump -f "$f" 2>/dev/null | grep -iE 'file format|architecture' || true)"
+          echo "$fmt" | head -5
+          printf '%s' "$fmt" | grep -qi 'wasm' || { echo "ARCH FAIL: not wasm"; exit 1; }
+          # Count defined (not undefined) ut_* symbols across the archive, deduped by name.
+          n=$(llvm-nm --defined-only "$f" 2>/dev/null \
+               | awk '{print $NF}' | sed 's/^_//' \
+               | grep -E '^ut_[A-Za-z0-9_]+$' | sort -u | wc -l | tr -d ' ')
           echo "  defined ut_* symbols: $n (expect $UT_RUNTIME_SYMS)"
           if [ "$n" -ne "$UT_RUNTIME_SYMS" ]; then llvm-nm --defined-only "$f" 2>/dev/null | grep -E ' ut_' | awk '{print $NF}' | sort -u; echo "SYMBOL COUNT FAIL"; exit 1; fi
       - name: Stage outputs
