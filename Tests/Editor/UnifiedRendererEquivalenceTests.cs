@@ -96,5 +96,44 @@ namespace LightSide.Tests
                 if (Vector3.Distance(a[i], b[i]) > tol) mism++;
             Assert.AreEqual(0, mism, $"{mism}/{a.Count} vertices differ beyond {tol} between legacy and unified geometry");
         }
+
+        [Test]
+        public void UnifiedPath_MsdfFont_SameGeometry_AndUberGroups()
+        {
+            if (!FT.IsInitialized) FT.Initialize();
+            if (!FT.IsInitialized) Assert.Ignore("FreeType native unavailable.");
+            SharedGlyphAtlas.Clear();
+
+            string noto = MsdfTestUtil.FindNotoSansPath();
+            if (noto == null) Assert.Ignore("NotoSans-Regular.ttf not found.");
+            var font = UniTextFont.CreateFontAsset(File.ReadAllBytes(noto), 48, 0.25f, UniTextRenderMode.Msdf);
+            if (font == null) Assert.Ignore("MSDF font asset creation failed.");
+            _junk.Add(font);
+            if (font.AtlasRenderMode != UniTextRenderMode.Msdf)
+                Assert.Ignore("MSDF outline export unavailable in this native binary (font degraded to SDF).");
+
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>(); _junk.Add(stack);
+            stack.fonts.Add(font);
+            var app = ScriptableObject.CreateInstance<UniTextAppearance>(); _junk.Add(app);
+
+            var legacy = MakeText(UniText.UnifiedRendererMode.ForceOff, stack, app);
+            var legacyVerts = legacy.GetDrawnVerticesForTests();
+            if (legacyVerts.Count == 0) Assert.Ignore("Pipeline produced no geometry in this environment.");
+
+            var unified = MakeText(UniText.UnifiedRendererMode.ForceOn, stack, app);
+            int groups = unified.UnifiedGroupCountForTests;
+            Assert.GreaterOrEqual(groups, 1);
+            Assert.LessOrEqual(groups, 2, $"MSDF unified path must produce <=2 draw groups (got {groups})");
+            foreach (var sh in unified.GetUnifiedGroupShaderNamesForTests())
+                Assert.AreEqual("UniText/Uber", sh, "MSDF unified group must use UniText/Uber");
+
+            var unifiedVerts = unified.GetDrawnVerticesForTests();
+            Assert.AreEqual(legacyVerts.Count, unifiedVerts.Count, "MSDF unified path emits the same vertex count as legacy");
+            var a = Sorted(legacyVerts); var b = Sorted(unifiedVerts);
+            int mism = 0;
+            for (int i = 0; i < a.Count; i++)
+                if (Vector3.Distance(a[i], b[i]) > 1e-3f) mism++;
+            Assert.AreEqual(0, mism, $"{mism}/{a.Count} MSDF vertices differ beyond 1e-3 between legacy and unified");
+        }
     }
 }
