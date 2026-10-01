@@ -215,10 +215,12 @@ jobs:
             -output "out/iOS/libunitext_native.xcframework" || \
           echo "xcframework naming is normalized in the assemble job to match the shipped slice names"
       - name: Build tvOS (STATIC)
-        run: >
-          cmake -S "NativeSource~" -B build-tvos -G Xcode
-          -DCMAKE_SYSTEM_NAME=tvOS "-DCMAKE_OSX_ARCHITECTURES=arm64"
-          -DCMAKE_OSX_SYSROOT=appletvos -DOPENGLYPH_ENABLE_BLEND2D=OFF &&
+        run: |
+          TVOS_SDK="$(xcrun --sdk appletvos --show-sdk-path)"
+          echo "Resolved tvOS SDK: $TVOS_SDK"
+          cmake -S "NativeSource~" -B build-tvos -G Xcode \
+            -DCMAKE_SYSTEM_NAME=tvOS "-DCMAKE_OSX_ARCHITECTURES=arm64" \
+            -DCMAKE_OSX_SYSROOT="$TVOS_SDK" -DOPENGLYPH_ENABLE_BLEND2D=OFF
           cmake --build build-tvos --config Release
       - name: Stage tvOS
         run: |
