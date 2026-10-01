@@ -180,7 +180,14 @@ Mixed   123.7  →   44.4   (2.8x)
 |---|---|---|---|
 | (a) Editor play-mode (batchmode) | ✅ all 16 combos + OpenGlyph glyph raster | Mono (editor JIT) | **No** — editor overhead |
 | (b) Windows x64 standalone player | ✅ built + ran, all 16 combos + raster | **Mono/Release** (IL2CPP module absent) | **Yes** |
-| (c) Android IL2CPP APK | ⚠️ see `run-android.ps1` | IL2CPP if module present, else Mono | user device only |
+| (c) Android IL2CPP Release APK | ✅ **built** `OpenGlyphBench.apk` (27.38 MB, IL2CPP/Release, ARM64) — cannot run here (no device); install+run with `run-android.ps1` | **IL2CPP/Release** | runs on your device |
+
+> The Android APK built with **IL2CPP** (bundled SDK/NDK/JDK present on this host),
+> unlike Windows (IL2CPP module absent → Mono). Output was placed on D: at
+> `D:\OpenGlyphWork\scratch\benchmarks\build\Android\OpenGlyphBench.apk` to spare
+> the near-full C: drive; `run-android.ps1` defaults to that path. On a connected
+> Quest/Android device it installs, launches, waits, and pulls
+> `android_il2cpp_results.json` into `Results/`.
 
 ## Reproduce / fix
 

@@ -60,4 +60,7 @@ Benchmarks~/Build/
 Benchmarks~/Builds/
 Benchmarks~/*.csproj
 Benchmarks~/*.sln
+Benchmarks~/.utmp/
+Benchmarks~/.gradle/
+Benchmarks~/.vs/
 # Keep committed results + raw JSON under Benchmarks~/Results/ (added explicitly).
