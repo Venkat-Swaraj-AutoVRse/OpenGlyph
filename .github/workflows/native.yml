@@ -119,6 +119,26 @@ jobs:
             "build/Release/unitext_native.dll" `
             "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
           if ($LASTEXITCODE -ne 0) { throw "parity failed (exit $LASTEXITCODE)" }
+      - name: Dump Windows reference (x64 only; the accepted baseline)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          # Serialise reference outputs from the COMMITTED Windows x64 DLL — the binary the user
+          # visually accepted — into a portable, versioned, OS-neutral dump. Linux and macOS
+          # download this and `compare` their committed Plugins binary against it, which is the
+          # only thing that proves their output equals the Windows reference (you cannot dlopen a
+          # .dll on Linux/macOS, so the side-by-side harness can never cross OSes).
+          dotnet "$env:RUNNER_TEMP/parity-bin/parity.dll" dump `
+            "Plugins/Windows/x86_64/unitext_native.dll" `
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf" `
+            "$env:RUNNER_TEMP/winref-dump"
+          if ($LASTEXITCODE -ne 0) { throw "dump failed (exit $LASTEXITCODE)" }
+          Get-Content "$env:RUNNER_TEMP/winref-dump/manifest.txt"
+      - uses: actions/upload-artifact@v4
+        if: matrix.arch == 'x64'
+        with:
+          name: winref-dump
+          path: ${{ runner.temp }}/winref-dump/
 
   # ---------------------------------------------------------------- Linux x64 / ARM64
   linux:
@@ -682,6 +702,57 @@ jobs:
         with:
           name: msdf-parity
           path: ${{ runner.temp }}/msdf-parity/
+
+  # ---------------------------------------------------------------- Cross-platform parity vs Windows
+  # Proves (or quantifies) that the committed Linux .so and macOS .dylib produce the SAME output
+  # as the ACCEPTED Windows x64 unitext_native.dll. The windows job dumps reference outputs from
+  # the committed Plugins/Windows DLL (artifact winref-dump); each OS here downloads it and runs
+  # `parity compare` against ITS committed Plugins binary.
+  #
+  # REPORT-ONLY while thresholds are being measured: compare prints a per-category table and
+  # exits 0. Flip to a hard gate by adding `--gate` to the compare command once the measured
+  # cross-platform spread justifies the per-category tolerances (which live in DumpCompare.cs).
+  xplat_parity:
+    needs: [windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-22.04
+            lib: Plugins/Linux/x86_64/libunitext_native.so
+          - os: macos
+            runner: macos-14
+            lib: Plugins/macOS/libunitext_native.dylib
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: winref-dump
+          path: winref-dump
+      - name: Build parity harness
+        run: dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$RUNNER_TEMP/parity-bin"
+      - name: Compare committed ${{ matrix.os }} binary vs Windows reference (GATE)
+        run: |
+          set -euo pipefail
+          echo "=== Windows reference dump manifest ==="
+          cat winref-dump/manifest.txt
+          echo "=== compare: ${{ matrix.lib }} vs winref-dump ==="
+          # The macOS .dylib is universal (arm64+x86_64); the arm64 runner loads the arm64 slice.
+          # HARD GATE (--gate): the first measurement run proved Linux x86_64 and macOS arm64 are
+          # byte-identical to the accepted Windows x64 reference in every category, so the gate is
+          # EXACT (tolerances max<=0, mean<=0 in DumpCompare.cs). Any nonzero cross-platform
+          # difference now fails the job. `set -e` + --gate's non-zero exit stops the job.
+          dotnet "$RUNNER_TEMP/parity-bin/parity.dll" compare \
+            "${{ matrix.lib }}" \
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf" \
+            "winref-dump" --gate | tee "$RUNNER_TEMP/compare-${{ matrix.os }}.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xplat-parity-${{ matrix.os }}
+          path: ${{ runner.temp }}/compare-${{ matrix.os }}.txt
 
   # ---------------------------------------------------------------- Assemble Plugins/ tree
   assemble:
