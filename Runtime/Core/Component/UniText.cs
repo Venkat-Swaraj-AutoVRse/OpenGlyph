@@ -270,6 +270,28 @@ namespace LightSide
         private UnifiedRenderBuilder unifiedBuilder;
         private List<UniTextRenderData> unifiedRenderData;
 
+        [SerializeField]
+        [Tooltip("Render Architecture R2 sub-task 2: named styles addressable from <style=Name> per-span " +
+                 "markup. Optional — only needed if the text uses <style=…> tags.")]
+        private UniTextStyleSheet styleSheet;
+
+        /// <summary>
+        /// Render-Architecture R2 sub-task 2: the <see cref="UniTextStyleSheet"/> that resolves
+        /// <c>&lt;style=Name&gt;</c> per-span markup. Null when no named styles are used.
+        /// </summary>
+        public UniTextStyleSheet StyleSheet
+        {
+            get => styleSheet;
+            set { if (styleSheet == value) return; styleSheet = value; SetVerticesDirty(); }
+        }
+
+        /// <summary>R2 sub-task 2: per-component collector mapping composed per-span styles to local ids (0 = base).</summary>
+        private SpanStyleCollector spanStyleCollector;
+        /// <summary>True once this component's span-style OnBeforeMesh/OnGlyph coordinator is subscribed.</summary>
+        private bool spanStyleHooked;
+        /// <summary>The component base GlyphStyle captured at generation start, that span overrides layer onto.</summary>
+        private GlyphStyle spanBaseStyle;
+
         private Rect cachedClipRect;
         private bool cachedValidClip;
         private Vector4 cachedClipSoftness;
@@ -947,6 +969,7 @@ namespace LightSide
             base.OnDestroy();
             highlighter?.Destroy();
             DeInit();
+            UnhookSpanStyle();
             unifiedBuilder?.Dispose();
             unifiedBuilder = null;
             DestroyRuntimeConfigCopies();
@@ -1208,6 +1231,7 @@ namespace LightSide
             {
                 fontProvider = new UniTextFontProvider(fontStack, appearance);
                 meshGenerator = new UniTextMeshGenerator(fontProvider, buffers);
+                EnsureSpanStyleHooked();
                 textProcessor.SetFontProvider(fontProvider);
                 Cat.Meow("[UniText] FontProvider created", this);
             }
@@ -1278,13 +1302,17 @@ namespace LightSide
 
                 unifiedBuilder ??= new UnifiedRenderBuilder();
                 unifiedRenderData ??= new List<UniTextRenderData>(2);
+                spanStyleCollector ??= new SpanStyleCollector();
+                EnsureSpanStyleHooked();
                 // R2 sub-task 1: prefer the component-authored style when Override Style is ON;
                 // otherwise fall back to the shim synthesising one from the legacy appearance/material
                 // (so old assets still render identically during the deprecation window).
                 var style = overrideStyle
                     ? this.style.ToGlyphStyle()
                     : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
-                unifiedBuilder.Build(renderData, style, unifiedRenderData);
+                // The collector was reset at OnBeforeMesh with the base style and populated per glyph
+                // (local ids in UV1.w). The builder maps each glyph's local id -> a shared StyleTable row.
+                unifiedBuilder.Build(renderData, style, spanStyleCollector, unifiedRenderData);
                 UpdateSubMeshes(unifiedRenderData);
                 UniTextDebug.EndSample();
                 return;
@@ -1296,6 +1324,74 @@ namespace LightSide
         }
 
         protected override void UpdateMaterial() { }
+
+        // ---- Render-Architecture R2 sub-task 2: per-span style coordinator ---------------------------
+        // Exactly ONE OnGlyph per glyph composes the cluster's accumulated SpanStyleOverride over the
+        // component base style, dedups it to a local id, and writes that id into the glyph's UV1.w.
+        // The SpanStyleModifier instances only populate the shared per-cluster override buffer (data);
+        // this is the single place that stamps vertices, so a glyph is composed once regardless of how
+        // many span tags cover it.
+
+        private void EnsureSpanStyleHooked()
+        {
+            if (spanStyleHooked || meshGenerator == null) return;
+            meshGenerator.OnBeforeMesh += OnSpanStyleBeforeMesh;
+            meshGenerator.OnGlyph += OnSpanStyleGlyph;
+            spanStyleHooked = true;
+        }
+
+        private void UnhookSpanStyle()
+        {
+            if (!spanStyleHooked || meshGenerator == null) return;
+            meshGenerator.OnBeforeMesh -= OnSpanStyleBeforeMesh;
+            meshGenerator.OnGlyph -= OnSpanStyleGlyph;
+            spanStyleHooked = false;
+        }
+
+        private void OnSpanStyleBeforeMesh()
+        {
+            if (!UseUnifiedRenderer) return;
+            spanBaseStyle = overrideStyle
+                ? this.style.ToGlyphStyle()
+                : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
+            spanStyleCollector ??= new SpanStyleCollector();
+            spanStyleCollector.Reset(spanBaseStyle);
+        }
+
+        private void OnSpanStyleGlyph()
+        {
+            if (!UseUnifiedRenderer) return;
+            var gen = UniTextMeshGenerator.Current;
+            if (gen == null) return;
+            if (spanStyleCollector == null) { spanStyleCollector = new SpanStyleCollector(); spanStyleCollector.Reset(spanBaseStyle); }
+
+            // Read the accumulated per-span override for this glyph's cluster from the shared buffer.
+            var attr = Buffers?.GetAttributeData<PooledArrayAttribute<SpanStyleOverride>>(AttributeKeys.SpanStyle);
+            int localId = 0;
+            if (attr != null)
+            {
+                var buf = attr.buffer.data;
+                int cluster = gen.currentCluster;
+                if (buf != null && (uint)cluster < (uint)buf.Length)
+                {
+                    ref readonly var ov = ref buf[cluster];
+                    if (!ov.IsNone)
+                        localId = spanStyleCollector.GetOrAdd(ov.ComposeOnto(spanBaseStyle));
+                }
+            }
+
+            // Stamp the local id into UV1.w of this glyph's 4 verts (builder maps local id -> shared row).
+            int baseIdx = gen.vertexCount - 4;
+            var uv1 = gen.Uvs1;
+            if (uv1 == null || baseIdx < 0 || baseIdx + 3 >= uv1.Length) return;
+            for (int k = 0; k < 4; k++)
+            {
+                var v = uv1[baseIdx + k];
+                v.w = localId;
+                uv1[baseIdx + k] = v;
+            }
+        }
+
 
         /// <summary>Sets the clipping rectangle for masking, applying to all sub-mesh renderers.</summary>
         /// <inheritdoc/>
@@ -1442,6 +1538,28 @@ namespace LightSide
 
         /// <summary>EDITOR/TEST: number of merged unified-path draw groups produced on the last rebuild.</summary>
         internal int UnifiedGroupCountForTests => unifiedRenderData?.Count ?? 0;
+
+        /// <summary>EDITOR/TEST: number of DISTINCT per-span styles the span-style collector resolved on
+        /// the last rebuild (local id 0 = base, so 1 means no distinct span styles). Proves per-span
+        /// dedup / "a row per distinct span style".</summary>
+        internal int SpanStyleLocalCountForTests => spanStyleCollector?.Count ?? 0;
+
+        /// <summary>EDITOR/TEST: the per-vertex styleIdx (UV1.w) of every vertex submitted to the active
+        /// unified-path draw groups. Distinct values across glyphs prove per-glyph style selection in
+        /// a single renderer.</summary>
+        internal List<int> GetUnifiedStyleIndicesForTests()
+        {
+            var result = new List<int>();
+            if (unifiedRenderData == null) return result;
+            var uv1 = new List<Vector4>();
+            foreach (var rd in unifiedRenderData)
+            {
+                if (rd.mesh == null) continue;
+                uv1.Clear(); rd.mesh.GetUVs(1, uv1);
+                foreach (var v in uv1) result.Add((int)(v.w + 0.5f));
+            }
+            return result;
+        }
 
         /// <summary>EDITOR/TEST: the (mesh, material, texture) tuples this component built for the
         /// ACTIVE path. For the legacy path the atlas is the per-entry texture (the component binds it
