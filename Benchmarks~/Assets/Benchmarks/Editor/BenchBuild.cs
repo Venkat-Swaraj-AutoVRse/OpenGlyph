@@ -52,6 +52,11 @@ namespace OpenGlyph.Benchmarks.Editor
             runner.tmpSourceFont = ResolveTmpFont();
             runner.tmpFontAsset = tmpFontAsset;
             runner.quitWhenDone = true;
+            // TMP non-Latin generation is pathologically slow (~14s/iter), so keep the
+            // shared iteration count modest to fit the full matrix under the watchdog;
+            // median+p95 of 5 after 2 warmups is still meaningful. OpenGlyph/UITK are fast.
+            runner.warmups = 2;
+            runner.iterations = 5;
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
