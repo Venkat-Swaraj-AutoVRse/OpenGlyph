@@ -1,6 +1,10 @@
 using System;
 using UnityEngine;
 
+// R2 sub-task 4: settings still carries the editor-only DefaultAppearance (the [Obsolete] type) so new
+// components can seed from a project default during the deprecation window; suppress 618 for this file.
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -189,3 +193,4 @@ namespace LightSide
 #endif
     }
 }
+#pragma warning restore 618

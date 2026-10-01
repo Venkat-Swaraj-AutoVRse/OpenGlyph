@@ -4,6 +4,11 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Rendering;
 
+// R2 sub-task 4: UniText is the deprecation BRIDGE — it still holds the [Obsolete] UniTextAppearance
+// field/property so existing assets load and render through the shim during the deprecation window.
+// Suppress the obsolete-usage warning for this file to keep the package warning-clean (#pragma).
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -1772,3 +1777,4 @@ namespace LightSide
     }
 
 }
+#pragma warning restore 618
