@@ -439,6 +439,18 @@ namespace LightSide
         public float PixelSnapDeviceScale { get; set; } = 1f;
 
         /// <summary>
+        /// Device-pixel position of the element's local origin along X (the snapping phase). The final
+        /// device coordinate of a vertex is <c>PixelSnapPhaseX + localX·PixelSnapDeviceScale</c>, and
+        /// snapping rounds that whole expression, so a glyph lands on the physical grid even when the
+        /// element itself sits at a fractional device pixel (e.g. RectTransform x = 10.3). Set by the
+        /// component before mesh generation; 0 for Overlay-at-origin and the historical case.
+        /// </summary>
+        public float PixelSnapPhaseX { get; set; }
+
+        /// <summary>Device-pixel position of the element's local origin along Y. See <see cref="PixelSnapPhaseX"/>.</summary>
+        public float PixelSnapPhaseY { get; set; }
+
+        /// <summary>
         /// Snaps a local-unit coordinate to the device pixel grid given
         /// <see cref="PixelSnapDeviceScale"/> device pixels per local unit. Rounds to the nearest
         /// device pixel and converts back to local units. No-op when the scale is non-positive.
@@ -448,6 +460,21 @@ namespace LightSide
             if (deviceScale <= 0f || float.IsNaN(deviceScale) || float.IsInfinity(deviceScale))
                 return localValue;
             return Mathf.Round(localValue * deviceScale) / deviceScale;
+        }
+
+        /// <summary>
+        /// Phase-aware device-pixel snap. Rounds the FINAL device coordinate
+        /// (<paramref name="phase"/> + <paramref name="localValue"/>·<paramref name="deviceScale"/>)
+        /// to a whole pixel and returns the local value that achieves it, so the element's own
+        /// fractional placement on the grid is cancelled. With <paramref name="phase"/> = 0 this is
+        /// identical to the two-argument overload.
+        /// </summary>
+        internal static float SnapToDevicePixel(float localValue, float deviceScale, float phase)
+        {
+            if (deviceScale <= 0f || float.IsNaN(deviceScale) || float.IsInfinity(deviceScale))
+                return localValue;
+            float device = phase + localValue * deviceScale;
+            return (Mathf.Round(device) - phase) / deviceScale;
         }
 
         /// <summary>
@@ -735,6 +762,8 @@ namespace LightSide
             // leave snapDevScale at 0 so the corner math below is a pure no-op for them.
             var pixelSnap = font.PixelPerfectActive;
             var snapDevScale = pixelSnap ? PixelSnapDeviceScale : 0f;
+            var snapPhaseX = pixelSnap ? PixelSnapPhaseX : 0f;
+            var snapPhaseY = pixelSnap ? PixelSnapPhaseY : 0f;
 
             OnBeforeMesh?.Invoke();
 
@@ -809,13 +838,15 @@ namespace LightSide
 
                 // Pixel-perfect: snap all four quad edges to the device pixel grid so both the glyph
                 // origin and its extents are integral device pixels. Snapping each edge independently
-                // (rather than origin + size) keeps adjacent glyph seams aligned to the grid.
+                // (rather than origin + size) keeps adjacent glyph seams aligned to the grid. The
+                // phase carries the element's own device-pixel placement so the FINAL device
+                // coordinate is whole even when the element sits at a fractional pixel.
                 if (pixelSnap)
                 {
-                    tlX = SnapToDevicePixel(tlX, snapDevScale);
-                    trX = SnapToDevicePixel(trX, snapDevScale);
-                    tlY = SnapToDevicePixel(tlY, snapDevScale);
-                    blY = SnapToDevicePixel(blY, snapDevScale);
+                    tlX = SnapToDevicePixel(tlX, snapDevScale, snapPhaseX);
+                    trX = SnapToDevicePixel(trX, snapDevScale, snapPhaseX);
+                    tlY = SnapToDevicePixel(tlY, snapDevScale, snapPhaseY);
+                    blY = SnapToDevicePixel(blY, snapDevScale, snapPhaseY);
                 }
 
                 var uvBLx = (cachedData.rectX - paddingPixels) * invAtlasSize;

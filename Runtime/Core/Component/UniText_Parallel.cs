@@ -49,6 +49,17 @@ namespace LightSide
             /// no canvas). See <see cref="ComputePixelSnapDeviceScale"/>.
             /// </summary>
             public float pixelSnapDeviceScale;
+            /// <summary>
+            /// Device-pixel position of this element's local origin along X/Y relative to the root
+            /// canvas, i.e. where mesh-local (0,0) lands on the physical pixel grid. Snapping must
+            /// round <c>phase + local·deviceScale</c> (not just <c>local·deviceScale</c>) so a glyph
+            /// stays crisp even when the element itself sits at a fractional device pixel (e.g. the
+            /// RectTransform is at x = 10.3). Captured on the main thread. See
+            /// <see cref="ComputePixelSnapPhase"/>.
+            /// </summary>
+            public float pixelSnapPhaseX;
+            /// <summary>Device-pixel position of this element's local origin along Y. See <see cref="pixelSnapPhaseX"/>.</summary>
+            public float pixelSnapPhaseY;
         }
 
         /// <summary>Cached transform data captured before parallel processing.</summary>
@@ -58,13 +69,23 @@ namespace LightSide
         /// Computes device pixels per local text-mesh unit for pixel-perfect snapping.
         /// </summary>
         /// <remarks>
-        /// For a ScreenSpace (Overlay or Camera) canvas the root canvas GameObject is scaled by its
-        /// <c>scaleFactor</c>, so a UI child's <c>lossyScale</c> already folds scaleFactor together
-        /// with any nested Canvas / RectTransform scaling — one local unit maps to <c>lossyScale</c>
-        /// device pixels. That single value is therefore the correct device scale and it stays
-        /// correct when the CanvasScaler changes scaleFactor (lossyScale tracks it). For a World Space
-        /// canvas there is no fixed device-pixel grid (it depends on camera distance/viewport), so
-        /// snapping is disabled (returns 0) — documented as "no snapping in world space".
+        /// Device pixels per local unit = <c>scaleFactor × (element.lossyScale / root.lossyScale)</c>.
+        /// <para>
+        /// For <b>Screen Space - Overlay</b> the root canvas GameObject is itself scaled by its
+        /// <c>scaleFactor</c>, so <c>root.lossyScale == scaleFactor</c> and the expression reduces to
+        /// the element's own <c>lossyScale</c> (unchanged from before).
+        /// </para>
+        /// <para>
+        /// For <b>Screen Space - Camera</b> the root canvas is positioned on a plane in front of the
+        /// camera and its world <c>lossyScale</c> is driven by camera distance / viewport, NOT by
+        /// <c>scaleFactor</c>. Using the raw element <c>lossyScale</c> there is wrong (it is in world
+        /// units, not device pixels). Dividing by the root's world lossyScale cancels that world
+        /// factor, and multiplying by <c>scaleFactor</c> restores reference→device pixels; any nested
+        /// Canvas / RectTransform scaling between the element and the root survives in the
+        /// <c>element/root</c> ratio.
+        /// </para>
+        /// For a <b>World Space</b> canvas there is no fixed device-pixel grid (it depends on camera
+        /// distance / viewport), so snapping is disabled (returns 0).
         /// </remarks>
         private float ComputePixelSnapDeviceScale()
         {
@@ -75,10 +96,50 @@ namespace LightSide
             if (root.renderMode == RenderMode.WorldSpace)
                 return 0f; // no device pixel grid in world space
 
-            var scale = transform.lossyScale.x;
-            if (scale <= 0f || float.IsNaN(scale) || float.IsInfinity(scale))
+            var elementLossy = transform.lossyScale.x;
+            var rootLossy = root.transform.lossyScale.x;
+            if (elementLossy <= 0f || float.IsNaN(elementLossy) || float.IsInfinity(elementLossy))
                 return 0f;
-            return scale;
+            if (rootLossy <= 0f || float.IsNaN(rootLossy) || float.IsInfinity(rootLossy))
+                return 0f;
+
+            // scaleFactor × (element lossyScale / root lossyScale). For Overlay root.lossyScale ==
+            // scaleFactor so this is exactly element.lossyScale; for Camera it cancels the world
+            // scale the root plane introduces.
+            var devScale = c.scaleFactor * (elementLossy / rootLossy);
+            if (devScale <= 0f || float.IsNaN(devScale) || float.IsInfinity(devScale))
+                return 0f;
+            return devScale;
+        }
+
+        /// <summary>
+        /// Device-pixel position of this element's local origin (mesh-local 0,0) relative to the root
+        /// canvas, used as the snapping phase. Final device coordinate of a vertex is
+        /// <c>phase + local·deviceScale</c>; snapping rounds that whole expression, so the phase must
+        /// carry the element's own (possibly fractional) placement on the pixel grid.
+        /// </summary>
+        /// <remarks>
+        /// The element origin is expressed in the root canvas's local (reference-pixel) space via
+        /// <c>rootCanvas.InverseTransformPoint</c>, then multiplied by <c>scaleFactor</c> to reach
+        /// device pixels — the same reference→device conversion used for the device scale. Returns
+        /// (0,0) when there is no canvas or in World Space (snapping is disabled there anyway).
+        /// </remarks>
+        private Vector2 ComputePixelSnapPhase()
+        {
+            var c = canvas;
+            if (c == null) return Vector2.zero;
+            var root = c.rootCanvas != null ? c.rootCanvas : c;
+            if (root.renderMode == RenderMode.WorldSpace)
+                return Vector2.zero;
+
+            // Element origin in root-canvas local (reference-pixel) space, then to device pixels.
+            var local = root.transform.InverseTransformPoint(transform.position);
+            var sf = c.scaleFactor;
+            var phase = new Vector2(local.x * sf, local.y * sf);
+            if (float.IsNaN(phase.x) || float.IsInfinity(phase.x) ||
+                float.IsNaN(phase.y) || float.IsInfinity(phase.y))
+                return Vector2.zero;
+            return phase;
         }
 
         private void PrepareForParallel()
@@ -94,8 +155,11 @@ namespace LightSide
                 rect = rectTransform.rect,
                 lossyScale = scale,
                 hasWorldCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay,
-                pixelSnapDeviceScale = ComputePixelSnapDeviceScale()
+                pixelSnapDeviceScale = ComputePixelSnapDeviceScale(),
             };
+            var snapPhase = ComputePixelSnapPhase();
+            cachedTransformData.pixelSnapPhaseX = snapPhase.x;
+            cachedTransformData.pixelSnapPhaseY = snapPhase.y;
 
             PrepareModifiersForParallel();
         }
@@ -538,6 +602,8 @@ namespace LightSide
             meshGenerator.defaultColor = color;
             meshGenerator.SetCanvasParametersCached(cached.lossyScale, cached.hasWorldCamera);
             meshGenerator.PixelSnapDeviceScale = cached.pixelSnapDeviceScale;
+            meshGenerator.PixelSnapPhaseX = cached.pixelSnapPhaseX;
+            meshGenerator.PixelSnapPhaseY = cached.pixelSnapPhaseY;
             meshGenerator.SetRectOffset(cached.rect);
             meshGenerator.SetHorizontalAlignment(horizontalAlignment);
 

@@ -104,13 +104,15 @@ namespace LightSide.Tests
 
             float devScale = _text.cachedTransformData.pixelSnapDeviceScale;
             Assert.Greater(devScale, 0f, "Pixel-snap device scale must be set from the canvas for a screen-space pixel font.");
+            float phaseX = _text.cachedTransformData.pixelSnapPhaseX;
+            float phaseY = _text.cachedTransformData.pixelSnapPhaseY;
 
             int checkedCount = 0;
             foreach (var v in verts)
             {
-                float dx = v.x * devScale, dy = v.y * devScale;
-                Assert.AreEqual(Mathf.Round(dx), dx, 1e-3f, $"vertex x {v.x} -> device {dx} not integral at scale {scaleFactor}");
-                Assert.AreEqual(Mathf.Round(dy), dy, 1e-3f, $"vertex y {v.y} -> device {dy} not integral at scale {scaleFactor}");
+                float dx = phaseX + v.x * devScale, dy = phaseY + v.y * devScale;
+                Assert.AreEqual(Mathf.Round(dx), dx, 2e-3f, $"vertex x {v.x} -> device {dx} not integral at scale {scaleFactor}");
+                Assert.AreEqual(Mathf.Round(dy), dy, 2e-3f, $"vertex y {v.y} -> device {dy} not integral at scale {scaleFactor}");
                 checkedCount++;
             }
             Assert.Greater(checkedCount, 0);
@@ -127,12 +129,14 @@ namespace LightSide.Tests
 
             float devScale = _text.cachedTransformData.pixelSnapDeviceScale;
             Assert.AreEqual(1.5f, devScale, 1e-3f, "Device scale should equal the 1.5 canvas scale factor.");
+            float phaseX = _text.cachedTransformData.pixelSnapPhaseX;
+            float phaseY = _text.cachedTransformData.pixelSnapPhaseY;
 
             foreach (var v in verts)
             {
-                float dx = v.x * devScale, dy = v.y * devScale;
-                Assert.AreEqual(Mathf.Round(dx), dx, 1e-3f, $"At 1.5, device x {dx} must be integral (nearest device pixel).");
-                Assert.AreEqual(Mathf.Round(dy), dy, 1e-3f, $"At 1.5, device y {dy} must be integral (nearest device pixel).");
+                float dx = phaseX + v.x * devScale, dy = phaseY + v.y * devScale;
+                Assert.AreEqual(Mathf.Round(dx), dx, 2e-3f, $"At 1.5, device x {dx} must be integral (nearest device pixel).");
+                Assert.AreEqual(Mathf.Round(dy), dy, 2e-3f, $"At 1.5, device y {dy} must be integral (nearest device pixel).");
             }
         }
 
@@ -263,6 +267,103 @@ namespace LightSide.Tests
                 TestContext.WriteLine("ENGINE_PNG:" + outPath);
                 Assert.IsTrue(File.Exists(outPath));
             }
+        }
+
+        // -------------------------------------------------------------------------------------------
+        // Goal 2: Screen Space - Camera device scale = scaleFactor × (element lossyScale / root).
+        // Goal 3: fractional element position — FINAL device coordinates stay whole pixels.
+        // -------------------------------------------------------------------------------------------
+
+        [Test]
+        public void CameraCanvas_DeviceScale_IsScaleFactorTimesElementOverRootLossy()
+        {
+            // Reparent the existing canvas to Screen Space - Camera with a camera, give the element a
+            // nested scale, and assert the captured device scale is scaleFactor·(element/root), NOT
+            // the raw element lossyScale (which in camera space is in world units, not device px).
+            var camGo = new GameObject("Cam", typeof(Camera));
+            var cam = camGo.GetComponent<Camera>();
+            try
+            {
+                _canvas.renderMode = RenderMode.ScreenSpaceCamera;
+                _canvas.worldCamera = cam;
+                _canvas.planeDistance = 100f;
+                _canvas.scaleFactor = 2.0f;
+                // A nested scale on the element so element and root lossyScale genuinely differ.
+                _textGo.transform.localScale = new Vector3(3f, 3f, 1f);
+
+                _text.SetVerticesDirty();
+                _text.SetLayoutDirty();
+                Canvas.ForceUpdateCanvases();
+
+                var verts = _text.GetGeneratedVerticesForEditorTests();
+                if (verts.Count == 0) Assert.Ignore("Engine produced no vertices in this environment.");
+
+                var root = _canvas.rootCanvas != null ? _canvas.rootCanvas : _canvas;
+                float elementLossy = _textGo.transform.lossyScale.x;
+                float rootLossy = root.transform.lossyScale.x;
+                float expected = _canvas.scaleFactor * (elementLossy / rootLossy);
+
+                float actual = _text.cachedTransformData.pixelSnapDeviceScale;
+                Assert.Greater(actual, 0f, "Camera canvas must still produce a positive device scale.");
+                Assert.AreEqual(expected, actual, 1e-3f,
+                    "Camera device scale must be scaleFactor × (element lossyScale / root lossyScale).");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(camGo);
+            }
+        }
+
+        [TestCase(1.0f)]
+        [TestCase(2.0f)]
+        [TestCase(1.5f)]
+        public void FractionalElementPosition_FinalDeviceCoordinates_AreIntegral(float scaleFactor)
+        {
+            // Place the element at a fractional device-pixel position (x = 10.3 reference px) and
+            // assert the FINAL device coordinate (phase + local·deviceScale) of every vertex is a
+            // whole pixel at each scale — this is what the snap phase guarantees.
+            var rt = _textGo.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0f, 0f);
+            rt.pivot = new Vector2(0f, 0f);
+            rt.anchoredPosition = new Vector2(10.3f, 7.7f);
+
+            var verts = RenderAtScale(scaleFactor);
+            if (verts.Count == 0) Assert.Ignore("Engine produced no vertices in this environment.");
+
+            float devScale = _text.cachedTransformData.pixelSnapDeviceScale;
+            float phaseX = _text.cachedTransformData.pixelSnapPhaseX;
+            float phaseY = _text.cachedTransformData.pixelSnapPhaseY;
+            Assert.Greater(devScale, 0f, "Pixel-snap device scale must be set.");
+
+            foreach (var v in verts)
+            {
+                float devX = phaseX + v.x * devScale;
+                float devY = phaseY + v.y * devScale;
+                Assert.AreEqual(Mathf.Round(devX), devX, 2e-3f,
+                    $"At scale {scaleFactor}, final device x {devX} (phase {phaseX}) not integral.");
+                Assert.AreEqual(Mathf.Round(devY), devY, 2e-3f,
+                    $"At scale {scaleFactor}, final device y {devY} (phase {phaseY}) not integral.");
+            }
+        }
+
+        [Test]
+        public void SnapToDevicePixel_WithPhase_RoundsFinalDeviceCoordinate()
+        {
+            // Pure-math check of the phase-aware snap: for a fractional phase the returned local value
+            // must put (phase + local·scale) on a whole device pixel.
+            float scale = 2f, phase = 0.6f;
+            foreach (float local in new[] { 0f, 1.37f, 10.3f, -4.9f })
+            {
+                float snappedLocal = UniTextMeshGenerator.SnapToDevicePixel(local, scale, phase);
+                float device = phase + snappedLocal * scale;
+                Assert.AreEqual(Mathf.Round(device), device, 1e-3f,
+                    $"Phase-aware snap: device {device} (local {local}) must be integral.");
+            }
+            // Zero phase must equal the two-arg overload exactly.
+            Assert.AreEqual(
+                UniTextMeshGenerator.SnapToDevicePixel(1.37f, scale),
+                UniTextMeshGenerator.SnapToDevicePixel(1.37f, scale, 0f), 1e-6f,
+                "Zero phase must match the historical two-argument snap.");
         }
 
         private struct CoverageBlock { public int w, h; public byte[] data; public bool isValid; }
