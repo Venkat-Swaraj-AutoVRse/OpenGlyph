@@ -24,6 +24,30 @@ namespace LightSide
         [Tooltip("Named gradients for <gradient=name> tags.")]
         private UniTextGradients gradients;
 
+        [Header("Word Segmentation Dictionaries (opt-in)")]
+        [SerializeField]
+        [Tooltip("Dictionary assets enabling dictionary-based line breaking for scripts written " +
+                 "without spaces (Thai, Lao, Khmer, Myanmar). Assign a .bytes dictionary per script " +
+                 "to enable word-boundary line breaking for it. Leave a script unassigned to keep the " +
+                 "default behaviour (no interior breaks) and ship nothing extra. Because these assets " +
+                 "live OUTSIDE any Resources folder, an unassigned script adds zero bytes to the build.")]
+        private SegmentationDictionaryEntry[] segmentationDictionaries = Array.Empty<SegmentationDictionaryEntry>();
+
+        /// <summary>
+        /// Returns the dictionary asset assigned for the given segmentation script, or
+        /// <see langword="null"/> if none is assigned (script stays at default behaviour).
+        /// </summary>
+        public static TextAsset GetSegmentationDictionary(SegmentationScript script)
+        {
+            var inst = Instance;
+            if (inst == null || inst.segmentationDictionaries == null)
+                return null;
+            foreach (var entry in inst.segmentationDictionaries)
+                if (entry != null && entry.script == script)
+                    return entry.dictionary;
+            return null;
+        }
+
         /// <summary>Gets or sets the named gradients asset.</summary>
         public static UniTextGradients Gradients
         {
