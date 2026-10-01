@@ -48,10 +48,8 @@ through phase 1c.
   `BreakIterator` (which caps any faithful re-implementation at ~F1 0.92), not an
   OpenGlyph quality regression; against the ICU-60-vintage `laodict` the same code
   reaches F1 0.9985.
-- **Khmer/Myanmar real-layout wrap test is skipped**: no Khmer or Myanmar font
-  fixture under a compatible licence is bundled yet. Segmentation of those scripts is
-  still unit-tested; only the end-to-end real-layout wrap render awaits a bundled font
-  (Thai is fully covered).
+- **Real-layout wrap tests** cover Thai, Khmer and Myanmar with bundled OFL Noto Sans
+  fixtures (test data only, not shipped). Lao has no real-layout test yet.
 
 ## [1.0.0] - TBD
 
