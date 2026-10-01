@@ -1,5 +1,9 @@
 using UnityEngine;
 
+// R2 sub-task 4: the shim's whole job is to read the [Obsolete] UniTextAppearance/material API and
+// synthesise an equivalent style, so old assets render during the deprecation window. Suppress 618.
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -127,3 +131,4 @@ namespace LightSide
             m != null && m.HasProperty(id) ? m.GetFloat(id) : fallback;
     }
 }
+#pragma warning restore 618

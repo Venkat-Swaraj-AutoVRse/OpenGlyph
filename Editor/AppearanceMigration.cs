@@ -5,6 +5,10 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
+// R2 sub-task 4: the migration tool reads the [Obsolete] UniTextAppearance/material API by design (to
+// convert it); suppress 618 for this file.
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -231,3 +235,4 @@ namespace LightSide
         }
     }
 }
+#pragma warning restore 618
