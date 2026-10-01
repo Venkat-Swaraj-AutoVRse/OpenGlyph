@@ -22,6 +22,20 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# iOS/tvOS ship STATIC libs (no linking/bundling happens here), but the Xcode generator still
+# runs a code-signing phase and FAILS CI with "Signing for ... requires a development team"
+# because the hosted runner has no provisioning profile. A static archive is never signed, so
+# disable signing for every target in this build. Set BEFORE FetchContent defines any target
+# so the fetched dependency targets (freetype, harfbuzz, png, zlib, blend2d) inherit it too.
+# No effect on Windows/Linux/macOS-dylib/Android (non-Xcode or non-embedded) builds.
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+  set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED  "NO" CACHE STRING "" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO" CACHE STRING "" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY    ""   CACHE STRING "" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM      ""   CACHE STRING "" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE        "NO" CACHE STRING "" FORCE)
+endif()
+
 # Work around a CMake 4.2 GNUInstallDirs bug (infinite recursion in
 # _GNUInstallDirs_RUNSTATEDIR_get_default) triggered when Blend2D includes it: shadow the
 # stock module with a lean shim (cmake/GNUInstallDirs.cmake) placed first on the module path.
@@ -53,18 +67,30 @@ FetchContent_Declare(zlib
   GIT_SHALLOW    TRUE)
 set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(zlib)
-# Point find_package(ZLIB) (used by libpng and FreeType) at the fetched build. Under the VS
-# multi-config generator the static lib lands at <bindir>/<Config>/zlibstatic.lib. Seed the
-# FindZLIB cache vars + ZLIB_FOUND so no configure-time file existence check is needed, and
-# provide the ZLIB::ZLIB imported-style target for consumers that prefer it.
+# zlib's CMakeLists unconditionally defines BOTH a shared `zlib` and a static `zlibstatic`
+# target, and on UNIX-like platforms (which includes Emscripten) sets OUTPUT_NAME=z on both.
+# On a single-config generator where dynamic linking is unavailable (Emscripten/wasm), the
+# `zlib` SHARED target is silently downgraded to STATIC and then collides with `zlibstatic`
+# on the same output file `libz.a` -> "ninja: multiple rules generate _deps/zlib-build/libz.a".
+# We only ever link the static `zlibstatic`, so give the shared target a distinct output name
+# and drop it from the default build; this removes the collision without patching the source.
+if(TARGET zlib)
+  set_target_properties(zlib PROPERTIES OUTPUT_NAME zlibdyn EXCLUDE_FROM_ALL ON)
+endif()
+# Point find_package(ZLIB) (used by libpng and FreeType) at the fetched build USING THE TARGET,
+# not a hardcoded, config- and platform-specific library file path. The previous approach wrote
+# a literal "<bindir>/$<CONFIG>/zlibstatic.lib" into ZLIB_LIBRARY: the generator expression is
+# not evaluated by find_package consumers (seen verbatim in Linux logs) and the ".lib" / name is
+# MSVC-only, so non-Windows builds leaked a Windows path. Seed FindZLIB from the imported-style
+# ZLIB::ZLIB target instead, which carries the correct per-platform artifact and include dirs.
 set(ZLIB_INCLUDE_DIR  "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
 set(ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
-set(ZLIB_LIBRARY  "${zlib_BINARY_DIR}/$<CONFIG>/zlibstatic.lib" CACHE STRING "" FORCE)
-set(ZLIB_LIBRARIES zlibstatic CACHE STRING "" FORCE)
-set(ZLIB_FOUND TRUE CACHE BOOL "" FORCE)
 if(TARGET zlibstatic AND NOT TARGET ZLIB::ZLIB)
   add_library(ZLIB::ZLIB ALIAS zlibstatic)
 endif()
+set(ZLIB_LIBRARY  ZLIB::ZLIB CACHE STRING "" FORCE)
+set(ZLIB_LIBRARIES ZLIB::ZLIB CACHE STRING "" FORCE)
+set(ZLIB_FOUND TRUE CACHE BOOL "" FORCE)
 
 # ---- libpng (libpng/PNG license) ---------------------------------------------
 FetchContent_Declare(libpng
@@ -76,19 +102,35 @@ set(PNG_STATIC   ON  CACHE BOOL "" FORCE)
 set(PNG_TESTS    OFF CACHE BOOL "" FORCE)
 set(PNG_TOOLS    OFF CACHE BOOL "" FORCE)
 set(PNG_FRAMEWORK OFF CACHE BOOL "" FORCE)
+# Disable libpng's CPU-specific optimizations. On the macOS universal (arm64;x86_64) and
+# iOS/Android-arm builds libpng's arm/*_neon_intrinsics.c fail to compile ("NEON intrinsics
+# not available with the soft-float ABI") because the NEON path is selected per-file but the
+# per-file flags don't carry a NEON-capable float ABI through CMake's universal/Xcode driver.
+# FreeType only uses libpng's baseline (non-SIMD) decode for color-bitmap strikes, so the
+# hardware paths are dead weight here; turning them off removes the broken translation units
+# on every arch without changing decode output.
+set(PNG_HARDWARE_OPTIMIZATIONS OFF CACHE BOOL "" FORCE)
+set(PNG_ARM_NEON "off" CACHE STRING "" FORCE)
+set(PNG_INTEL_SSE "off" CACHE STRING "" FORCE)
+set(PNG_POWERPC_VSX "off" CACHE STRING "" FORCE)
+set(PNG_MIPS_MSA "off" CACHE STRING "" FORCE)
 set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(libpng)
-# Seed FindPNG (used by FreeType) at the fetched static libpng, same technique as ZLIB.
+# Seed FindPNG (used by FreeType) at the fetched static libpng, same technique as ZLIB:
+# bind to the PNG::PNG target rather than a hardcoded "<bindir>/$<CONFIG>/libpng16_static.lib"
+# path. That literal name is MSVC-only (ELF/Mach-O produce libpng16.a, no $<CONFIG> dir on
+# single-config generators) and previously leaked a Windows ".lib" path into Linux/macOS/
+# Android/WebGL builds. The target carries the correct artifact name per platform.
 if(TARGET png_static)
   set(PNG_PNG_INCLUDE_DIR "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
   set(PNG_INCLUDE_DIR     "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
   set(PNG_INCLUDE_DIRS    "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
-  set(PNG_LIBRARY   "${libpng_BINARY_DIR}/$<CONFIG>/libpng16_static.lib" CACHE STRING "" FORCE)
-  set(PNG_LIBRARIES png_static CACHE STRING "" FORCE)
-  set(PNG_FOUND TRUE CACHE BOOL "" FORCE)
   if(NOT TARGET PNG::PNG)
     add_library(PNG::PNG ALIAS png_static)
   endif()
+  set(PNG_LIBRARY   PNG::PNG CACHE STRING "" FORCE)
+  set(PNG_LIBRARIES PNG::PNG CACHE STRING "" FORCE)
+  set(PNG_FOUND TRUE CACHE BOOL "" FORCE)
 endif()
 
 # ---- FreeType (FTL / GPLv2 dual) ---------------------------------------------
@@ -117,6 +159,33 @@ set(HB_BUILD_UTILS     OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(freetype harfbuzz)
 
+# ---- Build-order wiring for FreeType's zlib/png dependencies -------------------
+# FreeType enables zlib + libpng support and #includes png.h, which in turn includes the
+# GENERATED header pnglibconf.h (emitted into libpng's binary dir by libpng's own custom
+# targets). find_package(PNG) hands FreeType the include dir but creates NO target-level
+# ordering, so on generators that don't infer it from a linked target at compile time
+# (Visual Studio, Xcode) FreeType's sources can compile before pnglibconf.h exists:
+#   png.h(329): fatal error C1083: Cannot open include file: 'pnglibconf.h'
+# Make the ordering explicit: FreeType must wait for the png/zlib static libs (which already
+# depend on their generated headers) to be built first. This is pure ordering; it does not
+# change what FreeType links or how it is compiled.
+if(TARGET freetype)
+  if(TARGET png_static)
+    add_dependencies(freetype png_static)
+  endif()
+  if(TARGET zlibstatic)
+    add_dependencies(freetype zlibstatic)
+  endif()
+  # Belt-and-suspenders: if libpng exposed a dedicated header-generation target, order on it
+  # too so the generated pnglibconf.h is guaranteed present before any FreeType translation
+  # unit is compiled, independent of the static-lib target's own dependency edges.
+  foreach(_png_gentarget png_genfiles pnglibconf_h genfiles)
+    if(TARGET ${_png_gentarget})
+      add_dependencies(freetype ${_png_gentarget})
+    endif()
+  endforeach()
+endif()
+
 # ---- Blend2D (M2, gated) ------------------------------------------------------
 # Blend2D is implemented (src/ut_bl.cpp) and pinned, but its master CMakeLists triggers a
 # recursion bug in the installed CMake 4.2.2 (Check*CompilerFlag on flags like
@@ -143,6 +212,15 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   set(BLEND2D_STATIC ON CACHE BOOL "" FORCE)
   set(BLEND2D_NO_INSTALL ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(blend2d)
+  # On a macOS universal (arm64;x86_64) pass, Blend2D compiles its AArch64 JIT path
+  # (pipecompiler_a64.cpp etc., which #include <asmjit/a64.h>) but its own
+  # target_include_directories(blend2d ... ${ASMJIT_INCLUDE_DIRS}) does not reliably cover
+  # every core TU for the secondary arch, so context.cpp fails with "'asmjit/a64.h' file not
+  # found". The embedded asmjit sources live under <asmjit>/src; add that dir to the blend2d
+  # target's include path unconditionally so the asmjit umbrella headers always resolve.
+  if(TARGET blend2d AND EXISTS "${asmjit_SOURCE_DIR}/src")
+    target_include_directories(blend2d BEFORE PRIVATE "${asmjit_SOURCE_DIR}/src")
+  endif()
 endif()
 
 # ---- Runtime library: unitext_native -----------------------------------------
@@ -155,14 +233,41 @@ else()
   set(OPENGLYPH_BL_SRC src/ut_bl_stub.c)
 endif()
 
-add_library(unitext_native SHARED
+# ---- Platform / packaging model ----------------------------------------------
+# iOS, tvOS and WebGL(emscripten) ship STATIC libs (linked into the app / __Internal);
+# Windows, Linux, macOS and Android ship SHARED libs. Detect and pick.
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "tvOS" OR EMSCRIPTEN)
+  set(OPENGLYPH_LIBTYPE STATIC)
+else()
+  set(OPENGLYPH_LIBTYPE SHARED)
+endif()
+
+# Default-hidden visibility on non-Windows; the ut_* symbols carry
+# __attribute__((visibility("default"))) via UT_API in ut_native.h. A GNU version script
+# (Linux/Android) or a macho exported-symbols list (macOS/iOS/tvOS) additionally restricts
+# the dynamic symbol table to exactly the ut_* / editor exports.
+if(NOT MSVC)
+  set(CMAKE_C_VISIBILITY_PRESET hidden)
+  set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+  set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+endif()
+
+# Windows uses the .def; other platforms must drop it from the source list.
+set(OPENGLYPH_RT_EXPORTS "")
+set(OPENGLYPH_ED_EXPORTS "")
+if(WIN32)
+  set(OPENGLYPH_RT_EXPORTS src/ut_exports.def)
+  set(OPENGLYPH_ED_EXPORTS src/editor/ut_editor_exports.def)
+endif()
+
+add_library(unitext_native ${OPENGLYPH_LIBTYPE}
   src/ut_ft.c
   src/ut_ft_variations.c
   src/ut_hb.c
   src/ut_colr.c
   ${OPENGLYPH_BL_SRC}
   src/ut_version.c
-  src/ut_exports.def)
+  ${OPENGLYPH_RT_EXPORTS})
 target_link_libraries(unitext_native PRIVATE freetype harfbuzz)
 # FreeType references zlib + libpng symbols (sbix/CBDT PNG strikes); pull the statics in.
 if(TARGET zlibstatic)
@@ -176,25 +281,62 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   target_compile_definitions(unitext_native PRIVATE OPENGLYPH_HAVE_BLEND2D=1)
 endif()
 target_include_directories(unitext_native PRIVATE include)
-set_target_properties(unitext_native PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native")
+# Output name to match Plugins/<platform>/: Windows 'unitext_native.dll'; ELF/Mach-O get the
+# 'lib' prefix (libunitext_native.so/.dylib/.a) which CMake adds by default on those platforms.
+if(WIN32)
+  set_target_properties(unitext_native PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native")
+else()
+  set_target_properties(unitext_native PROPERTIES OUTPUT_NAME "unitext_native")
+endif()
+# Restrict exported symbols on shared ELF/Mach-O builds to the ut_* set.
+if(OPENGLYPH_LIBTYPE STREQUAL "SHARED" AND NOT WIN32)
+  if(APPLE)
+    target_link_options(unitext_native PRIVATE
+      "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/exports/ut_symbols.macho.txt")
+  elseif(NOT EMSCRIPTEN)
+    target_link_options(unitext_native PRIVATE
+      "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports/ut_symbols.map")
+  endif()
+endif()
 
-# ---- Editor library: unitext_native_editor (milestone 2) ---------------------
-option(OPENGLYPH_BUILD_EDITOR_DLL "Build unitext_native_editor (milestone 2)" ON)
+# ---- Editor library: unitext_native_editor (desktop only: Win/Linux/macOS) --------
+# Not shipped for Android/iOS/tvOS/WebGL (no editor tooling there). dialog_win32.c has a
+# non-Windows stub for the two dialog exports so subset+shape still build everywhere.
+if(WIN32 OR (UNIX AND NOT ANDROID AND NOT IOS AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS"))
+  set(OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT ON)
+else()
+  set(OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT OFF)
+endif()
+option(OPENGLYPH_BUILD_EDITOR_DLL "Build unitext_native_editor (desktop)" ${OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT})
 if(OPENGLYPH_BUILD_EDITOR_DLL)
   add_library(unitext_native_editor SHARED
     src/editor/subset.c
     src/editor/dialog_win32.c
-    src/editor/ut_editor_exports.def)
+    ${OPENGLYPH_ED_EXPORTS})
   target_link_libraries(unitext_native_editor PRIVATE harfbuzz-subset harfbuzz)
   # harfbuzz + harfbuzz-subset are separate static libs that both embed the same CFF/number
-  # translation units, so MSVC sees duplicate (byte-identical) symbols. Allow multiple
-  # definitions; the editor DLL is functionally verified by the parity harness subset test.
+  # translation units, so the linker sees duplicate (byte-identical) symbols. Allow multiple
+  # definitions on every linker; the editor DLL is functionally verified by the parity harness
+  # subset test. MSVC: /FORCE:MULTIPLE. GNU ld (Linux/Android): --allow-multiple-definition.
+  # Apple ld64 treats duplicate archive symbols as a warning, not an error, so it needs no flag
+  # (and --allow-multiple-definition is not accepted there).
   if(MSVC)
     target_link_options(unitext_native_editor PRIVATE /FORCE:MULTIPLE /IGNORE:4088)
+  elseif(NOT APPLE)
+    target_link_options(unitext_native_editor PRIVATE "-Wl,--allow-multiple-definition")
   endif()
   target_include_directories(unitext_native_editor PRIVATE include)
-  set_target_properties(unitext_native_editor PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native_editor")
   if(WIN32)
+    set_target_properties(unitext_native_editor PROPERTIES PREFIX "" OUTPUT_NAME "unitext_native_editor")
     target_link_libraries(unitext_native_editor PRIVATE comdlg32)
+  else()
+    set_target_properties(unitext_native_editor PROPERTIES OUTPUT_NAME "unitext_native_editor")
+    if(APPLE)
+      target_link_options(unitext_native_editor PRIVATE
+        "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/exports/ut_editor_symbols.macho.txt")
+    else()
+      target_link_options(unitext_native_editor PRIVATE
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports/ut_editor_symbols.map")
+    endif()
   endif()
 endif()

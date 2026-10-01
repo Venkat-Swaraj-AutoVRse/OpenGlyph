@@ -1,0 +1,4 @@
+# Keep the native CI workflow LF so Linux/macOS runners never see CR bytes in its
+# heredocs or `set -e` scripts. Scoped to this one file so no committed source blob
+# is renormalized.
+/.github/workflows/native.yml text eol=lf

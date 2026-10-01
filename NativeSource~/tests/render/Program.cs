@@ -87,6 +87,7 @@ unsafe class Render
         fixed(byte* p=font){ lib.Fn<D_newface>("ut_ft_new_memory_face")(l,p,(IntPtr)font.Length,IntPtr.Zero,out var f); return lib.Fn<D_charindex>("ut_ft_get_char_index")(f,(UIntPtr)cp); }
     }
     // shader preview: smoothstep(0.5-w,0.5+w, sdf/255) -> alpha 0..255 (white glyph on dark)
+    static byte[] CopyField(byte[] sdf,int w,int h,int pitch){ var o=new byte[w*h]; for(int y=0;y<h;y++)for(int x=0;x<w;x++)o[y*w+x]=sdf[y*pitch+x]; return o; }
     static byte[] ShaderPreview(byte[] sdf,int w,int h,int pitch,double ww)
     {
         var o=new byte[w*h];
@@ -119,7 +120,11 @@ unsafe class Render
             int w=Math.Min(so.w,sn.w),h=Math.Min(so.h,sn.h);
             var po=ShaderPreview(so.buf,w,h,so.pitch,ww); var pn=ShaderPreview(sn.buf,w,h,sn.pitch,ww);
             rows.Add(($"{ch} 1x", po, pn, w, h));
-            var po4=UpBilinear(po,w,h,4,out int W,out int H); var pn4=UpBilinear(pn,w,h,4,out _,out _);
+            // 4x the way the GPU does it: bilinear-upscale the SDF FIELD, then smoothstep at target
+            // resolution (NOT upscale the thresholded 1x preview, which just blurs both equally).
+            var oField=CopyField(so.buf,w,h,so.pitch); var nField=CopyField(sn.buf,w,h,sn.pitch);
+            var oUp=UpBilinear(oField,w,h,4,out int W,out int H); var nUp=UpBilinear(nField,w,h,4,out _,out _);
+            var po4=ShaderPreview(oUp,W,H,W,ww); var pn4=ShaderPreview(nUp,W,H,W,ww);
             rows.Add(($"{ch} 4x", po4, pn4, W, H));
         }
         // worst-edgeMax glyphs (from perceptual gate: NotoSans reported worst on curved/diagonal;
