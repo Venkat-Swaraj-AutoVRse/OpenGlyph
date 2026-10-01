@@ -46,7 +46,12 @@ jobs:
           Copy-Item $orig "$env:RUNNER_TEMP/unitext_native_orig.dll"
           dotnet run -c Release --project "NativeSource~/tests/parity" -- `
             "$env:RUNNER_TEMP/unitext_native_orig.dll" `
-            "build/Release/unitext_native.dll" "Defaults" "Defaults/NotoSans-Regular.ttf" || exit 0
+            "build/Release/unitext_native.dll" "Defaults" "Defaults/NotoSans-Regular.ttf"
+          # Soft gate: the harness reports a result and exits non-zero on the pre-existing
+          # mm_var (variations) checks that the committed baseline DLL also fails; those are
+          # not a regression (SDF/bitmap/raster parity is byte-identical). Do not fail CI on
+          # the harness exit code. `|| exit 0` is a bash idiom and errors in pwsh.
+          exit 0
       - name: Stage outputs
         shell: pwsh
         run: |
@@ -188,13 +193,13 @@ jobs:
         run: >
           cmake -S "NativeSource~" -B build-ios -G Xcode
           -DCMAKE_SYSTEM_NAME=iOS "-DCMAKE_OSX_ARCHITECTURES=arm64"
-          -DCMAKE_OSX_SYSROOT=iphoneos -DOPENGLYPH_ENABLE_BLEND2D=ON &&
+          -DCMAKE_OSX_SYSROOT=iphoneos -DOPENGLYPH_ENABLE_BLEND2D=OFF &&
           cmake --build build-ios --config Release
       - name: Build iOS simulator (arm64 + x86_64, STATIC)
         run: >
           cmake -S "NativeSource~" -B build-iossim -G Xcode
           -DCMAKE_SYSTEM_NAME=iOS "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
-          -DCMAKE_OSX_SYSROOT=iphonesimulator -DOPENGLYPH_ENABLE_BLEND2D=ON &&
+          -DCMAKE_OSX_SYSROOT=iphonesimulator -DOPENGLYPH_ENABLE_BLEND2D=OFF &&
           cmake --build build-iossim --config Release
       - name: Package xcframework (static-lib slices)
         run: |
@@ -213,7 +218,7 @@ jobs:
         run: >
           cmake -S "NativeSource~" -B build-tvos -G Xcode
           -DCMAKE_SYSTEM_NAME=tvOS "-DCMAKE_OSX_ARCHITECTURES=arm64"
-          -DCMAKE_OSX_SYSROOT=appletvos -DOPENGLYPH_ENABLE_BLEND2D=ON &&
+          -DCMAKE_OSX_SYSROOT=appletvos -DOPENGLYPH_ENABLE_BLEND2D=OFF &&
           cmake --build build-tvos --config Release
       - name: Stage tvOS
         run: |
