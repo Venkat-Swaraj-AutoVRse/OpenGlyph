@@ -95,6 +95,44 @@ jobs:
           if ('${{ matrix.arch }}' -eq 'x64') {
             Check-Dll "out/$d/unitext_native_editor.dll" 'x64' ([int]$env:UT_EDITOR_SYMS) 'editor'
           }
+      - name: Verify no VC++ runtime dependency (static CRT)
+        shell: pwsh
+        run: |
+          # Gate: the shipped DLLs must link the CRT statically and import NO VC++ runtime —
+          # no VCRUNTIME140{,_1}.dll, no MSVCP140*.dll, no api-ms-win-crt-*.dll. Otherwise a
+          # Unity player on a machine without the VC++ redistributable fails to load our DLL
+          # with DllNotFoundException (Unity's own UnityPlayer.dll imports none of these).
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsroot  = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $dumpbin = Get-ChildItem -Path "$vsroot\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
+                     Where-Object { $_.FullName -match '\\Hostx64\\x64\\' } | Select-Object -First 1 -Expand FullName
+          if (-not $dumpbin) { $dumpbin = (Get-ChildItem -Path "$vsroot\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Select-Object -First 1 -Expand FullName) }
+          Write-Output "dumpbin: $dumpbin"
+          # Forbidden import patterns (case-insensitive). api-ms-win-crt-* is the UCRT's
+          # "apiset" forwarder family (only present with the dynamic CRT); vcruntime*/msvcp*
+          # are the VC++ runtime DLLs. OS DLLs (KERNEL32, ntdll, api-ms-win-core-*, etc.) are fine.
+          $forbidden = '^(vcruntime140.*|msvcp140.*|concrt140.*|vccorlib140.*|api-ms-win-crt-.*)\.dll$'
+          $d = if ('${{ matrix.arch }}' -eq 'x64') { 'Windows/x86_64' } else { 'Windows/ARM64' }
+          $dlls = @("out/$d/unitext_native.dll")
+          if ('${{ matrix.arch }}' -eq 'x64') { $dlls += "out/$d/unitext_native_editor.dll" }
+          $fail = $false
+          foreach ($dll in $dlls) {
+            Write-Output "=== dependents: $dll ==="
+            # Parse the "Image has the following dependencies:" block — one DLL name per line.
+            $deps = & $dumpbin /dependents $dll |
+              Select-String -Pattern '^\s+(\S+\.dll)\s*$' |
+              ForEach-Object { $_.Matches[0].Groups[1].Value }
+            $deps | Sort-Object -Unique | ForEach-Object { Write-Output "    $_" }
+            $bad = $deps | Where-Object { $_ -match $forbidden }
+            if ($bad) {
+              Write-Output "  FORBIDDEN CRT imports in $dll :"
+              $bad | Sort-Object -Unique | ForEach-Object { Write-Output "    !! $_" }
+              $fail = $true
+            } else {
+              Write-Output "  OK: no VC++ runtime / UCRT apiset imports"
+            }
+          }
+          if ($fail) { throw "VC++ runtime dependency detected — DLL is not statically linked against the CRT" }
       - uses: actions/upload-artifact@v4
         with:
           name: native-windows-${{ matrix.arch }}
