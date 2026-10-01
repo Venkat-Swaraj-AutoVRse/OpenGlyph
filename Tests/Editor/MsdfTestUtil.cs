@@ -24,6 +24,16 @@ namespace LightSide.Tests
             foreach (var c in candidates)
                 if (File.Exists(c)) return c;
 
+            // Resolve relative to THIS package's physical on-disk root (works for a file:-referenced
+            // package whose source tree is outside the host project): Defaults/ ships inside the
+            // imported package.
+            string pkgRoot = PackagePhysicalRoot();
+            if (pkgRoot != null)
+            {
+                string cand = Path.Combine(pkgRoot, "Defaults", "NotoSans-Regular.ttf");
+                if (File.Exists(cand)) return cand;
+            }
+
             // Fallback: search the Library/PackageCache and the project tree.
             string root = Path.GetFullPath(Path.Combine(UnityEngine.Application.dataPath ?? ".", ".."));
             try
@@ -32,6 +42,29 @@ namespace LightSide.Tests
                     return f;
             }
             catch { /* ignore */ }
+            return null;
+        }
+
+        /// <summary>
+        /// Physical on-disk root of THIS package, resolved from the test assembly via the Package
+        /// Manager (<c>PackageInfo.FindForAssembly</c>). For a <c>file:</c>-referenced package this is
+        /// the real source worktree, NOT a path under the host project's <c>dataPath</c> — which is
+        /// why walking up from <c>Application.dataPath</c> cannot find assets that live only in the
+        /// source tree (e.g. the <c>NativeSource~/</c> test fonts, which Unity never imports because
+        /// of the trailing <c>~</c>). Returns null if the Package Manager cannot locate the assembly.
+        /// </summary>
+        private static string PackagePhysicalRoot()
+        {
+            try
+            {
+                var asm = typeof(MsdfTestUtil).Assembly;
+                var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(asm);
+                // resolvedPath is the physical directory of the package on disk (the worktree root
+                // for a file: dependency); assetPath is the virtual Packages/<name> path.
+                if (info != null && !string.IsNullOrEmpty(info.resolvedPath) && Directory.Exists(info.resolvedPath))
+                    return info.resolvedPath;
+            }
+            catch { /* Package Manager unavailable — fall back to the dataPath walk-up. */ }
             return null;
         }
 
@@ -116,8 +149,21 @@ namespace LightSide.Tests
         /// <summary>Locates the fetched RobotoFlex-VF.ttf (variable font) under NativeSource~/tests/fonts.</summary>
         public static string FindRobotoFlexPath()
         {
+            // PRIMARY: resolve relative to THIS package's physical root. The font lives at
+            // <packageRoot>/NativeSource~/tests/fonts/RobotoFlex-VF.ttf. The NativeSource~ folder is
+            // NOT imported by Unity (trailing ~), so it is never under the host project's dataPath;
+            // walking up from dataPath (the old-only strategy) therefore found nothing in a
+            // file:-referenced host and the test skipped. PackageInfo.resolvedPath IS the worktree.
+            string pkgRoot = PackagePhysicalRoot();
+            if (pkgRoot != null)
+            {
+                string cand = Path.Combine(pkgRoot, "NativeSource~", "tests", "fonts", "RobotoFlex-VF.ttf");
+                if (File.Exists(cand)) return cand;
+            }
+
+            // FALLBACK 1: walk up from the host project (covers an embedded package laid out under
+            // the project directory).
             string root = System.IO.Path.GetFullPath(System.IO.Path.Combine(UnityEngine.Application.dataPath ?? ".", ".."));
-            // Walk up to find the repo root that holds NativeSource~.
             var dir = new DirectoryInfo(root);
             for (int i = 0; i < 8 && dir != null; i++)
             {
