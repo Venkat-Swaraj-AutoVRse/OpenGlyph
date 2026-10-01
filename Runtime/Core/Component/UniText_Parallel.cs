@@ -613,7 +613,30 @@ namespace LightSide
             else
                 textProcessor.SetStyleSource(false, FontStyleSpec.Normal, null, null);
 
+            // Phase 2: a property-driven style has no markup span, so AttributeParser.Apply never
+            // Prepare()s the Bold/Italic modifiers -> their OnGlyph/OnShaped never subscribe and the
+            // flags SetStyleSource writes go unconsumed. Prepare the matching registered modifier(s)
+            // here so property-driven synthetic bold/italic renders exactly like <b>/<i> markup.
+            PrepareStyleModifiers();
+
             textProcessor.EnsureFirstPass(textSpan, settings);
+        }
+
+        // Ensures the registered BoldModifier/ItalicModifier are initialized (subscribed) when the
+        // component's weight/style property requests bold/italic but no markup span would trigger them.
+        private void PrepareStyleModifiers()
+        {
+            bool wantBold = fontWeight >= FontStyleSpec.BoldWeight;
+            bool wantItalic = fontStyleAxis != StyleAxis.Normal;
+            if (!wantBold && !wantItalic) return;
+
+            for (int i = 0; i < modRegisters.Count; i++)
+            {
+                var mod = modRegisters[i]?.Modifier;
+                if (mod == null || mod.IsInitialized) continue;
+                if ((wantBold && mod is BoldModifier) || (wantItalic && mod is ItalicModifier))
+                    mod.Prepare();
+            }
         }
 
         private void DoGenerateMeshData()
