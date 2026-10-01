@@ -137,6 +137,39 @@ namespace LightSide.Tests
         }
 
         [Test]
+        public void DefaultAppearance_MsdfFont_UsesMsdfShader_NotSdf()
+        {
+            // Product fix: an MSDF-mode font on the DEFAULT appearance must be drawn with an MSDF
+            // shader, not the SDF default (which would render solid blocks sampling the RGB atlas).
+            var vf = UniTextFont.CreateFontAsset(_bytes, samplingPointSize: 64, renderMode: UniTextRenderMode.Msdf);
+            if (vf == null) Assert.Ignore("RobotoFlex MSDF asset failed to load.");
+            try
+            {
+                if (vf.AtlasRenderMode != UniTextRenderMode.Msdf)
+                    Assert.Ignore("MSDF outline export unavailable in this native binary.");
+                var appearance = RealLayoutFixtures.LoadDefaultAppearance();
+                var mats = appearance.GetMaterials(vf);
+                Assert.IsNotNull(mats);
+                Assert.Greater(mats.Length, 0);
+                Assert.IsNotNull(mats[0]);
+                Assert.IsNotNull(mats[0].shader);
+                StringAssert.Contains("MSDF", mats[0].shader.name,
+                    $"An MSDF font on the default appearance must use an MSDF shader, got '{mats[0].shader.name}'.");
+
+                // And a plain SDF font must still get its (non-MSDF) shader.
+                var sdf = UniTextFont.CreateFontAsset(_bytes, samplingPointSize: 64, renderMode: UniTextRenderMode.SDF);
+                try
+                {
+                    var sdfMats = appearance.GetMaterials(sdf);
+                    if (sdfMats != null && sdfMats.Length > 0 && sdfMats[0] != null && sdfMats[0].shader != null)
+                        StringAssert.DoesNotContain("MSDF", sdfMats[0].shader.name, "An SDF font must not get an MSDF shader.");
+                }
+                finally { UnityEngine.Object.DestroyImmediate(sdf); }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(vf); }
+        }
+
+        [Test]
         public void Colr_EmojiFont_UnaffectedByVariationKeys()
         {
             // The EmojiFont (COLR) is a non-variable color font; a variation request on it is a no-op
