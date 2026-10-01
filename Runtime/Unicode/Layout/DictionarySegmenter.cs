@@ -48,9 +48,25 @@ namespace LightSide
         private readonly UnicodeDataProvider _provider;
         private readonly GraphemeBreaker _graphemeBreaker;
 
-        // Lazily-loaded per-script dictionaries.
-        private DictionaryTrie _thai, _lao, _khmer, _myanmar;
-        private bool _thaiTried, _laoTried, _khmerTried, _myanmarTried;
+        /// <summary>
+        /// Immutable, atomically-swappable set of the four per-script dictionaries. A layout pass
+        /// captures ONE reference to the current snapshot at its start and reads only that reference
+        /// for its whole duration, so a settings change on another thread (which only flips a dirty
+        /// flag) can never null or swap a trie mid-pass — no torn reads, no NRE on a worker thread.
+        /// </summary>
+        private sealed class DictSnapshot
+        {
+            public readonly DictionaryTrie Thai, Lao, Khmer, Myanmar;
+            public DictSnapshot(DictionaryTrie thai, DictionaryTrie lao, DictionaryTrie khmer, DictionaryTrie myanmar)
+            { Thai = thai; Lao = lao; Khmer = khmer; Myanmar = myanmar; }
+        }
+
+        // The live snapshot (volatile: readers see a fully-constructed snapshot, never a partially
+        // written field set). Built on the MAIN thread — at construction and whenever UniTextSettings
+        // changes — because resolving a dictionary reads TextAsset.bytes, which Unity permits only on
+        // the main thread. A worker-thread layout pass only READS this reference; it never builds.
+        private volatile DictSnapshot _snapshot;
+        private readonly object _snapshotLock = new object();
 
         // Reusable candidate-length scratch for the 3-word lookahead (word lengths are
         // small; POSSIBLE_WORD_LIST_MAX in ICU is 20).
@@ -64,24 +80,37 @@ namespace LightSide
         {
             _provider = provider ?? throw new ArgumentNullException(nameof(provider));
             _graphemeBreaker = new GraphemeBreaker(provider);
-            // Re-resolve dictionaries if the project's segmentation assignment changes at
-            // runtime (e.g. UniTextSettings.SetInstance, or an edit in Project Settings). Without
-            // this the first per-script resolution would be cached forever, so assigning a
-            // dictionary after a script had already fallen back — or clearing one — would have
-            // no effect until domain reload.
-            UniTextSettings.Changed += ResetDictionaries;
+            // Build the initial snapshot now (constructor runs on the main thread). A later settings
+            // change rebuilds it via RebuildSnapshot, invoked on UniTextSettings.Changed — which fires
+            // synchronously inside UniTextSettings.SetInstance, i.e. on the (main) thread that changed
+            // the setting. The rebuilt snapshot is published atomically through the volatile field, so
+            // a worker-thread pass that captured the PREVIOUS snapshot keeps using it to completion and
+            // the NEXT pass picks up the new one — the reload applies strictly between passes.
+            RebuildSnapshot();
+            UniTextSettings.Changed += RebuildSnapshot;
         }
 
         /// <summary>
-        /// Drops the cached per-script dictionaries so the next SA run re-resolves them from
-        /// <see cref="UniTextSettings"/> (re-emitting the one-time warning for a script that is
-        /// still unassigned). Invoked automatically on <see cref="UniTextSettings.Changed"/>.
+        /// Resolves all four dictionaries and publishes a fresh immutable snapshot. MAIN-THREAD ONLY
+        /// (reads TextAsset.bytes). Serialised so concurrent Changed callbacks resolve once.
         /// </summary>
-        public void ResetDictionaries()
+        private void RebuildSnapshot()
         {
-            _thai = _lao = _khmer = _myanmar = null;
-            _thaiTried = _laoTried = _khmerTried = _myanmarTried = false;
+            lock (_snapshotLock)
+            {
+                _snapshot = new DictSnapshot(
+                    Load(SegmentationScript.Thai),
+                    Load(SegmentationScript.Lao),
+                    Load(SegmentationScript.Khmer),
+                    Load(SegmentationScript.Myanmar));
+            }
         }
+
+        /// <summary>
+        /// Back-compat alias retained for callers/tests that forced a re-resolution. Rebuilds the
+        /// snapshot on the calling (main) thread; the new snapshot is used by the NEXT pass.
+        /// </summary>
+        public void ResetDictionaries() => RebuildSnapshot();
 
         /// <summary>True if the codepoint's line-break class is SA (complex-context).</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -107,6 +136,13 @@ namespace LightSide
             int n = codepoints.Length;
             if (n < 2) return;
 
+            // Capture ONE immutable snapshot at the start of the pass. The snapshot is only ever
+            // replaced (atomically, via the volatile field) by RebuildSnapshot on the main thread
+            // when UniTextSettings changes; a change arriving while this pass runs publishes a NEW
+            // snapshot that this pass does not see — it keeps using `snap` to completion, and the
+            // next pass captures the new one. Hence no torn reads mid-pass.
+            DictSnapshot snap = _snapshot;
+
             bool graphemeReady = false;
             Span<bool> graphemeBoundaries = default;
 
@@ -125,7 +161,7 @@ namespace LightSide
                     j++;
                 int runEnd = j;
 
-                if (runEnd - runStart >= MinWord * 2 && ResolveTrie(codepoints[runStart]) != null)
+                if (runEnd - runStart >= MinWord * 2 && ResolveTrie(snap, codepoints[runStart]) != null)
                 {
                     // Compute grapheme boundaries once, lazily, only if a real SA run with
                     // a dictionary is present (avoids the O(n) pass for pure non-SA text).
@@ -138,7 +174,7 @@ namespace LightSide
                         graphemeReady = true;
                     }
 
-                    SegmentRun(codepoints, runStart, runEnd, breaks, graphemeBoundaries);
+                    SegmentRun(snap, codepoints, runStart, runEnd, breaks, graphemeBoundaries);
                 }
 
                 i = runEnd;
@@ -150,13 +186,14 @@ namespace LightSide
         /// interior word boundaries as Optional breaks (grapheme-safe, additive only).
         /// </summary>
         private void SegmentRun(
+            DictSnapshot snap,
             ReadOnlySpan<int> codepoints,
             int start,
             int end,
             Span<LineBreakType> breaks,
             ReadOnlySpan<bool> graphemeBoundaries)
         {
-            var trie = ResolveTrie(codepoints[start]);
+            var trie = ResolveTrie(snap, codepoints[start]);
             if (trie == null)
                 return;
 
@@ -321,24 +358,15 @@ namespace LightSide
             }
         }
 
-        private DictionaryTrie ResolveTrie(int codepoint)
+        private DictionaryTrie ResolveTrie(DictSnapshot snap, int codepoint)
         {
             switch (_provider.GetScript(codepoint))
             {
-                case UnicodeScript.Thai:
-                    if (!_thaiTried) { _thai = Load(SegmentationScript.Thai); _thaiTried = true; }
-                    return _thai;
-                case UnicodeScript.Lao:
-                    if (!_laoTried) { _lao = Load(SegmentationScript.Lao); _laoTried = true; }
-                    return _lao;
-                case UnicodeScript.Khmer:
-                    if (!_khmerTried) { _khmer = Load(SegmentationScript.Khmer); _khmerTried = true; }
-                    return _khmer;
-                case UnicodeScript.Myanmar:
-                    if (!_myanmarTried) { _myanmar = Load(SegmentationScript.Myanmar); _myanmarTried = true; }
-                    return _myanmar;
-                default:
-                    return null;
+                case UnicodeScript.Thai: return snap.Thai;
+                case UnicodeScript.Lao: return snap.Lao;
+                case UnicodeScript.Khmer: return snap.Khmer;
+                case UnicodeScript.Myanmar: return snap.Myanmar;
+                default: return null;
             }
         }
 

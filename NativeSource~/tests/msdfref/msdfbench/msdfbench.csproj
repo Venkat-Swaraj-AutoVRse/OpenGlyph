@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>msdfbench</AssemblyName>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Optimize>true</Optimize>
+    <Configuration>Release</Configuration>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/Vector2D.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/EdgeSegment.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/EdgeColoring.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/Shape.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/GlyphOutline.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfDistance.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfGenerator.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfErrorCorrection.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfBuilder.cs" />
+  </ItemGroup>
+</Project>

@@ -416,10 +416,21 @@ jobs:
             # freetype + harfbuzz + libpng + zlib. Exclude harfbuzz-subset (editor-only, and
             # it duplicates the CFF/number TUs already in libharfbuzz.a) and blend2d/asmjit
             # (disabled for these targets).
+            #
+            # DEDUPE BY BASENAME. The Xcode generator stages a dependency's archive under more than
+            # one path (e.g. a per-config Release/ dir AND an unsuffixed one, or one copy per build
+            # sub-target), so a plain `find` matches the SAME logical archive twice. `sort -u` only
+            # removes identical path strings, not two different paths holding the same library, so
+            # libtool then merges both copies and every object appears twice ("duplicate member
+            # name" warnings; a bloated, double-size archive). Keep the FIRST archive seen per
+            # basename: awk on the basename (field after the last '/') passes a path through only
+            # the first time its filename appears.
             libs=$(find "$tree" -name '*.a' \
                      ! -iname '*harfbuzz-subset*' \
-                     ! -iname '*blend2d*' ! -iname '*asmjit*' | sort -u)
-            echo "--- bundling into $out from:"; echo "$libs"
+                     ! -iname '*blend2d*' ! -iname '*asmjit*' \
+                   | sort \
+                   | awk -F/ '!seen[$NF]++')
+            echo "--- bundling into $out from (deduped by basename):"; echo "$libs"
             # shellcheck disable=SC2086
             libtool -static -o "$out" $libs
             echo "--- bundled $out:"; ls -l "$out"
@@ -624,6 +635,53 @@ jobs:
             grep -viE '^[0-9a-fA-F ]* [Uuw] ' "$RUNNER_TEMP/wnm.txt" | grep -oE '\but_[A-Za-z0-9_]+\b' | sort -u
             echo "SYMBOL COUNT FAIL"; exit 1
           fi
+
+  # ---------------------------------------------------------------- MSDF parity vs msdfgen v1.12
+  # Permanent per-texel parity test of OpenGlyph's managed MSDF pipeline against upstream msdfgen
+  # v1.12 (85e8b3d, MIT). Linux-only (one runner is enough — the field math is pure managed +
+  # msdfgen core, no per-OS native field code), path-filtered like the rest.
+  #
+  # msdfref (C++) fetches msdfgen core at the pinned tag via FetchContent and acts as the field
+  # oracle; glyphref (.NET) exports OpenGlyph's real FreeType outlines through the live managed
+  # Runtime/FontCore/Msdf code, generates OpenGlyph's RAW+CORRECTED fields, serialises the
+  # identical coloured shape for msdfref, and compares per texel. glyphref returns non-zero when
+  # any glyph's RAW field exceeds 1e-4 per channel or its per-edge colours differ from msdfgen's.
+  msdfref:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Build msdfref (fetches msdfgen 85e8b3d, core only)
+        run: |
+          cmake -S "NativeSource~/tests/msdfref" -B msdfref-build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build msdfref-build
+      - name: Build glyphref (.NET harness over live Msdf sources)
+        run: dotnet build -c Release "NativeSource~/tests/msdfref/glyphref" -o glyphref-bin
+      - name: Run MSDF parity (ppem 64, spread 6; gates RAW within 1e-4 + colours equal)
+        run: |
+          set -euo pipefail
+          # Use the committed Linux x64 runtime .so as the FreeType outline source (same binary the
+          # package ships; the outline export is OS-independent). Default font is NotoSans-Regular,
+          # the font the W-streak gate uses.
+          dotnet glyphref-bin/glyphref.dll \
+            "Plugins/Linux/x86_64/libunitext_native.so" \
+            "Defaults/NotoSans-Regular.ttf" \
+            "msdfref-build/msdfref" \
+            "$RUNNER_TEMP/msdf-parity"
+          echo "=== parity results ==="
+          cat "$RUNNER_TEMP/msdf-parity/PARITY_RESULTS_MSDF.md"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: msdf-parity
+          path: ${{ runner.temp }}/msdf-parity/
 
   # ---------------------------------------------------------------- Assemble Plugins/ tree
   assemble:
