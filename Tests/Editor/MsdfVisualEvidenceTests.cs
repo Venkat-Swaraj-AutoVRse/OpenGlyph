@@ -146,6 +146,42 @@ namespace LightSide.Tests
                 Blit(img, imgW, imgH, msdfLum, c.w * Up, c.h * Up, cx, 2 * pad + cellH + (cellH - c.h * Up) / 2);
             }
 
+            // 32x crop of the '@' cell through the SAME real shader (MSDF over SDF, two stacked rows),
+            // so the review can inspect the inner-wall region that carried the vertical streak at a
+            // magnification where a single phantom column is unmistakable.
+            string atCropPath = null;
+            {
+                Cell atCell = default; bool haveAt = false;
+                foreach (var c in cells) if (c.ch == '@') { atCell = c; haveAt = true; break; }
+                if (haveAt)
+                {
+                    const int CropUp = 32;
+                    int cw = atCell.w * CropUp, chh = atCell.h * CropUp;
+                    float[] atSdf, atMsdf;
+                    if (realShaders)
+                    {
+                        atSdf = RenderThroughShader(SdfAtlas(atCell), sdfMat, cw, chh);
+                        atMsdf = RenderThroughShader(MsdfAtlas(atCell), msdfMat, cw, chh);
+                    }
+                    else
+                    {
+                        atSdf = NearestScalar(atCell.sdf, atCell.w, atCell.h, CropUp);
+                        atMsdf = NearestMedian(atCell.msdfField, atCell.w, atCell.h, CropUp);
+                    }
+                    int cpad = 8, cImgW = cw + 2 * cpad, cImgH = 2 * chh + 3 * cpad;
+                    var cImg = new Color32[cImgW * cImgH];
+                    for (int i = 0; i < cImg.Length; i++) cImg[i] = new Color32(24, 24, 28, 255);
+                    Blit(cImg, cImgW, cImgH, atSdf, cw, chh, cpad, cpad);
+                    Blit(cImg, cImgW, cImgH, atMsdf, cw, chh, cpad, 2 * cpad + chh);
+                    var ctex = new Texture2D(cImgW, cImgH, TextureFormat.RGB24, false);
+                    ctex.SetPixels32(cImg); ctex.Apply();
+                    atCropPath = Path.Combine(OutputDir(),
+                        realShaders ? "glyph_at_realshaders_32x.png" : "glyph_at_atlas_32x.png");
+                    File.WriteAllBytes(atCropPath, ctex.EncodeToPNG());
+                    UnityEngine.Object.DestroyImmediate(ctex);
+                }
+            }
+
             if (msdfMat != null) UnityEngine.Object.DestroyImmediate(msdfMat);
             if (sdfMat != null) UnityEngine.Object.DestroyImmediate(sdfMat);
 
@@ -160,11 +196,38 @@ namespace LightSide.Tests
             TestContext.WriteLine($"[VISUAL] text='{Text}' ppem={Ppem} spread={Spread} up={Up}x");
             TestContext.WriteLine($"[VISUAL] top row = SDF, bottom row = MSDF");
             TestContext.WriteLine($"[VISUAL] png = {outPath}");
+            if (atCropPath != null) TestContext.WriteLine($"[VISUAL] '@' 32x crop (top=SDF, bottom=MSDF) = {atCropPath}");
             Assert.IsTrue(File.Exists(outPath), "Visual PNG was not written.");
 
             if (!realShaders)
                 Assert.Inconclusive($"Shader-rendered evidence unavailable ({mode}). Raw-atlas montage written to {outPath}. " +
                     "Re-run batchmode WITHOUT -nographics to capture the real shader output.");
+        }
+
+        // Nearest-neighbour upscales at an arbitrary factor for the no-GPU '@' crop fallback.
+        private static float[] NearestMedian(float[] field, int w, int h, int up)
+        {
+            int W = w * up, H = h * up; var o = new float[W * H];
+            for (int y = 0; y < H; y++)
+                for (int x = 0; x < W; x++)
+                {
+                    int sx = Mathf.Clamp(x / up, 0, w - 1), sy = Mathf.Clamp(y / up, 0, h - 1);
+                    int i = (sy * w + sx) * 3;
+                    o[y * W + x] = MsdfGenerator.Median(field[i], field[i + 1], field[i + 2]) > 0.5f ? 1f : 0f;
+                }
+            return o;
+        }
+
+        private static float[] NearestScalar(float[] field, int w, int h, int up)
+        {
+            int W = w * up, H = h * up; var o = new float[W * H];
+            for (int y = 0; y < H; y++)
+                for (int x = 0; x < W; x++)
+                {
+                    int sx = Mathf.Clamp(x / up, 0, w - 1), sy = Mathf.Clamp(y / up, 0, h - 1);
+                    o[y * W + x] = field[sy * w + sx] > 0.5f ? 1f : 0f;
+                }
+            return o;
         }
 
         private struct Cell { public char ch; public int w, h; public float[] msdfField; public float[] sdf; }

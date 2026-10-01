@@ -41,7 +41,7 @@ namespace LightSide.Msdf
             seed >>= 1;
         }
 
-        public static void ColorSimple(Shape shape, double angleThreshold = DefaultAngleThreshold, ulong seed = 0, double maxEdgeRun = 0)
+        public static void ColorSimple(Shape shape, double angleThreshold = DefaultAngleThreshold, ulong seed = 0)
         {
             double crossThreshold = Math.Sin(angleThreshold);
 
@@ -87,9 +87,15 @@ namespace LightSide.Msdf
                     SwitchColor(ref c0, ref seed);
                     colors[2] = c0;
 
-                    // No corner to anchor on, so lay the three colours evenly around the loop.
-                    for (int i = 0; i < edgeCount; i++)
-                        contour.Edges[i].Color = colors[ThreeWaySegment(i, edgeCount)];
+                    // No corner to anchor on; msdfgen lays the three colours with the same symmetric
+                    // map as the teardrop, anchored at edge 0. raw in {-1,0,1} -> colors[1+raw].
+                    int m0 = edgeCount;
+                    for (int i = 0; i < m0; i++)
+                    {
+                        int raw = (int)(3 + 2.875 * i / (m0 - 1) - 1.4375 + 0.5) - 3;
+                        int seg = Math.Max(0, Math.Min(2, 1 + raw));
+                        contour.Edges[i].Color = colors[seg];
+                    }
                 }
                 else if (corners.Count == 1)
                 {
@@ -118,29 +124,32 @@ namespace LightSide.Msdf
                     for (int i = 0; i < m; i++)
                     {
                         int idx = (corner + i) % m;
-                        // msdfgen's symmetric three-way map, anchored at the corner.
-                        int seg = (int)(3 + 2.875 * i / (m - 1) - 1.4375 + 0.5) - 3;
+                        // msdfgen's symmetric three-way map, anchored at the corner. The raw index is
+                        // in {-1,0,1} and msdfgen reads it as (colors+1)[raw] == colors[1+raw], so the
+                        // three parts receive colors[0], colors[1] (WHITE) and colors[2] respectively.
+                        // (A previous port dropped the +1 offset and clamped the -1 to 0, which left
+                        // colors[2] unused — that produced the all-CYAN inner ring of '@' whose pinned
+                        // G,B pair collapsed the median into the vertical streak.)
+                        int raw = (int)(3 + 2.875 * i / (m - 1) - 1.4375 + 0.5) - 3; // -1, 0, or 1
+                        int seg = 1 + raw;
                         seg = Math.Max(0, Math.Min(2, seg));
                         contour.Edges[idx].Color = colors[seg];
                     }
                 }
                 else
                 {
-                    // MULTIPLE corners. Base colouring is msdfgen edgeColoringSimple: one switching
-                    // colour per spline (the run of edges between two consecutive corners), chosen so
-                    // the two splines meeting at each corner share exactly one channel and differ in
-                    // another — that difference is what the median turns into a sharp corner.
+                    // MULTIPLE corners. msdfgen edgeColoringSimple: one switching colour per spline
+                    // (the run of edges between two consecutive corners), chosen so the two splines
+                    // meeting at each corner share exactly one channel and differ in another — that
+                    // difference is what the median turns into a sharp corner. No post-pass: the
+                    // artifact clean-up is now msdfgen's own MSDFErrorCorrection on the generated
+                    // field (see MsdfErrorCorrection.cs), not an edge-colouring heuristic.
                     int cornerCount = corners.Count;
                     int spline = 0;
                     int start = corners[0];
                     EdgeColor color = EdgeColor.White;
                     SwitchColor(ref color, ref seed);
                     EdgeColor initialColor = color;
-
-                    // Track, per edge, which spline it belongs to and its base colour, so a second
-                    // pass can refine LONG splines without disturbing corners.
-                    var splineOf = new int[edgeCount];
-                    var baseColor = new EdgeColor[edgeCount];
 
                     for (int i = 0; i < edgeCount; i++)
                     {
@@ -152,65 +161,10 @@ namespace LightSide.Msdf
                             SwitchColor(ref color, ref seed, banned);
                         }
                         contour.Edges[idx].Color = color;
-                        splineOf[idx] = spline;
-                        baseColor[idx] = color;
                     }
-
-                    // LONG-SPLINE refinement (the '@' inner-wall fix). A long SMOOTH spline carrying a
-                    // single TWO-channel colour pins those two channels to ~0.5 wherever it runs
-                    // tangent to a sample column; the third channel comes only from the far wall, so
-                    // the median collapses to the contour value along an interior line. msdfgen avoids
-                    // this by reintroducing the third channel along the spline. We do it with a
-                    // SHARED-CHANNEL HANDOFF: partway along the spline we switch to a colour that
-                    // shares ONE channel with the base and swaps the other for the missing third
-                    // channel (e.g. YELLOW=RG -> CYAN=GB keeps G, swaps R for B). Because the two
-                    // colours share a channel, the median is continuous across the seam (no spurious
-                    // corner), yet all three channels are now represented along the run, so the median
-                    // can no longer collapse. Handoffs repeat every ~maxRun output pixels of arc.
-                    if (maxEdgeRun > 0)
-                        RefineLongSplines(contour, splineOf, baseColor, cornerCount, maxEdgeRun);
                 }
             }
         }
-
-        /// <summary>
-        /// For each spline whose arc length exceeds <paramref name="maxRun"/>, recolours its INTERIOR
-        /// edges WHITE while leaving the first and last edge at the spline's two-channel base colour.
-        /// A long two-channel spline running tangent to a sample column pins BOTH its channels to the
-        /// edge value there, collapsing the median to the contour along an interior line (the '@'
-        /// inner-wall artifact). A WHITE edge contributes to all three channels equally, so its median
-        /// is simply that edge's honest distance — exactly like a single-channel SDF along a smooth
-        /// wall, with no pair to pin. Keeping the first/last edge coloured preserves the channel
-        /// difference each bounding corner needs for a sharp median corner. Short splines, WHITE
-        /// splines and single-channel splines are left untouched. This is msdfgen's strategy of
-        /// reserving two-channel colouring for the corner neighbourhoods and letting smooth spans
-        /// reconstruct like an SDF.
-        /// </summary>
-        private static void RefineLongSplines(Contour contour, int[] splineOf, EdgeColor[] baseColor, int splineCount, double maxRun)
-        {
-            int n = contour.Edges.Count;
-            for (int s = 0; s < splineCount; s++)
-            {
-                // Collect this spline's edge indices in traversal order and measure total arc length.
-                var idxs = new List<int>();
-                double total = 0;
-                for (int i = 0; i < n; i++)
-                    if (splineOf[i] == s) { idxs.Add(i); total += (contour.Edges[i].Point(1) - contour.Edges[i].Point(0)).Length(); }
-                if (idxs.Count < 3) continue; // need an interior to whiten while keeping both ends
-
-                EdgeColor baseC = baseColor[idxs[0]];
-                // Only a TWO-channel colour can pin a channel pair; WHITE/single-channel never collapse.
-                if (!IsTwoChannel(baseC) || total <= maxRun) continue;
-
-                // Whiten everything except the first and last edge (which anchor the two end corners).
-                for (int k = 1; k < idxs.Count - 1; k++)
-                    contour.Edges[idxs[k]].Color = EdgeColor.White;
-            }
-        }
-
-        /// <summary>True for the three two-channel edge colours (YELLOW=RG, MAGENTA=RB, CYAN=GB).</summary>
-        private static bool IsTwoChannel(EdgeColor c) =>
-            c == EdgeColor.Yellow || c == EdgeColor.Magenta || c == EdgeColor.Cyan;
 
         /// <summary>
         /// Ensures a contour carries at least three edges by splitting each edge into thirds
@@ -230,18 +184,6 @@ namespace LightSide.Msdf
             }
             contour.Edges.Clear();
             contour.Edges.AddRange(split);
-        }
-
-        /// <summary>
-        /// Maps edge position <paramref name="i"/> of <paramref name="count"/> onto one of three
-        /// evenly-sized arcs (0,1,2) around a corner-free loop, so the three teardrop colours are
-        /// laid down in equal thirds.
-        /// </summary>
-        private static int ThreeWaySegment(int i, int count)
-        {
-            if (count <= 0) return 0;
-            int seg = (3 * i) / count;
-            return seg < 0 ? 0 : (seg > 2 ? 2 : seg);
         }
 
         /// <summary>Index of the first corner in a contour, or -1 if the contour is smooth.</summary>

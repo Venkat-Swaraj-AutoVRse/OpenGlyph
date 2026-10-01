@@ -65,10 +65,11 @@ namespace LightSide.Msdf
             int w = glyphW + 2 * spread;
             int h = glyphH + 2 * spread;
 
-            // Pass pxRange (2*spread) as the max tangent run before a long two-channel spline hands
-            // off to a shared-channel partner, so the third channel is reintroduced well within the
-            // distance range and the median cannot collapse mid-stroke (the '@' inner-wall fix).
-            EdgeColoring.ColorSimple(shape, angleThreshold, 0, 2.0 * spread);
+            // Faithful msdfgen edge-colouring: smooth/short contours split into >=3 coloured parts
+            // (teardrop treatment), corners anchor the per-spline colour switches. The '@' inner-wall
+            // and corner-clash artifacts are cleaned afterwards by msdfgen's own MSDFErrorCorrection
+            // on the generated field (MsdfErrorCorrection.cs), not by an edge-colouring heuristic.
+            EdgeColoring.ColorSimple(shape, angleThreshold, 0);
 
             var cfg = new MsdfConfig
             {
@@ -81,11 +82,6 @@ namespace LightSide.Msdf
                 TranslateX = spread - gx0,
                 TranslateY = spread - gy0,
                 ErrorCorrection = errorCorrection,
-                // Faithful edge-colouring (smooth/short contours split into >=3 coloured parts) is
-                // the primary defence against the mid-stroke median collapse; msdfgen's
-                // interpolation-artifact correction (threshold-free) is the secondary pass that
-                // cleans residual bends on long two-channel splines ('@''s inner wall).
-                LiftCollapse = errorCorrection,
             };
 
             float[] field = MsdfGenerator.Generate(shape, in cfg);
