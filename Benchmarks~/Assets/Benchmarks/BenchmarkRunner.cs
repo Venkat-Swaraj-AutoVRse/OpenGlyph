@@ -632,6 +632,11 @@ namespace OpenGlyph.Benchmarks
         {
             var ps = ScriptableObject.CreateInstance<PanelSettings>();
             ps.scaleMode = PanelScaleMode.ConstantPixelSize;
+            // A theme stylesheet resolves the default font; without it MeasureTextSize
+            // can return 0 (no font) and text never generates.
+            var theme = Resources.Load<ThemeStyleSheet>("unity-default-runtime-theme");
+            if (theme == null) theme = Resources.Load<ThemeStyleSheet>("Default Theme Style Sheet");
+            if (theme != null) ps.themeStyleSheet = theme;
             return ps;
         }
 

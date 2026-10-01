@@ -277,6 +277,10 @@ namespace OpenGlyph.Benchmarks.Editor
             PlayerSettings.defaultScreenHeight = 480;
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.openglyph.bench");
+            // Minimal managed stripping so TMP_Settings / TextCore types are not
+            // stripped out of the IL2CPP build (link.xml also preserves them).
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Standalone, ManagedStrippingLevel.Minimal);
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Android, ManagedStrippingLevel.Minimal);
         }
 
         private static string AbsOut(string platform)
