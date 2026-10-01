@@ -143,11 +143,17 @@ Shader "UniText/Uber"
                 }
                 else
                 {
-                    // SDF/MSDF: threshold around 0.5 with a soft edge; outline widens the threshold.
+                    // SDF/MSDF: the sampled value is a distance field with the edge at 0.5. Use a
+                    // SCREEN-SPACE antialias width from fwidth(dist) (one-pixel transition) so the
+                    // field is interpreted as a true distance -- a fixed near-zero smoothstep makes
+                    // the glyph's padding region (median/alpha > 0.5) opaque and the quad renders as a
+                    // solid block (the MSDF bug). `softness`/dilate from the style widen the band.
+                    half aa = fwidth(dist) + 1e-4;
                     half edge = 0.5 - faceDilate * 0.5;
-                    alpha    = smoothstep(edge - softness, edge + softness, dist);
+                    half band = aa + softness;
+                    alpha    = smoothstep(edge - band, edge + band, dist);
                     half oEdge = edge - outlineWidth * 0.5;
-                    outAlpha = smoothstep(oEdge - softness, oEdge + softness, dist);
+                    outAlpha = smoothstep(oEdge - band, oEdge + band, dist);
                 }
 
                 // Composite: outline under face; underlay(shadow) under both (same-slice offset sample).

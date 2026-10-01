@@ -101,6 +101,9 @@ namespace LightSide
         /// </summary>
         private static readonly ProfilerMarker s_BuildMarker = new("UniText.Unified.Build");
 
+        /// <summary>Diagnostics: when true, logs each segment's page format -> glyphMode -> dst array.</summary>
+        public static bool DiagLog = false;
+
         public void Build(List<UniTextRenderData> segments, in GlyphStyle style, List<UniTextRenderData> output)
         {
             using var _ = s_BuildMarker.Auto();
@@ -119,6 +122,8 @@ namespace LightSide
 
                 var mode = ModeFromFormat(page.format);
                 var dstFormat = UberDrawGroup.FormatFor(mode);
+                if (DiagLog)
+                    Debug.Log($"[UnifiedRenderBuilder DIAG] seg fontId={seg.fontId} pageFormat={page.format} -> glyphMode={mode} dstArray={dstFormat} verts={seg.mesh.vertexCount}");
                 var arr = SharedGlyphAtlas.Get(dstFormat, page.width);
                 if (!arr.AddPage(page.GetInstanceID(), page, out int slice))
                     continue;
