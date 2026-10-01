@@ -39,6 +39,11 @@ namespace LightSide
             if (!attribute.buffer.data.HasFlag(cluster))
                 return;
 
+            // Phase 2 (CSS font-synthesis): a glyph whose run used a REAL italic/oblique face must
+            // NOT be sheared on top.
+            if (gen.currentRealItalic)
+                return;
+
             var italicStyle = gen.font?.ItalicStyle ?? 12f;
             var shearValue = italicStyle * 0.01f;
 
