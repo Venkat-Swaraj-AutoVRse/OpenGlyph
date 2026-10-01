@@ -56,7 +56,30 @@ namespace OpenGlyph.Benchmarks
 
         private readonly BenchmarkReport report = new BenchmarkReport();
 
-        private void Start() => StartCoroutine(RunAll());
+        private void Start()
+        {
+            StartCoroutine(Watchdog());
+            StartCoroutine(RunAll());
+        }
+
+        // Hard safety net: force-exit if the run wedges (e.g. a stuck forced update).
+        private IEnumerator Watchdog()
+        {
+            float budget = 600f; // 10 minutes
+            float t = 0f;
+            while (t < budget) { t += Time.unscaledDeltaTime; yield return null; }
+            Debug.LogError("[Bench] WATCHDOG timeout — forcing exit");
+            HardExit(42);
+        }
+
+        private void HardExit(int code)
+        {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.Exit(code);
+#else
+            Application.Quit(code);
+#endif
+        }
 
         private IEnumerator RunAll()
         {
@@ -89,13 +112,7 @@ namespace OpenGlyph.Benchmarks
 
             Debug.Log("[Bench] DONE");
             if (quitWhenDone)
-            {
-#if UNITY_EDITOR
-                UnityEditor.EditorApplication.isPlaying = false;
-#else
-                Application.Quit(0);
-#endif
-            }
+                HardExit(0);
         }
 
         // ---------------------------------------------------------------- env
@@ -673,18 +690,29 @@ namespace OpenGlyph.Benchmarks
         private void WriteResults()
         {
             string dir = Application.persistentDataPath;
+            string overridePath = GetArg("-resultsPath");
             try
             {
-                string path = Path.Combine(dir, resultsFileName);
+                string path = !string.IsNullOrEmpty(overridePath)
+                    ? overridePath
+                    : Path.Combine(dir, resultsFileName);
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
                 File.WriteAllText(path, report.ToJson());
                 Debug.Log($"[Bench] results written: {path}");
-                // Also write next to the executable for standalone (easier pull).
 #if !UNITY_EDITOR && !UNITY_ANDROID
                 string exeDir = Path.GetDirectoryName(Application.dataPath);
                 File.WriteAllText(Path.Combine(exeDir, resultsFileName), report.ToJson());
 #endif
             }
             catch (Exception ex) { Debug.LogError("[Bench] write failed: " + ex); }
+        }
+
+        private static string GetArg(string name)
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+                if (args[i] == name) return args[i + 1];
+            return null;
         }
     }
 }
