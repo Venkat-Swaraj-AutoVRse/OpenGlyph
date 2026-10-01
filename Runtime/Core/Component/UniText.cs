@@ -88,6 +88,14 @@ namespace LightSide
         [SerializeField]
         [Tooltip("Base font size in points.")]
         private float fontSize = 36f;
+
+        [SerializeField]
+        [Tooltip("Phase 2: base font weight (CSS usWeightClass; 400 normal, 700 bold). Selects the matching face from a FontFamily, or drives the variable 'wght' axis; synthetic bold applies only when the family has no heavier face.")]
+        private int fontWeight = FontStyleSpec.NormalWeight;
+
+        [SerializeField]
+        [Tooltip("Phase 2: base font style (Normal/Italic/Oblique). Selects the matching face from a FontFamily or drives the variable italic/slant axis; synthetic slant applies only when the family has no italic/oblique face.")]
+        private StyleAxis fontStyleAxis = StyleAxis.Normal;
         
         [SerializeField]
         [Tooltip("Base text direction. Auto detects from first strong directional character.")]
@@ -414,6 +422,40 @@ namespace LightSide
                 if (baseDirection == value) return;
                 baseDirection = value;
                 SetDirty(DirtyFlags.Direction);
+            }
+        }
+
+        /// <summary>
+        /// Phase 2: base font weight (CSS usWeightClass; 400 normal, 700 bold). When the component's
+        /// <see cref="FontStack"/> carries a <see cref="FontFamily"/>, this selects the matching real
+        /// face (or drives a variable font's <c>wght</c> axis); synthetic bold is used only when no
+        /// heavier face exists.
+        /// </summary>
+        public int FontWeight
+        {
+            get => fontWeight;
+            set
+            {
+                var v = Mathf.Clamp(value, 1, 1000);
+                if (fontWeight == v) return;
+                fontWeight = v;
+                SetDirty(DirtyFlags.Text); // full rebuild: itemization + face resolution change
+            }
+        }
+
+        /// <summary>
+        /// Phase 2: base font style (Normal/Italic/Oblique). Selects the matching real face from a
+        /// <see cref="FontFamily"/> (or drives the variable italic/slant axis); synthetic slant is
+        /// used only when no italic/oblique face exists.
+        /// </summary>
+        public StyleAxis FontStyleAxis
+        {
+            get => fontStyleAxis;
+            set
+            {
+                if (fontStyleAxis == value) return;
+                fontStyleAxis = value;
+                SetDirty(DirtyFlags.Text);
             }
         }
 
