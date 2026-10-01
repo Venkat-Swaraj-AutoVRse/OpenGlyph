@@ -158,7 +158,7 @@ namespace LightSide.Msdf
             return winding;
         }
 
-        private const int CurveSteps = 24;
+        private const int CurveSteps = 64;
 
         /// <summary>
         /// Signed crossing contribution of segment a→b for a horizontal ray from p toward +X.
@@ -200,66 +200,103 @@ namespace LightSide.Msdf
         {
             if (Contours.Count == 0) return;
 
-            // Decisions are taken against the ORIGINAL geometry, then applied, so reversing one
-            // contour cannot perturb the inside/outside test used for the next.
-            var reverse = new bool[Contours.Count];
-
-            for (int ci = 0; ci < Contours.Count; ci++)
+            // A representative point strictly inside each contour's OWN outline (hole-independent).
+            int n = Contours.Count;
+            var rep = new Vector2D[n];
+            var hasRep = new bool[n];
+            var selfW = new int[n];
+            for (int i = 0; i < n; i++)
             {
-                var contour = Contours[ci];
-                int selfWinding = contour.Winding();
-                if (selfWinding == 0 || contour.Edges.Count == 0) continue;
-
-                if (!RepresentativeInsidePoint(contour, selfWinding, out Vector2D inside))
-                    continue;
-
-                // Is that interior point actually part of the filled shape (non-zero winding of ALL
-                // contours)? If yes, this contour bounds solid area and should be CCW (+1); if no,
-                // it is a hole and should be CW (−1).
-                bool filled = Winding(inside) != 0;
-                int wanted = filled ? +1 : -1;
-                if (selfWinding != wanted)
-                    reverse[ci] = true;
+                selfW[i] = Contours[i].Winding();
+                hasRep[i] = InteriorPoint(Contours[i], out rep[i]);
             }
 
-            for (int ci = 0; ci < Contours.Count; ci++)
-                if (reverse[ci]) Contours[ci].Reverse();
+            // Decide each contour's role by ENCLOSURE PARITY: how many OTHER contours contain its
+            // representative point. Even depth (0, 2, …) ⇒ a FILLED region (outermost ring, or an
+            // island inside a hole); odd depth ⇒ a HOLE. This is correct for nested glyphs ('O','B',
+            // '&','g') where a single whole-shape fill sample would land in a hole and mislabel the
+            // enclosing contour. Overlaps are handled too: an overlapping duplicate sits at depth 0
+            // like the contour it overlaps, so both stay fills.
+            var reverse = new bool[n];
+            for (int i = 0; i < n; i++)
+            {
+                if (selfW[i] == 0 || !hasRep[i] || Contours[i].Edges.Count == 0) continue;
+
+                int depth = 0;
+                for (int j = 0; j < n; j++)
+                {
+                    if (j == i || !hasRep[j]) continue;
+                    if (ContourContains(Contours[j], rep[i])) depth++;
+                }
+
+                // This port's directed-edge distance is POSITIVE-inside when a contour's own
+                // Contour.Winding() == +1 (verified against a known square and the real-glyph suite),
+                // so a fill contour must settle at +1 and a hole at −1.
+                int wanted = (depth % 2 == 0) ? +1 : -1;
+                if (selfW[i] != wanted)
+                    reverse[i] = true;
+            }
+
+            for (int i = 0; i < n; i++)
+                if (reverse[i]) Contours[i].Reverse();
+        }
+
+        /// <summary>Non-zero crossing test of a SINGLE contour against a horizontal ray to +X.</summary>
+        private static bool ContourContains(Contour contour, Vector2D p)
+        {
+            int winding = 0;
+            foreach (var edge in contour.Edges)
+            {
+                int steps = (edge is LinearSegment) ? 1 : CurveSteps;
+                Vector2D a = edge.Point(0);
+                for (int s = 1; s <= steps; s++)
+                {
+                    Vector2D c = edge.Point((double)s / steps);
+                    winding += RayCrossing(p, a, c);
+                    a = c;
+                }
+            }
+            return winding != 0;
         }
 
         /// <summary>
-        /// Finds a point just inside <paramref name="contour"/> (relative to its own winding): a
-        /// point offset from a mid-edge sample along the contour's inward normal by a fraction of
-        /// the contour's size. Returns false if no usable edge/size is found.
+        /// Finds a point just inside <paramref name="contour"/>'s OWN outline, in its material band
+        /// next to an edge (NOT at the bbox centre, which for a ring would land in the hole). Offsets
+        /// an edge midpoint a tiny step along the normal, choosing the side the contour's own
+        /// crossing test reports as inside. Returns false if no usable edge is found.
         /// </summary>
-        private static bool RepresentativeInsidePoint(Contour contour, int selfWinding, out Vector2D inside)
+        private static bool InteriorPoint(Contour contour, out Vector2D inside)
         {
             inside = default;
+            if (contour.Edges.Count == 0) return false;
 
             double l = double.MaxValue, b = double.MaxValue, r = double.MinValue, t = double.MinValue;
             contour.Bound(ref l, ref b, ref r, ref t);
-            double diag = Math.Max(1e-6, Math.Sqrt((r - l) * (r - l) + (t - b) * (t - b)));
-            double step = diag * 1e-3; // small, well inside the thinnest reasonable stroke
+            double diag = Math.Sqrt((r - l) * (r - l) + (t - b) * (t - b));
+            if (!(diag > 0)) return false;
+            double step = Math.Max(1e-4, diag * 5e-3);
 
-            // Pick the longest edge for a stable normal; sample its midpoint.
-            EdgeSegment best = null;
-            double bestLen = -1;
-            foreach (var e in contour.Edges)
+            // Try edges longest-first for a stable normal.
+            var edges = new List<EdgeSegment>(contour.Edges);
+            edges.Sort((x, y) => (y.Point(1) - y.Point(0)).SquaredLength()
+                                 .CompareTo((x.Point(1) - x.Point(0)).SquaredLength()));
+
+            foreach (var e in edges)
             {
-                double len = (e.Point(1) - e.Point(0)).SquaredLength();
-                if (len > bestLen) { bestLen = len; best = e; }
+                Vector2D mid = e.Point(0.5);
+                Vector2D dir = e.Direction(0.5).Normalize();
+                if (dir.X == 0 && dir.Y == 0) continue;
+                Vector2D nrm = new Vector2D(-dir.Y, dir.X);
+
+                Vector2D plus = mid + nrm * step;
+                Vector2D minus = mid - nrm * step;
+                bool pIn = ContourContains(contour, plus);
+                bool mIn = ContourContains(contour, minus);
+                if (pIn && !mIn) { inside = plus; return true; }
+                if (mIn && !pIn) { inside = minus; return true; }
+                // Ambiguous at this edge (step crossed another part of the contour); try the next.
             }
-            if (best == null) return false;
-
-            Vector2D mid = best.Point(0.5);
-            Vector2D dir = best.Direction(0.5).Normalize();
-            if (dir.X == 0 && dir.Y == 0) return false;
-
-            // Left normal of the travel direction points INTO the region for a counter-clockwise
-            // loop; for a clockwise loop the inside is on the right. selfWinding encodes that.
-            Vector2D leftNormal = new Vector2D(-dir.Y, dir.X);
-            Vector2D inward = selfWinding > 0 ? leftNormal : (leftNormal * -1.0);
-            inside = mid + inward * step;
-            return true;
+            return false;
         }
 
 

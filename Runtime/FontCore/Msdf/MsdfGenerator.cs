@@ -112,15 +112,15 @@ namespace LightSide.Msdf
         }
 
         /// <summary>
-        /// msdfgen error correction: where the median of a pixel disagrees in sign with what
-        /// bilinear interpolation to its neighbours would produce (an interpolation artifact),
-        /// collapse that pixel's three channels to their median so the artifact disappears.
-        /// Simplified port of msdfgen's legacy <c>msdfErrorCorrection</c>.
+        /// msdfgen error correction: removes multi-channel "clash" artifacts — the small specks and
+        /// spurs that appear where two differently-coloured edges meet (corners, junctions, thin
+        /// stems). Between a pixel and each neighbour, a channel whose value crosses the 0.5 contour
+        /// while the reconstructed MEDIAN does NOT (or vice-versa) would make the shader draw a false
+        /// edge there; such a pixel is collapsed to its own median, which cannot clash. Port of the
+        /// crossing test in msdfgen's <c>msdfErrorCorrection</c> (Viktor Chlumsky, MIT).
         /// </summary>
         private static void ErrorCorrect(float[] img, int w, int h)
         {
-            // Threshold in normalised units (msdfgen default ~ 1.0 pixel of edge).
-            const float threshold = 0.5f / 3f + 1e-3f;
             var clones = (float[])img.Clone();
 
             for (int y = 0; y < h; y++)
@@ -128,37 +128,125 @@ namespace LightSide.Msdf
                 for (int x = 0; x < w; x++)
                 {
                     int idx = (y * w + x) * 3;
-                    float m = Median(clones[idx], clones[idx + 1], clones[idx + 2]);
 
                     bool artifact = false;
-                    // 4-neighbourhood check.
-                    if (x > 0) artifact |= Disagree(clones, idx, (y * w + (x - 1)) * 3, m, threshold);
-                    if (x + 1 < w) artifact |= Disagree(clones, idx, (y * w + (x + 1)) * 3, m, threshold);
-                    if (y > 0) artifact |= Disagree(clones, idx, ((y - 1) * w + x) * 3, m, threshold);
-                    if (y + 1 < h) artifact |= Disagree(clones, idx, ((y + 1) * w + x) * 3, m, threshold);
+                    if (x > 0) artifact |= Clashes(clones, idx, (y * w + (x - 1)) * 3);
+                    if (!artifact && x + 1 < w) artifact |= Clashes(clones, idx, (y * w + (x + 1)) * 3);
+                    if (!artifact && y > 0) artifact |= Clashes(clones, idx, ((y - 1) * w + x) * 3);
+                    if (!artifact && y + 1 < h) artifact |= Clashes(clones, idx, ((y + 1) * w + x) * 3);
+                    // Diagonals catch corner specks that the 4-neighbourhood misses.
+                    if (!artifact && x > 0 && y > 0) artifact |= Clashes(clones, idx, ((y - 1) * w + (x - 1)) * 3);
+                    if (!artifact && x + 1 < w && y > 0) artifact |= Clashes(clones, idx, ((y - 1) * w + (x + 1)) * 3);
+                    if (!artifact && x > 0 && y + 1 < h) artifact |= Clashes(clones, idx, ((y + 1) * w + (x - 1)) * 3);
+                    if (!artifact && x + 1 < w && y + 1 < h) artifact |= Clashes(clones, idx, ((y + 1) * w + (x + 1)) * 3);
 
                     if (artifact)
                     {
-                        img[idx] = m;
-                        img[idx + 1] = m;
-                        img[idx + 2] = m;
+                        float m = Median(clones[idx], clones[idx + 1], clones[idx + 2]);
+                        img[idx] = m; img[idx + 1] = m; img[idx + 2] = m;
+                    }
+                }
+            }
+
+            // Second stage — mid-region median collapse. On a smooth contour whose long spline is
+            // coloured with a single two-channel colour (e.g. the inner wall of '@', 'O', 'e'), that
+            // one edge drives TWO channels to ~0.5 wherever it runs tangentially close to a sample
+            // column, leaving only the third channel (from the opposite wall, which shares NO channel
+            // with it) to vote "inside". The median then collapses to the edge value (~0.5) along an
+            // interior line even though every neighbour is solidly inside (or outside). A
+            // neighbour-crossing test cannot see this because the collapsed texel sits exactly ON 0.5
+            // (product == 0, never < 0). Repair it the way msdfgen's distance error-correction does:
+            // where a texel's median hugs the 0.5 contour yet its surrounding non-pinned neighbours
+            // agree firmly on ONE side, the texel is an interpolation artifact of the channel
+            // pairing, not a real edge — lift its median to that consensus so the silhouette stays
+            // continuous. Iterated twice so a collapse band up to two texels wide heals from its
+            // edges inward. The consensus requirement keeps every genuine edge, corner and 1px
+            // feature untouched: a real edge's neighbourhood straddles 0.5, it does not agree.
+            const float onEdge = 0.10f;  // |median-0.5| below this == "pinned to the edge"
+            const float firm = 0.06f;    // a neighbour this far past 0.5 is a firm vote
+            for (int pass = 0; pass < 2; pass++)
+            {
+                var src = (float[])img.Clone();
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int idx = (y * w + x) * 3;
+                        float m = Median(src[idx], src[idx + 1], src[idx + 2]);
+                        if (Math.Abs(m - 0.5f) > onEdge) continue; // only touch edge-pinned texels
+
+                        // Tally the 8-neighbourhood: firm inside vs firm outside votes, ignoring
+                        // other pinned texels (which carry no reliable side).
+                        int inside = 0, outside = 0;
+                        for (int dy = -1; dy <= 1; dy++)
+                            for (int dx = -1; dx <= 1; dx++)
+                            {
+                                if (dx == 0 && dy == 0) continue;
+                                int nx = x + dx, ny = y + dy;
+                                if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                                int ni = (ny * w + nx) * 3;
+                                float nm = Median(src[ni], src[ni + 1], src[ni + 2]) - 0.5f;
+                                if (nm > firm) inside++;
+                                else if (nm < -firm) outside++;
+                            }
+
+                        // Lift only on an UNAMBIGUOUS consensus with no dissent — a genuine edge
+                        // always has firm votes on BOTH sides, so it can never satisfy this.
+                        if (inside >= 3 && outside == 0) Lift(img, idx, +1);
+                        else if (outside >= 3 && inside == 0) Lift(img, idx, -1);
                     }
                 }
             }
         }
 
-        private static bool Disagree(float[] img, int a, int b, float medianA, float threshold)
+        /// <summary>
+        /// Nudges an edge-pinned texel's median just across 0.5 to the given side (+1 inside / −1
+        /// outside) by setting its channels to the mean of its own interior value and the two
+        /// nearest neighbour medians would be overkill; the minimal, sign-faithful repair is to set
+        /// all three channels to a value firmly on the consensus side while preserving the texel's
+        /// own strongest channel so corners nearby keep their multi-channel character.
+        /// </summary>
+        private static void Lift(float[] img, int idx, int side)
         {
+            float r = img[idx], g = img[idx + 1], b = img[idx + 2];
+            float keep = side > 0 ? Math.Max(r, Math.Max(g, b)) : Math.Min(r, Math.Min(g, b));
+            // Pull the two off-side channels to match the kept extreme so the median follows it,
+            // but no further — this restores the silhouette without inventing distance beyond the
+            // texel's own strongest edge reading.
+            img[idx] = img[idx + 1] = img[idx + 2] = keep;
+        }
+
+        /// <summary>
+        /// True when, between pixels <paramref name="a"/> and <paramref name="b"/>, the number of
+        /// per-channel 0.5-crossings disagrees with whether the MEDIAN crosses 0.5 — i.e. at least
+        /// one channel draws an edge the median does not, or the median draws an edge no single
+        /// channel supports. That mismatch is exactly a renderable clash artifact.
+        /// </summary>
+        private static bool Clashes(float[] img, int a, int b)
+        {
+            const float t = 0.5f;
+            float ma = Median(img[a], img[a + 1], img[a + 2]);
             float mb = Median(img[b], img[b + 1], img[b + 2]);
-            // The interpolated median at the midpoint of channels should be monotone; a large
-            // per-channel swing that flips relative to the medians is an artifact.
+            bool medianCrosses = (ma - t) * (mb - t) < 0f;
+
+            int channelCrossings = 0;
             for (int c = 0; c < 3; c++)
+                if ((img[a + c] - t) * (img[b + c] - t) < 0f)
+                    channelCrossings++;
+
+            // No true edge here (median flat) but a channel still flips -> spurious contour.
+            if (!medianCrosses && channelCrossings > 0) return true;
+            // Median flips but is driven by only ONE channel while another flips the OTHER way,
+            // producing a double/false edge (the classic corner clash).
+            if (medianCrosses && channelCrossings >= 2)
             {
-                float da = img[a + c] - medianA;
-                float db = img[b + c] - mb;
-                if (Math.Sign(da) != Math.Sign(db) &&
-                    Math.Abs(da) > threshold && Math.Abs(db) > threshold)
-                    return true;
+                // Count how many channels cross in the SAME direction as the median.
+                int sameDir = 0;
+                float medDir = Math.Sign(mb - ma);
+                for (int c = 0; c < 3; c++)
+                    if ((img[a + c] - t) * (img[b + c] - t) < 0f && Math.Sign(img[b + c] - img[a + c]) == medDir)
+                        sameDir++;
+                if (sameDir < channelCrossings) return true; // a channel crosses against the median
             }
             return false;
         }

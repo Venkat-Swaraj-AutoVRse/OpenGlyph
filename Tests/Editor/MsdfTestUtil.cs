@@ -112,5 +112,62 @@ namespace LightSide.Tests
             o.Contours.Add(c);
             return o;
         }
+
+        /// <summary>Locates the fetched RobotoFlex-VF.ttf (variable font) under NativeSource~/tests/fonts.</summary>
+        public static string FindRobotoFlexPath()
+        {
+            string root = System.IO.Path.GetFullPath(System.IO.Path.Combine(UnityEngine.Application.dataPath ?? ".", ".."));
+            // Walk up to find the repo root that holds NativeSource~.
+            var dir = new DirectoryInfo(root);
+            for (int i = 0; i < 8 && dir != null; i++)
+            {
+                string cand = Path.Combine(dir.FullName, "NativeSource~", "tests", "fonts", "RobotoFlex-VF.ttf");
+                if (File.Exists(cand)) return cand;
+                dir = dir.Parent;
+            }
+            try
+            {
+                foreach (var f in Directory.EnumerateFiles(root, "RobotoFlex-VF.ttf", SearchOption.AllDirectories))
+                    return f;
+            }
+            catch { /* ignore */ }
+            return null;
+        }
+
+        /// <summary>
+        /// Non-zero-winding ground-truth fill of a Shape at a supersampled cell centre. Correct for
+        /// glyphs with holes AND overlapping contours (unlike the even-odd <see cref="IsInside"/>).
+        /// </summary>
+        public static bool WindingInside(Shape shape, double x, double y) => shape.Contains(new Vector2D(x, y));
+
+        /// <summary>
+        /// Analyses a boolean error mask (true = reconstructed silhouette disagrees with ground
+        /// truth) and returns the sizes of connected error components (4-connectivity) that lie
+        /// MORE than <paramref name="edgeBandPx"/> output pixels from any true-edge pixel. Isolated
+        /// specks/spurs away from the real edge are exactly what these components capture.
+        /// </summary>
+        public static List<int> IsolatedErrorBlobSizes(bool[] error, bool[] nearEdge, int w, int h)
+        {
+            var sizes = new List<int>();
+            var seen = new bool[w * h];
+            var stack = new Stack<int>();
+            for (int i = 0; i < w * h; i++)
+            {
+                if (!error[i] || seen[i] || nearEdge[i]) continue;
+                int size = 0; stack.Clear(); stack.Push(i); seen[i] = true;
+                while (stack.Count > 0)
+                {
+                    int p = stack.Pop(); size++;
+                    int px = p % w, py = p / w;
+                    void Try(int q) { if (q >= 0 && q < w * h && error[q] && !seen[q] && !nearEdge[q]) { seen[q] = true; stack.Push(q); } }
+                    if (px > 0) Try(p - 1);
+                    if (px + 1 < w) Try(p + 1);
+                    if (py > 0) Try(p - w);
+                    if (py + 1 < h) Try(p + w);
+                }
+                sizes.Add(size);
+            }
+            return sizes;
+        }
     }
 }
