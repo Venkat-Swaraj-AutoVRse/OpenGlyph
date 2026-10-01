@@ -412,7 +412,11 @@ namespace LightSide
             if (_array != null)
                 UnityEngine.Object.DestroyImmediate(_array);
 
-            _array = new Texture2DArray(_size, _size, want, _format, false)
+            // mipChain:false, linear:true — the atlas stores DISTANCE-FIELD / coverage DATA, not sRGB
+            // colour. Omitting linear makes Unity gamma-decode an RGBA32 array on sample, which
+            // corrupts the MSDF median3 (glyphs render as solid blocks) and shifts SDF edges. Legacy
+            // atlas textures are likewise created without sRGB.
+            _array = new Texture2DArray(_size, _size, want, _format, false, true)
             {
                 name = $"UniText SharedAtlas[{_format}] x{want}",
                 hideFlags = HideFlags.DontSave,
