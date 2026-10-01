@@ -104,8 +104,20 @@ namespace OpenGlyph.Benchmarks.Editor
         {
             BuildScene();
             ConfigureCommon();
-            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.IL2CPP);
-            PlayerSettings.SetIl2CppCompilerConfiguration(NamedBuildTarget.Standalone, Il2CppCompilerConfiguration.Release);
+            // Prefer IL2CPP Release; fall back to Mono if the IL2CPP module isn't
+            // installed in this editor (Windows build-support IL2CPP variation absent).
+            bool il2cpp = Il2CppAvailable(BuildTarget.StandaloneWindows64);
+            if (il2cpp)
+            {
+                PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.IL2CPP);
+                PlayerSettings.SetIl2CppCompilerConfiguration(NamedBuildTarget.Standalone, Il2CppCompilerConfiguration.Release);
+                Debug.Log("[BenchBuild] Windows backend: IL2CPP (Release)");
+            }
+            else
+            {
+                PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
+                Debug.LogWarning("[BenchBuild] Windows IL2CPP module NOT installed — falling back to Mono (representative player, non-IL2CPP). Install 'Windows Build Support (IL2CPP)' via Unity Hub for an IL2CPP run.");
+            }
             EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Standalone, BuildTarget.StandaloneWindows64);
 
             string outDir = AbsOut("Windows");
@@ -120,12 +132,46 @@ namespace OpenGlyph.Benchmarks.Editor
             LogReport("Windows", BuildPipeline.BuildPlayer(opts));
         }
 
+        // True only if the IL2CPP player variation for this target is actually on disk.
+        private static bool Il2CppAvailable(BuildTarget target)
+        {
+            try
+            {
+                string data = EditorApplication.applicationContentsPath;
+                if (target == BuildTarget.StandaloneWindows64 || target == BuildTarget.StandaloneWindows)
+                {
+                    string varDir = Path.Combine(data, "PlaybackEngines/windowsstandalonesupport/Variations");
+                    if (!Directory.Exists(varDir)) return false;
+                    foreach (var d in Directory.GetDirectories(varDir))
+                        if (Path.GetFileName(d).ToLowerInvariant().Contains("il2cpp")) return true;
+                    return false;
+                }
+                if (target == BuildTarget.Android)
+                {
+                    string il2 = Path.Combine(data, "PlaybackEngines/AndroidPlayer/Variations/il2cpp");
+                    return Directory.Exists(il2);
+                }
+            }
+            catch { }
+            return false;
+        }
+
         public static void BuildAndroid()
         {
             BuildScene();
             ConfigureCommon();
-            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
-            PlayerSettings.SetIl2CppCompilerConfiguration(NamedBuildTarget.Android, Il2CppCompilerConfiguration.Release);
+            bool il2cpp = Il2CppAvailable(BuildTarget.Android);
+            if (il2cpp)
+            {
+                PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
+                PlayerSettings.SetIl2CppCompilerConfiguration(NamedBuildTarget.Android, Il2CppCompilerConfiguration.Release);
+                Debug.Log("[BenchBuild] Android backend: IL2CPP (Release)");
+            }
+            else
+            {
+                PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.Mono2x);
+                Debug.LogWarning("[BenchBuild] Android IL2CPP module NOT installed — falling back to Mono.");
+            }
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             EditorUserBuildSettings.buildAppBundle = false;
             EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
