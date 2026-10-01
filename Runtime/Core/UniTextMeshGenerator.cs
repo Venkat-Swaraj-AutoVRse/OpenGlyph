@@ -802,7 +802,16 @@ namespace LightSide
                 if (!useCache || !cachedData.isValid)
                 {
                     var glyphId = (uint)glyph.glyphId;
-                    if (!glyphLookup.TryGetValue(glyphId, out var glyphData))
+                    Glyph glyphData;
+                    bool found;
+                    // Phase 2: a glyph belonging to a variable-font instance resolves from the
+                    // per-(VariationKey) atlas store so wght 400 and 700 use their own cells.
+                    if (!glyph.variationKey.IsNone)
+                        found = font.TryGetGlyph(glyphId, glyph.variationKey, out glyphData);
+                    else
+                        found = glyphLookup.TryGetValue(glyphId, out glyphData);
+
+                    if (!found)
                     {
                         skippedGlyphs++;
                         cachedData.isValid = false;
