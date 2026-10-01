@@ -50,6 +50,20 @@ namespace LightSide
         private Dictionary<int, Material[]> materialsByFontId;
         private static Material[] emojiMaterials;
 
+        /// <summary>
+        /// Sets the default materials used when no font-specific override applies (single material for
+        /// normal rendering, two for 2-pass outline+face). Rebuilds the lookup immediately. Enables
+        /// configuring outline/underlay/glow at runtime without an authored asset.
+        /// </summary>
+        public void SetDefaultMaterials(params Material[] materials)
+        {
+            defaultMaterials ??= new StyledList<Material>();
+            defaultMaterials.Clear();
+            if (materials != null)
+                foreach (var m in materials) defaultMaterials.Add(m);
+            RebuildLookup();
+        }
+
         private void OnEnable()
         {
             RebuildLookup();

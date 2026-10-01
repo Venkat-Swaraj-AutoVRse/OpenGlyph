@@ -141,7 +141,14 @@ namespace LightSide.Tests
                 var m = Measure();
                 int rendererCount = t.ActiveSubMeshRendererCountForTests;
                 if (mode == UniText.UnifiedRendererMode.ForceOff) _aOffRenderers = rendererCount; else _aOnRenderers = rendererCount;
-                results.Append($"  \"a_{mode}\": {{ \"draws\": {m.draws}, \"batches\": {m.batches}, \"setpass\": {m.setpass}, \"renderers\": {rendererCount} }},\n");
+                var ev = new System.Text.StringBuilder();
+                foreach (var tup in t.GetDrawnMeshMaterialsForTests())
+                {
+                    string sh = tup.mat == null ? "null" : (tup.mat.shader == null ? "null" : tup.mat.shader.name);
+                    string tx = tup.tex == null ? "array-on-material" : tup.tex.GetType().Name + "(" + (tup.tex is Texture2D t2 ? t2.format.ToString() : "?") + ")";
+                    ev.Append($"(shader={sh} tex={tx} verts={(tup.mesh == null ? 0 : tup.mesh.vertexCount)}) ");
+                }
+                results.Append($"  \"a_{mode}\": {{ \"draws\": {m.draws}, \"batches\": {m.batches}, \"setpass\": {m.setpass}, \"renderers\": {rendererCount}, \"events\": \"{ev.ToString().Trim().Replace("\"","'")}\" }},\n");
                 var go_a = t.gameObject; _junk.Remove(go_a); Object.DestroyImmediate(go_a);
                 UnifiedRenderBuilder.ResetShared();
                 SharedGlyphAtlas.Clear();
