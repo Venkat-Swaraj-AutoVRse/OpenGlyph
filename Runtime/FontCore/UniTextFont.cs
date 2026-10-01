@@ -843,6 +843,111 @@ namespace LightSide
                    && d.TryGetValue(glyphIndex, out glyph);
         }
 
+        // ---- Render-Architecture R2 step 1: shared Texture2DArray atlas facet (ADDITIVE) ----------
+        // Publishes an already-packed glyph into the process-wide shared array for this font's format
+        // (decision §5.1: Alpha8 for SDF/coverage, RGBA32 for MSDF/color). The legacy per-font
+        // atlasTextures path stays authoritative; this only MIRRORS the glyph so the single draw-group
+        // renderer (sub-task 2) can bind one array across fonts. Cells are keyed
+        // (fontId, glyphIndex, VariationKey). Lazy + cached: a published glyph is not re-copied.
+        [NonSerialized] private HashSet<GlyphAtlasArray.GlyphCellKey> _publishedCells;
+
+        /// <summary>
+        /// Ensures the glyph <paramref name="glyphIndex"/> (variation <paramref name="key"/>) is
+        /// present in the shared <see cref="GlyphAtlasArray"/> for this font's format, copying its
+        /// bytes from the legacy atlas on first request, and returns its
+        /// <see cref="GlyphAtlasArray.GlyphCell"/>. Returns false when the glyph is not packed (zero
+        /// rect / missing) or the atlas pixels are unavailable. Does NOT alter the legacy path.
+        /// Main-thread only.
+        /// </summary>
+        public bool TryPublishToSharedAtlas(uint glyphIndex, VariationKey key, out GlyphAtlasArray.GlyphCell cell)
+        {
+            cell = default;
+            if (!TryGetGlyph(glyphIndex, key, out var glyph))
+                return false;
+            var rect = glyph.glyphRect;
+            if (rect.width <= 0 || rect.height <= 0)
+                return false; // whitespace / zero-area glyph: nothing to pack
+            if (atlasTextures == null || glyph.atlasIndex < 0 || glyph.atlasIndex >= atlasTextures.Count)
+                return false;
+            var srcTex = atlasTextures[glyph.atlasIndex];
+            if (srcTex == null)
+                return false;
+
+            var mode = EffectiveRenderMode;
+            var format = SharedGlyphAtlas.FormatFor(mode, IsColor);
+            var arr = SharedGlyphAtlas.Get(format, atlasSize);
+
+            var cellKey = new GlyphAtlasArray.GlyphCellKey(GetCachedInstanceId(), glyphIndex, key);
+            _publishedCells ??= new HashSet<GlyphAtlasArray.GlyphCellKey>();
+
+            if (arr.TryGetCell(cellKey, out cell))
+                return true; // already resident in the shared array
+
+            // Extract the glyph's bytes from the legacy atlas (CPU-side raw data; the legacy atlas is
+            // kept readable because PackRenderedBatch calls Apply(false, false)).
+            int srcChannels = srcTex.format == TextureFormat.RGBA32 ? 4
+                : srcTex.format == TextureFormat.RGB24 ? 3 : 1;
+            int dstChannels = format == TextureFormat.RGBA32 ? 4 : 1;
+
+            byte[] glyphBytes = ExtractGlyphBytes(srcTex, rect, srcChannels, dstChannels);
+            if (glyphBytes == null)
+                return false;
+
+            if (!arr.AddGlyph(cellKey, glyphBytes, rect.width, rect.height, dstChannels, out cell))
+                return false;
+            arr.Apply(false);
+            _publishedCells.Add(cellKey);
+            return true;
+        }
+
+        // Copies a glyph sub-rect out of a legacy atlas texture into a tightly packed byte[] in the
+        // shared array's channel count. Alpha8 src -> expands to RGBA32 (alpha in .a, rgb = alpha) when
+        // the shared array is RGBA32; RGB24/ RGBA src -> RGBA32. Same-channel copies are a straight blit.
+        private static byte[] ExtractGlyphBytes(Texture2D srcTex, GlyphRect rect, int srcChannels, int dstChannels)
+        {
+            Unity.Collections.NativeArray<byte> raw;
+            try { raw = srcTex.GetRawTextureData<byte>(); }
+            catch { return null; }
+            if (!raw.IsCreated || raw.Length == 0) return null;
+
+            int atlasW = srcTex.width;
+            int srcStride = atlasW * srcChannels;
+            var dst = new byte[rect.width * rect.height * dstChannels];
+
+            for (int y = 0; y < rect.height; y++)
+            {
+                int srcRow = (rect.y + y) * srcStride + rect.x * srcChannels;
+                int dstRow = y * rect.width * dstChannels;
+                for (int x = 0; x < rect.width; x++)
+                {
+                    int s = srcRow + x * srcChannels;
+                    int d = dstRow + x * dstChannels;
+                    if (dstChannels == 1)
+                    {
+                        // Alpha8 shared array: take source alpha (ch0 for Alpha8, ch3 for RGBA, else ch0).
+                        dst[d] = srcChannels == 4 ? raw[s + 3] : raw[s];
+                    }
+                    else // dstChannels == 4 (RGBA32 shared array: MSDF or color)
+                    {
+                        if (srcChannels == 1)
+                        {
+                            byte a = raw[s];
+                            dst[d] = a; dst[d + 1] = a; dst[d + 2] = a; dst[d + 3] = a;
+                        }
+                        else if (srcChannels == 3)
+                        {
+                            dst[d] = raw[s]; dst[d + 1] = raw[s + 1]; dst[d + 2] = raw[s + 2]; dst[d + 3] = 255;
+                        }
+                        else // 4
+                        {
+                            dst[d] = raw[s]; dst[d + 1] = raw[s + 1]; dst[d + 2] = raw[s + 2]; dst[d + 3] = raw[s + 3];
+                        }
+                    }
+                }
+            }
+            return dst;
+        }
+
         /// <summary>
         /// Ensures <paramref name="glyphIndices"/> are rasterized into the atlas for the variable-font
         /// instance <paramref name="key"/> (design coords <paramref name="coords"/> for axes
