@@ -255,20 +255,17 @@ namespace LightSide.Tests
         }
 
         /// <summary>
-        /// Khmer / Myanmar real-layout coverage runs only when a compatibly-licensed font for
-        /// one of those scripts is present in the package. None is bundled today (only the Thai
-        /// OFL fixture is), so this test skips cleanly rather than fail — matching the task's
-        /// "if a font is available" condition. If such a font is added under
-        /// <c>Tests/Editor/Fixtures/</c> later, this test picks it up automatically.
+        /// Khmer and Myanmar real-layout coverage, using the bundled OFL Noto Sans fixtures
+        /// (see Fixtures/SOURCES.md). Each script must wrap only at dictionary word boundaries
+        /// and never inside a grapheme cluster.
         /// </summary>
-        [Test]
-        public void KhmerOrMyanmar_NarrowWidth_WrapsAtWordBoundaries_WhenFontAvailable()
+        [TestCase(SegmentationScript.Khmer)]
+        [TestCase(SegmentationScript.Myanmar)]
+        public void ComplexScript_NarrowWidth_WrapsAtWordBoundaries(SegmentationScript script)
         {
-            var candidate = RealLayoutFixtures.FindComplexScriptFont(out SegmentationScript script,
+            var candidate = RealLayoutFixtures.FindComplexScriptFont(script,
                 out SegmentationFixtures.Case[] cases);
-            if (candidate == null)
-                Assert.Ignore("No Khmer/Myanmar font fixture under a compatible licence is bundled; " +
-                              "real-layout wrap coverage for those scripts is skipped (Thai is covered).");
+            Assert.IsNotNull(candidate, $"{script} font fixture missing under Tests/Editor/Fixtures/.");
 
             SegHelper.AssignDictionaries();
             var fontBytes = File.ReadAllBytes(candidate);
