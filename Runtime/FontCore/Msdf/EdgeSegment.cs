@@ -129,7 +129,7 @@ namespace LightSide.Msdf
 
         public override EdgeSegment Reversed() => new LinearSegment(Point1, Point0, Color);
 
-        private static double Sign(double n) => n > 0 ? 1 : (n < 0 ? -1 : 0);
+        private static double Sign(double n) => n >= 0 ? 1 : -1; // msdfgen nonZeroSign: NEVER 0, so a point collinear with an edge endpoint tangent (Cross==0) keeps a real signed endpoint distance instead of collapsing to 0 (the '@' vertical-wall column pin).
     }
 
     public sealed class QuadraticSegment : EdgeSegment
@@ -222,7 +222,7 @@ namespace LightSide.Msdf
         public override EdgeSegment Reversed() => new QuadraticSegment(Point1, _p1, Point0, Color);
 
         private static Vector2D Lerp(Vector2D a, Vector2D b, double t) => a + (b - a) * t;
-        private static double Sign(double n) => n > 0 ? 1 : (n < 0 ? -1 : 0);
+        private static double Sign(double n) => n >= 0 ? 1 : -1; // msdfgen nonZeroSign: NEVER 0, so a point collinear with an edge endpoint tangent (Cross==0) keeps a real signed endpoint distance instead of collapsing to 0 (the '@' vertical-wall column pin).
     }
 
     public sealed class CubicSegment : EdgeSegment
@@ -339,6 +339,6 @@ namespace LightSide.Msdf
         public override EdgeSegment Reversed() => new CubicSegment(Point1, _p2, _p1, Point0, Color);
 
         private static Vector2D Lerp(Vector2D a, Vector2D b, double t) => a + (b - a) * t;
-        private static double Sign(double n) => n > 0 ? 1 : (n < 0 ? -1 : 0);
+        private static double Sign(double n) => n >= 0 ? 1 : -1; // msdfgen nonZeroSign: NEVER 0, so a point collinear with an edge endpoint tangent (Cross==0) keeps a real signed endpoint distance instead of collapsing to 0 (the '@' vertical-wall column pin).
     }
 }

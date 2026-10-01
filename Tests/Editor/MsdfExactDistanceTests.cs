@@ -212,20 +212,35 @@ namespace LightSide.Tests
                     double tX = spread - gx0, tY = spread - gy0;
                     var spans = DenseSpans(shape);
 
+                    // Precompute the brute-force signed distance ONCE per pixel centre (w*h brute
+                    // calls, not w*h*sub*sub). Off the ~1px edge band the true fill side is constant
+                    // across a texel, so a sub-sample's reference side is its texel's brute sign.
+                    var pixBrute = new double[w * h];
+                    for (int y = 0; y < h; y++)
+                        for (int x = 0; x < w; x++)
+                            pixBrute[y * w + x] = BruteSignedDistance(spans, shape,
+                                new Vector2D((x + 0.5) - tX, (y + 0.5) - tY));
+
                     int phantom = 0, scanned = 0; var colPh = new int[w];
                     for (int y = 0; y + 1 < h; y++)
                         for (int x = 0; x + 1 < w; x++)
+                        {
+                            // Skip texels adjacent to the true edge: if any of the 4 corners is within
+                            // the edge band, a median crossing here is legitimate anti-aliasing.
+                            double b00 = pixBrute[y * w + x], b10 = pixBrute[y * w + (x + 1)];
+                            double b01 = pixBrute[(y + 1) * w + x], b11 = pixBrute[(y + 1) * w + (x + 1)];
+                            double minAbs = Math.Min(Math.Min(Math.Abs(b00), Math.Abs(b10)), Math.Min(Math.Abs(b01), Math.Abs(b11)));
+                            if (minAbs <= edgeBand) continue;
+                            bool refInside = b00 > 0; // off-edge: all four agree
                             for (int syi = 0; syi < sub; syi++)
                                 for (int sxi = 0; sxi < sub; sxi++)
                                 {
                                     double fx = x + (sxi + 0.5) / sub, fy = y + (syi + 0.5) / sub;
-                                    double px = (fx + 0.5) - tX, py = (fy + 0.5) - tY;
-                                    double brute = BruteSignedDistance(spans, shape, new Vector2D(px, py));
-                                    if (Math.Abs(brute) <= edgeBand) continue;
                                     scanned++;
                                     float med = BilinearMedianField(msdf.Field, w, h, fx, fy);
-                                    if ((med > 0.5f) != (brute > 0)) { phantom++; colPh[x]++; }
+                                    if ((med > 0.5f) != refInside) { phantom++; colPh[x]++; }
                                 }
+                        }
                     int worstCol = -1; for (int x = 0; x < w; x++) if (worstCol < 0 || colPh[x] > colPh[worstCol]) worstCol = x;
                     int worstColCount = worstCol >= 0 ? colPh[worstCol] : 0;
 
