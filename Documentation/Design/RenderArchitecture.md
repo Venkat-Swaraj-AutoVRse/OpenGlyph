@@ -559,13 +559,34 @@ there, each with a found root cause:
 Plus the double-premultiply removal and the premultiplied `BlendOver` composite.
 
 **Remaining residual — outline + underlay (effect layers only; face is exact).**
-Outline: nonBg 3690 vs 5555 (red ring now draws — up from 46 red px to 242 — but
-~⅓ too thin); maxΔ 255 is the red colour at that thin ring. Underlay: 2397 vs 2737,
-maxΔ 64 (shadow extent/offset). Both are the single-pass approximations of the
-offset-sampled outline/underlay layers vs SSD's exact `scaleSoftness`/offset-factor
-terms (SSD derives the underlay offset from `ComputeUnderlayOffsetFactor` × texel
-size, which the merged path approximates). The core SDF/MSDF/colour path is a
-bit-exact drop-in; the outline/underlay offset terms are the last sub-pixel items.
+Outline: nonBg 3690 vs 5555, maxΔ 255 (red ring at the edge). Underlay: 2397 vs
+2737, maxΔ 64.
+
+**Empirical bisection (the deliverable, not a reading).** With a test hook scaling
+the synthesized outline width by k and the underlay offset by a factor, both swept
+against a fixed legacy render (world-space 1280×720; spreadRatio = 0.25,
+gradientScale = 8, normFactor = 0.4):
+
+- **Outline width sweep** (legacy lit 5555 / red 2925): `k=2.4 → 5174/2554`,
+  `2.5 → 5270/2688`, `2.667 → 5411/2852`, `2.8 → 5524/3038`, `2.9 → 5573/3120`,
+  `3.0 → 5647/3213`. The lit count matches legacy at **k ≈ 2.85**, the red count at
+  **k ≈ 2.73** — i.e. **no single width factor hits both**, and 2.73–2.85 is not a
+  clean quantity of normFactor/gradientScale/spreadRatio. Conclusion: the outline
+  gap is **not one missing scalar**; the merged single-pass outline ring is both
+  slightly narrow AND slightly differently anti-aliased vs legacy `UniText/SDF-SSD`'s
+  layered outline. A single k would be a magic constant that still misses the bar on
+  one of lit/red, so it was NOT applied. A faithful fix needs the ring profile
+  reproduced (width + edge), likely by matching SSD's `scaleSoftness`/`SDFLayer`
+  outline exactly as its own layer — a bounded next task.
+- **Underlay offset sweep** (legacy lit 2737): offset ×1→2397, ×2→2397, ×3→2358,
+  ×4→2300 — scaling the OFFSET does not grow the lit area, so the underlay gap is an
+  **EXTENT (dilate/scale)** difference, not an offset error. Next: port SSD's
+  underlay `layerScale`/`layerBias` extent exactly (it already uses the shared
+  `_AtlasSize` texel term).
+
+So: **SDF, MSDF and `<color>` are a bit-exact drop-in**; the outline/underlay effect
+layers draw correctly but are the remaining items, now characterised empirically
+(width+edge for outline, extent for underlay) rather than guessed.
 
 **Legacy coverage ported (batching-safe).** `UniText/SDF-Face` + `SDF-Base` coverage
 is now ported into `UniText/Uber` WITHOUT per-component material state (so the 5/5
