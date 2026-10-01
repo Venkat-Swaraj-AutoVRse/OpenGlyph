@@ -184,6 +184,30 @@ namespace LightSide
         private readonly List<Material> stencilMaterials = new();
         private List<UniTextRenderData> renderData;
 
+        /// <summary>Per-component override for the Render-Architecture R2 unified single-renderer path.</summary>
+        public enum UnifiedRendererMode { UseProjectSetting, ForceOn, ForceOff }
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2 unified single-renderer path for THIS component. " +
+                 "UseProjectSetting follows UniTextSettings.UseUnifiedRenderer; ForceOn/ForceOff override it.")]
+        private UnifiedRendererMode unifiedRendererMode = UnifiedRendererMode.UseProjectSetting;
+
+        /// <summary>
+        /// Whether this component renders through the R2 unified single-CanvasRenderer-per-draw-group
+        /// path (UniText/Uber + shared Texture2DArray + style table). Resolves the per-component
+        /// <see cref="unifiedRendererMode"/> against the project default. False keeps the legacy path.
+        /// </summary>
+        public bool UseUnifiedRenderer => unifiedRendererMode switch
+        {
+            UnifiedRendererMode.ForceOn => true,
+            UnifiedRendererMode.ForceOff => false,
+            _ => UniTextSettings.UseUnifiedRenderer,
+        };
+
+        /// <summary>R2 unified path: per-component builder + its merged (≤2) output. Lazy; disposed in OnDestroy.</summary>
+        private UnifiedRenderBuilder unifiedBuilder;
+        private List<UniTextRenderData> unifiedRenderData;
+
         private Rect cachedClipRect;
         private bool cachedValidClip;
         private Vector4 cachedClipSoftness;
@@ -861,6 +885,8 @@ namespace LightSide
             base.OnDestroy();
             highlighter?.Destroy();
             DeInit();
+            unifiedBuilder?.Dispose();
+            unifiedBuilder = null;
             DestroyRuntimeConfigCopies();
         }
 
@@ -1171,6 +1197,21 @@ namespace LightSide
                 return;
             }
 
+            // Render-Architecture R2: when the unified path is enabled, collapse the per-segment
+            // renderData into ≤2 merged draw groups on the UniText/Uber material. The legacy
+            // generation is untouched; this only re-packs its output. When OFF, renderData flows to
+            // UpdateSubMeshes exactly as before (default — guards the existing test suite).
+            if (UseUnifiedRenderer)
+            {
+                unifiedBuilder ??= new UnifiedRenderBuilder();
+                unifiedRenderData ??= new List<UniTextRenderData>(2);
+                var style = AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
+                unifiedBuilder.Build(renderData, style, unifiedRenderData);
+                UpdateSubMeshes(unifiedRenderData);
+                UniTextDebug.EndSample();
+                return;
+            }
+
             UpdateSubMeshes();
 
             UniTextDebug.EndSample();
@@ -1258,9 +1299,14 @@ namespace LightSide
 
         private void UpdateSubMeshes()
         {
+            UpdateSubMeshes(renderData);
+        }
+
+        private void UpdateSubMeshes(List<UniTextRenderData> data)
+        {
             UniTextDebug.BeginSample("UniText.UpdateSubMeshes");
 
-            var requiredCount = renderData.Count;
+            var requiredCount = data.Count;
             var existingCount = subMeshRenderers.Count;
 
             var currentPivot = rectTransform.pivot;
@@ -1291,7 +1337,7 @@ namespace LightSide
 
             for (var i = 0; i < requiredCount; i++)
             {
-                var pair = renderData[i];
+                var pair = data[i];
 
                 if (i < existingCount)
                 {

@@ -527,6 +527,61 @@ namespace LightSide
         /// <summary>True when the glyph currently has a resident cell (no LRU touch).</summary>
         internal bool IsResident(in GlyphCellKey key) => _cells.ContainsKey(key);
 
+        // --- Pages-as-slices facet (unified renderer): publish a whole legacy atlas page ----------
+        // The unified single-renderer path reuses the existing per-font meshes/UVs wholesale and only
+        // needs each legacy atlas PAGE to become a slice of the shared array, so a vertex's page-local
+        // (u,v) + sliceIndex addresses it. This copies a source page's pixels into a dedicated slice
+        // once, cached by an opaque page key (e.g. the Texture2D instance id), and returns the slice.
+        private readonly Dictionary<int, int> _pageSlices = new(); // pageKey -> slice
+
+        /// <summary>
+        /// Publishes an entire legacy atlas page texture as a slice of this shared array, returning the
+        /// slice index. Cached by <paramref name="pageKey"/> so a page is copied once. The source must
+        /// be the array's dimensions and channel-compatible; a channel-expanding copy (Alpha8-&gt;RGBA32,
+        /// RGB24-&gt;RGBA32) is performed when needed. Returns false if the source is null/unreadable or
+        /// the dimensions do not match. Main-thread only; call <see cref="Apply"/> after a batch.
+        /// </summary>
+        public bool AddPage(int pageKey, Texture2D srcPage, out int slice)
+        {
+            slice = -1;
+            if (_pageSlices.TryGetValue(pageKey, out slice))
+                return true;
+            if (srcPage == null || srcPage.width != _size || srcPage.height != _size)
+                return false;
+
+            int srcCh = srcPage.format == TextureFormat.RGBA32 ? 4 : srcPage.format == TextureFormat.RGB24 ? 3 : 1;
+            Unity.Collections.NativeArray<byte> raw;
+            try { raw = srcPage.GetRawTextureData<byte>(); }
+            catch { return false; }
+            if (!raw.IsCreated || raw.Length == 0) return false;
+
+            var page = new Page { sliceIndex = _pages.Count, cpu = new byte[_size * _size * _channels], dirty = true };
+            _pages.Add(page);
+            EnsureArrayCapacity();
+            slice = page.sliceIndex;
+
+            // Copy with channel expansion matching the shared format.
+            int px = _size * _size;
+            for (int i = 0; i < px; i++)
+            {
+                int s = i * srcCh;
+                int d = i * _channels;
+                if (_channels == 1)
+                    page.cpu[d] = srcCh == 4 ? raw[s + 3] : raw[s];
+                else // RGBA32 shared
+                {
+                    if (srcCh == 1) { byte a = raw[s]; page.cpu[d] = a; page.cpu[d + 1] = a; page.cpu[d + 2] = a; page.cpu[d + 3] = a; }
+                    else if (srcCh == 3) { page.cpu[d] = raw[s]; page.cpu[d + 1] = raw[s + 1]; page.cpu[d + 2] = raw[s + 2]; page.cpu[d + 3] = 255; }
+                    else { page.cpu[d] = raw[s]; page.cpu[d + 1] = raw[s + 1]; page.cpu[d + 2] = raw[s + 2]; page.cpu[d + 3] = raw[s + 3]; }
+                }
+            }
+            _pageSlices[pageKey] = slice;
+            return true;
+        }
+
+        /// <summary>Slice a published page occupies, or -1 if that page key is not published.</summary>
+        public int SliceForPage(int pageKey) => _pageSlices.TryGetValue(pageKey, out var s) ? s : -1;
+
         public void Dispose()
         {
             _cells.Clear();
