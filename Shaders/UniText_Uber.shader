@@ -201,25 +201,43 @@ Shader "UniText/Uber"
                 col.rgb = outline.rgb * (1 - face.a) + face.rgb;
                 col.a = saturate(outline.a + face.a);
 
-                // Underlay / drop shadow (offset sample of the SAME slice), legacy ramp (SDF-SSD).
+                // Underlay / drop shadow (offset sample of the SAME slice). Faithful port of legacy
+                // UniText/SDF-SSD: the offset uses ComputeUnderlayOffsetFactor (NOT a flat texel step),
+                // the ramp is SDFLayer, and the layer is composited BEHIND face+outline via premultiplied
+                // BlendOver (NOT a max/lerp). This matches legacy's underlay extent and blend exactly.
                 if (underlayColor.a > 0 && mode != 2)
                 {
                     float baseWeight = i.cov.x; float normFactor = i.cov.y;
                     float pxSize = (abs(ddx(i.uv0.y)) + abs(ddy(i.uv0.y))) * _AtlasSize * 0.75;
-                    float scale = (1.0 / max(pxSize, 1e-8)) * (_Sharpness + 1) * abs(i.uv0.w) * i.uv0.z;
-                    // SSD underlay offset: _UnderlayOffset * offsetFactor * texelSize. Approximate the
-                    // offsetFactor with a texel step (1/_AtlasSize) scaled by the slider; sign negated.
-                    float2 uOff = float2(scal1.x, scal1.y) * (10.0 / max(_AtlasSize, 1.0));
+                    float gradientScale = i.uv0.z;
+                    float scale = (1.0 / max(pxSize, 1e-8)) * (_Sharpness + 1) * abs(i.uv0.w) * gradientScale;
+                    // Legacy ComputeUnderlayOffsetFactor(gradientScale, normFactor):
+                    //   pointSizeApprox = sqrt(72 * gradientScale * normFactor / REFERENCE_SPREAD_RATIO)
+                    //   offsetFactor    = pointSizeApprox / 9     (REFERENCE_SPREAD_RATIO = 0.1)
+                    // Legacy vertex: offset = -(_UnderlayOffset * _ScaleRatioC) * offsetFactor * texel,
+                    // texel = _MainTex_TexelSize = 1/_AtlasSize. _ScaleRatioC = 1 (shared default).
+                    float offsetFactor = sqrt(72.0 * gradientScale * normFactor / 0.1) / 9.0;
+                    float texel = 1.0 / max(_AtlasSize, 1.0);
+                    float2 uOff = float2(scal1.x, scal1.y) * offsetFactor * texel; // scal1.xy = _UnderlayOffsetX/Y
                     half4 ut = UNITY_SAMPLE_TEX2DARRAY(_MainTexArray, float3(i.uv0.xy - uOff, slice));
                     half uDist = (mode == 1) ? Median3(ut.rgb) : ut.a;
+                    // Legacy extent: underlaySoftnessFactor = _UnderlaySoftness*_ScaleRatioC*normFactor;
+                    // layerScale = scale/(1+that); underlayDilate = _FaceDilate*_ScaleRatioA +
+                    // _UnderlayDilate*_ScaleRatioC; normalizedUnderlayEffect = (baseWeight +
+                    // underlayDilate*0.5)*normFactor; layerBias = (0.5-that)*layerScale - 0.5.
                     float layerScale = scale / (1.0 + max(scal1.w, 0.0) * normFactor);
-                    float normUEffect = (baseWeight + (faceDilate + scal1.z) * 0.5) * normFactor;
+                    float underlayDilate = faceDilate + scal1.z; // _FaceDilate + _UnderlayDilate (ratios=1)
+                    float normUEffect = (baseWeight + underlayDilate * 0.5) * normFactor;
                     float layerBias = (0.5 - normUEffect) * layerScale - 0.5;
-                    half uA = saturate(uDist * layerScale - layerBias) * underlayColor.a;
-                    fixed4 outCol;
-                    outCol.rgb = lerp(underlayColor.rgb, col.rgb, col.a);
-                    outCol.a = max(col.a, uA);
-                    col = outCol;
+                    half ud = uDist * layerScale;
+                    // SDFLayer(ud, layerBias, underlayColor) with PREMULTIPLIED underlay colour, then
+                    // BlendOver(dst=underlay, src=col): the underlay sits behind the face+outline.
+                    fixed4 uPremult = underlayColor; uPremult.rgb *= uPremult.a;
+                    fixed4 uResult = uPremult * saturate(ud - layerBias);
+                    fixed4 blended;
+                    blended.rgb = uResult.rgb * (1 - col.a) + col.rgb;
+                    blended.a = saturate(uResult.a + col.a);
+                    col = blended;
                 }
 
                 // Vertex tint (gradient / per-vertex <color>). col is already PREMULTIPLIED, so tint
