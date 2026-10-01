@@ -416,10 +416,21 @@ jobs:
             # freetype + harfbuzz + libpng + zlib. Exclude harfbuzz-subset (editor-only, and
             # it duplicates the CFF/number TUs already in libharfbuzz.a) and blend2d/asmjit
             # (disabled for these targets).
+            #
+            # DEDUPE BY BASENAME. The Xcode generator stages a dependency's archive under more than
+            # one path (e.g. a per-config Release/ dir AND an unsuffixed one, or one copy per build
+            # sub-target), so a plain `find` matches the SAME logical archive twice. `sort -u` only
+            # removes identical path strings, not two different paths holding the same library, so
+            # libtool then merges both copies and every object appears twice ("duplicate member
+            # name" warnings; a bloated, double-size archive). Keep the FIRST archive seen per
+            # basename: awk on the basename (field after the last '/') passes a path through only
+            # the first time its filename appears.
             libs=$(find "$tree" -name '*.a' \
                      ! -iname '*harfbuzz-subset*' \
-                     ! -iname '*blend2d*' ! -iname '*asmjit*' | sort -u)
-            echo "--- bundling into $out from:"; echo "$libs"
+                     ! -iname '*blend2d*' ! -iname '*asmjit*' \
+                   | sort \
+                   | awk -F/ '!seen[$NF]++')
+            echo "--- bundling into $out from (deduped by basename):"; echo "$libs"
             # shellcheck disable=SC2086
             libtool -static -o "$out" $libs
             echo "--- bundled $out:"; ls -l "$out"
