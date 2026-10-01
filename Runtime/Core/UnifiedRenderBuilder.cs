@@ -111,7 +111,10 @@ namespace LightSide
                 g.material.SetFloat(StyleTexWidth, _styleTable.Width);
                 g.material.SetFloat(StyleTexHeight, Mathf.Max(1, _styleTable.Count));
 
-                output.Add(new UniTextRenderData(m, g.material, arr.Texture, 0));
+                // IMPORTANT: the atlas is a Texture2DArray bound via the material's _MainTexArray.
+                // Do NOT pass it as the CanvasRenderer main texture (SetTexture expects a 2D texture
+                // and asserts otherwise). The render-data texture is null; the material carries the array.
+                output.Add(new UniTextRenderData(m, g.material, (Texture)null, 0));
             }
         }
 

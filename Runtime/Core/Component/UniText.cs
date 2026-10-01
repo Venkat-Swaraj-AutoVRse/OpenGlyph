@@ -1282,6 +1282,90 @@ namespace LightSide
 
         #region Sub-mesh Management
 
+#if UNITY_EDITOR
+        /// <summary>EDITOR/TEST: forces this component's unified-renderer mode.</summary>
+        internal void SetUnifiedRendererModeForTests(UnifiedRendererMode mode) => unifiedRendererMode = mode;
+
+        /// <summary>EDITOR/TEST: number of currently-active drawn sub-mesh CanvasRenderers.</summary>
+        internal int ActiveSubMeshRendererCountForTests
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < subMeshRenderers.Count; i++)
+                {
+                    var r = subMeshRenderers[i].renderer;
+                    if (r != null && r.gameObject.activeSelf && r.GetMesh() != null) n++;
+                }
+                return n;
+            }
+        }
+
+        /// <summary>EDITOR/TEST: true if every active drawn renderer uses the UniText/Uber shader.</summary>
+        internal bool ActiveRenderersUseUberShaderForTests()
+        {
+            bool any = false;
+            for (int i = 0; i < subMeshRenderers.Count; i++)
+            {
+                var r = subMeshRenderers[i].renderer;
+                if (r == null || !r.gameObject.activeSelf || r.GetMesh() == null) continue;
+                any = true;
+                var mat = r.GetMaterial(0);
+                if (mat == null || mat.shader == null || mat.shader.name != "UniText/Uber") return false;
+            }
+            return any;
+        }
+
+        /// <summary>EDITOR/TEST: vertices actually submitted to the active drawn CanvasRenderers.</summary>
+        internal List<Vector3> GetDrawnVerticesForTests()
+        {
+            var result = new List<Vector3>();
+            for (int i = 0; i < subMeshRenderers.Count; i++)
+            {
+                var r = subMeshRenderers[i].renderer;
+                if (r == null || !r.gameObject.activeSelf) continue;
+                var m = r.GetMesh();
+                if (m != null) result.AddRange(m.vertices);
+            }
+            return result;
+        }
+
+        /// <summary>EDITOR/TEST: shader names of each active drawn renderer's material[0] (diagnostics).</summary>
+        internal List<string> GetActiveRendererShaderNamesForTests()
+        {
+            var names = new List<string>();
+            for (int i = 0; i < subMeshRenderers.Count; i++)
+            {
+                var r = subMeshRenderers[i].renderer;
+                if (r == null || !r.gameObject.activeSelf || r.GetMesh() == null) continue;
+                var mat = r.GetMaterial(0);
+                names.Add(mat == null ? "<null>" : (mat.shader == null ? "<null shader>" : mat.shader.name));
+            }
+            return names;
+        }
+
+        /// <summary>
+        /// EDITOR/TEST: the merged unified-path render data this component produced on the last
+        /// rebuild (source-side, independent of CanvasRenderer material read-back semantics). Each
+        /// entry is one draw group; its material[0] shader is what will be drawn. Null/empty when the
+        /// unified path did not run.
+        /// </summary>
+        internal List<string> GetUnifiedGroupShaderNamesForTests()
+        {
+            var names = new List<string>();
+            if (unifiedRenderData == null) return names;
+            foreach (var rd in unifiedRenderData)
+            {
+                var mat = rd.material;
+                names.Add(mat == null ? "<null>" : (mat.shader == null ? "<null shader>" : mat.shader.name));
+            }
+            return names;
+        }
+
+        /// <summary>EDITOR/TEST: number of merged unified-path draw groups produced on the last rebuild.</summary>
+        internal int UnifiedGroupCountForTests => unifiedRenderData?.Count ?? 0;
+#endif
+
         private void CollectExistingSubMeshRenderers()
         {
             subMeshRenderers.Clear();
