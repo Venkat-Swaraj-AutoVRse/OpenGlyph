@@ -104,6 +104,50 @@ namespace LightSide
         }
 
         public static FaceStyle Regular => new FaceStyle(FontStyleSpec.NormalWeight, FontStyleSpec.NormalWidth, StyleAxis.Normal, 0f);
+
+        /// <summary>
+        /// Derives a <see cref="FaceStyle"/> from an OpenType <c>name</c>-table style string such as
+        /// "Regular", "Bold", "Italic", "Bold Italic", "Condensed Bold", "Oblique".
+        /// </summary>
+        /// <remarks>
+        /// This is a name heuristic covering the common Regular/Bold/Italic/BoldItalic matrix plus a
+        /// few width keywords. It intentionally uses only the style name already returned by the
+        /// native face-info read (no new native exports). The authoritative numeric
+        /// <c>OS/2.usWeightClass</c>/<c>usWidthClass</c> can be set explicitly in the family inspector
+        /// to override this, and a future native export can supply them directly.
+        /// </remarks>
+        public static FaceStyle FromStyleName(string styleName)
+        {
+            var fs = Regular;
+            if (string.IsNullOrEmpty(styleName)) return fs;
+            var s = styleName.ToLowerInvariant();
+
+            // Weight keywords (checked longest/most-specific first).
+            if (s.Contains("thin")) fs.weight = 100;
+            else if (s.Contains("extralight") || s.Contains("ultralight")) fs.weight = 200;
+            else if (s.Contains("semibold") || s.Contains("demibold")) fs.weight = 600;
+            else if (s.Contains("extrabold") || s.Contains("ultrabold")) fs.weight = 800;
+            else if (s.Contains("light")) fs.weight = 300;
+            else if (s.Contains("medium")) fs.weight = 500;
+            else if (s.Contains("black") || s.Contains("heavy")) fs.weight = 900;
+            else if (s.Contains("bold")) fs.weight = FontStyleSpec.BoldWeight;
+
+            // Width keywords.
+            if (s.Contains("ultracondensed")) fs.width = 50;
+            else if (s.Contains("extracondensed")) fs.width = 62.5f;
+            else if (s.Contains("semicondensed")) fs.width = 87.5f;
+            else if (s.Contains("condensed") || s.Contains("narrow")) fs.width = 75;
+            else if (s.Contains("ultraexpanded")) fs.width = 200;
+            else if (s.Contains("extraexpanded")) fs.width = 150;
+            else if (s.Contains("semiexpanded")) fs.width = 112.5f;
+            else if (s.Contains("expanded") || s.Contains("wide")) fs.width = 125;
+
+            // Style axis.
+            if (s.Contains("italic")) fs.style = StyleAxis.Italic;
+            else if (s.Contains("oblique")) { fs.style = StyleAxis.Oblique; fs.slant = -12f; }
+
+            return fs;
+        }
     }
 
     /// <summary>

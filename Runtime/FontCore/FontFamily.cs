@@ -67,6 +67,57 @@ namespace LightSide
         }
 
         /// <summary>
+        /// Adds a face, deriving its <see cref="FaceStyle"/> from the font's <c>name</c>-table style
+        /// string (<see cref="FaceInfo"/>). Convenience for building a family from loaded faces.
+        /// </summary>
+        public void AddFace(UniTextFont font)
+        {
+            if (font == null) return;
+            faces.Add(new FamilyFace(font, FaceStyle.FromStyleName(font.FaceInfo.styleName)));
+        }
+
+        // Tracks (family instance, missing-style signature) pairs already warned about, so the
+        // synthetic-fallback notice is emitted exactly once per family+style rather than per run.
+        [NonSerialized] private HashSet<int> warnedSynthetic;
+
+        /// <summary>
+        /// Resolves a face for a composed request: a base <paramref name="spec"/> plus optional
+        /// <c>&lt;b&gt;</c>/<c>&lt;i&gt;</c> markup flags. Returns the chosen real face and reports
+        /// via <paramref name="how"/> whether synthetic bold/italic must still be layered on top.
+        /// When synthesis is required (no real face for the requested style), a one-time warning is
+        /// logged per (family, missing style).
+        /// </summary>
+        /// <param name="spec">Base style request (component settings).</param>
+        /// <param name="markupBold">True when a <c>&lt;b&gt;</c> span covers this run.</param>
+        /// <param name="markupItalic">True when an <c>&lt;i&gt;</c> span covers this run.</param>
+        /// <param name="how">Output: exactness and synthetic-bold/italic flags.</param>
+        /// <returns>The chosen face, or null when the family is empty.</returns>
+        public UniTextFont Resolve(FontStyleSpec spec, bool markupBold, bool markupItalic, out FaceMatch how)
+        {
+            if (markupBold) spec = spec.AsBold();
+            if (markupItalic) spec = spec.AsItalic();
+
+            var face = Match(spec, out how);
+
+            if (face != null && (how.synthesizeBold || how.synthesizeItalic))
+            {
+                warnedSynthetic ??= new HashSet<int>();
+                // Signature distinguishes the two synthesis kinds so each warns once.
+                var sig = (how.synthesizeBold ? 1 : 0) | (how.synthesizeItalic ? 2 : 0);
+                if (warnedSynthetic.Add(sig))
+                {
+                    var what = how.synthesizeBold && how.synthesizeItalic ? "bold+italic"
+                        : how.synthesizeBold ? "bold" : "italic";
+                    Cat.MeowWarnFormat(
+                        "[FontFamily] \"{0}\": no real {1} face for request {2}; synthesising {1} from the nearest face. Add a real {1} face to the family to silence this.",
+                        string.IsNullOrEmpty(familyName) ? name : familyName, what, spec);
+                }
+            }
+
+            return face;
+        }
+
+        /// <summary>
         /// Selects the best face for <paramref name="spec"/> using the CSS matching algorithm.
         /// </summary>
         /// <param name="spec">The requested weight/width/style.</param>
