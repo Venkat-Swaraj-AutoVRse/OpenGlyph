@@ -201,6 +201,40 @@ namespace LightSide
         private float resultWidth;
         private float resultHeight;
 
+        // ---- Phase 2 styled-run source ----------------------------------------
+        // Per-codepoint style inputs that itemization consults to resolve a real family face and a
+        // variable-font instance. Populated by the component (from parsed <b>/<i>/axis ranges) or by
+        // tests via SetStyleSource. When styleActive is false the pipeline behaves exactly as before.
+        private bool styleActive;
+        private FontStyleSpec baseStyleSpec = FontStyleSpec.Normal;
+        private byte[] boldFlags;      // per-codepoint 0/1
+        private byte[] italicFlags;    // per-codepoint 0/1
+        private FontStyleSpec[] perCpSpec; // optional explicit per-codepoint spec (axis markup); null -> base
+        private bool opszAuto = true;
+
+        /// <summary>
+        /// Phase 2: supplies per-codepoint style so itemization can resolve a real family face and a
+        /// variable-font instance. <paramref name="bold"/>/<paramref name="italic"/> are per-codepoint
+        /// flags (0/1); <paramref name="perCodepointSpec"/> optionally overrides the base spec per
+        /// codepoint (axis markup). Pass styleActive=false (or null buffers) to disable.
+        /// </summary>
+        public void SetStyleSource(bool active, FontStyleSpec baseSpec, byte[] bold, byte[] italic,
+            FontStyleSpec[] perCodepointSpec = null, bool opticalSizeAuto = true)
+        {
+            styleActive = active;
+            baseStyleSpec = baseSpec;
+            boldFlags = bold;
+            italicFlags = italic;
+            perCpSpec = perCodepointSpec;
+            opszAuto = opticalSizeAuto;
+        }
+
+        private bool BoldAt(int i) => styleActive && boldFlags != null && i < boldFlags.Length && boldFlags[i] != 0;
+        private bool ItalicAt(int i) => styleActive && italicFlags != null && i < italicFlags.Length && italicFlags[i] != 0;
+        private FontStyleSpec SpecAt(int i) =>
+            (perCpSpec != null && i < perCpSpec.Length) ? perCpSpec[i] : baseStyleSpec;
+
+
         private bool hasValidFirstPassData;
         private bool hasValidGlyphsInAtlas;
 
@@ -1057,6 +1091,22 @@ namespace LightSide
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int GetFontIdForCluster(Span<int> cpSpan, int start, int end, UniTextFontProvider fp)
         {
+            // Phase 2: when a styled run is requested (markup <b>/<i> or a weight/width/style spec),
+            // resolve the real family face for this cluster's style. A different resolved font id
+            // naturally splits the run. Only applies to non-emoji single text; emoji keep their path.
+            if (styleActive)
+            {
+                var cp0 = cpSpan[start];
+                bool emojiLike = (uint)cp0 >= UnicodeData.EmojiRangeThreshold
+                                 && EmojiFont.IsAvailable && IsSingleCodepointEmoji(cp0);
+                if (!emojiLike)
+                {
+                    var spec = SpecAt(start);
+                    var styledId = fp.ResolveStyledFontId(spec, BoldAt(start), ItalicAt(start), out _, out _);
+                    if (styledId != 0) return styledId;
+                }
+            }
+
             var clusterLength = end - start;
 
             if (clusterLength == 1)
@@ -1165,8 +1215,27 @@ namespace LightSide
                 range = new TextRange(start, length),
                 bidiLevel = bidiLevel,
                 script = script,
-                fontId = fontId
+                fontId = fontId,
+                styleSpec = styleActive ? SpecAt(start) : FontStyleSpec.Normal,
+                variationKey = VariationKey.None,
+                realBold = false,
+                realItalic = false
             };
+
+            if (styleActive && fontProvider != null)
+            {
+                var spec = SpecAt(start);
+                // Re-resolve to recover the real-face flags (cheap: face already registered/cached).
+                fontProvider.ResolveStyledFontId(spec, BoldAt(start), ItalicAt(start),
+                    out bool rb, out bool ri);
+                var vkey = fontProvider.GetVariationKeyForFont(fontId, spec,
+                    opszAuto ? buf.shapingFontSize : 0f);
+                ref var r = ref buf.runs[count];
+                r.realBold = rb;
+                r.realItalic = ri;
+                r.variationKey = vkey;
+            }
+
             buf.runs.count = count + 1;
         }
 
@@ -1204,7 +1273,10 @@ namespace LightSide
                     width = result.TotalAdvance,
                     direction = run.Direction,
                     bidiLevel = run.bidiLevel,
-                    fontId = run.fontId
+                    fontId = run.fontId,
+                    variationKey = run.variationKey,
+                    realBold = run.realBold,
+                    realItalic = run.realItalic
                 });
             }
         }

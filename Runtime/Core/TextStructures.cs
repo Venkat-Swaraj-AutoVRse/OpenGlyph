@@ -165,6 +165,17 @@ namespace LightSide
         /// <summary>The font ID to use for shaping this run.</summary>
         public int fontId;
 
+        /// <summary>The resolved style request (weight/width/style) for this run (Phase 2).</summary>
+        public FontStyleSpec styleSpec;
+
+        /// <summary>The variable-font instance key for this run; <see cref="VariationKey.None"/> for a static face (Phase 2).</summary>
+        public VariationKey variationKey;
+
+        /// <summary>True when the face was resolved to a REAL styled face, so synthetic bold/italic must be suppressed (Phase 2).</summary>
+        public bool realBold;
+        /// <summary>True when a real italic/oblique face was resolved, suppressing synthetic italic (Phase 2).</summary>
+        public bool realItalic;
+
         /// <summary>Gets the text direction derived from the BiDi level.</summary>
         public TextDirection Direction => (bidiLevel & 1) == 0
             ? TextDirection.LeftToRight
@@ -197,6 +208,14 @@ namespace LightSide
 
         /// <summary>The font ID used for this run.</summary>
         public int fontId;
+
+        /// <summary>The variable-font instance key for this run; <see cref="VariationKey.None"/> for a static face (Phase 2).</summary>
+        public VariationKey variationKey;
+
+        /// <summary>True when a real styled (bold) face was used, so synthetic bold must be suppressed (Phase 2).</summary>
+        public bool realBold;
+        /// <summary>True when a real italic/oblique face was used, so synthetic italic must be suppressed (Phase 2).</summary>
+        public bool realItalic;
     }
 
 
