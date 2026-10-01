@@ -85,6 +85,7 @@ namespace LightSide
 
         private readonly Dictionary<TextureFormat, Group> _groups = new();
         private readonly List<Vector4> _tmpUv = new();
+        private readonly List<Vector4> _tmpUv1 = new();
         private readonly List<Vector3> _tmpV = new();
         private readonly List<Vector3> _tmpN = new();
         private readonly List<Color32> _tmpC = new();
@@ -176,10 +177,12 @@ namespace LightSide
             _tmpN.Clear(); src.GetNormals(_tmpN);
             _tmpC.Clear(); src.GetColors(_tmpC);
             _tmpUv.Clear(); src.GetUVs(0, _tmpUv);
+            _tmpUv1.Clear(); src.GetUVs(1, _tmpUv1);
             _tmpTri.Clear(); src.GetTriangles(_tmpTri, 0);
 
             bool haveColors = _tmpC.Count == _tmpV.Count;
             bool haveNormals = _tmpN.Count == _tmpV.Count;
+            bool haveUv1 = _tmpUv1.Count == _tmpV.Count;
             for (int i = 0; i < _tmpV.Count; i++)
             {
                 g.verts.Add(_tmpV[i]);
@@ -187,7 +190,12 @@ namespace LightSide
                 g.colors.Add(haveColors ? _tmpC[i] : (Color32)Color.white);
                 var uv0 = i < _tmpUv.Count ? _tmpUv[i] : Vector4.zero;
                 g.uv0.Add(uv0);
-                g.uv1.Add(new Vector4(uv0.z, slice, glyphMode, styleIdx));
+                // UV1.x MUST be the real spreadRatio (Padding/PointSize) from the source mesh's
+                // TEXCOORD1.x — NOT uv0.z (gradientScale). normFactor = 0.1/spreadRatio, and getting
+                // this wrong (≈0.01 instead of ≈1) makes the outline/underlay offset ~100x too small
+                // (outline ring vanished).
+                float spreadRatio = haveUv1 ? _tmpUv1[i].x : 0.1f;
+                g.uv1.Add(new Vector4(spreadRatio, slice, glyphMode, styleIdx));
             }
             for (int i = 0; i < _tmpTri.Count; i++)
                 g.tris.Add(baseIndex + _tmpTri[i]);
