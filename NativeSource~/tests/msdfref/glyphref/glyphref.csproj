@@ -33,6 +33,7 @@
     <Compile Include="../../../../Runtime/FontCore/Msdf/EdgeColoring.cs" />
     <Compile Include="../../../../Runtime/FontCore/Msdf/Shape.cs" />
     <Compile Include="../../../../Runtime/FontCore/Msdf/GlyphOutline.cs" />
+    <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfDistance.cs" />
     <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfGenerator.cs" />
     <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfErrorCorrection.cs" />
     <Compile Include="../../../../Runtime/FontCore/Msdf/MsdfBuilder.cs" />
