@@ -145,7 +145,20 @@ namespace LightSide.Msdf
                             if (d < min) min = d;
                         }
 
-                    output[y * w + x] = (float)(min.Distance / range + 0.5);
+                    // ROOT FIX (round 6). The single-channel SDF must be the TRUE signed distance:
+                    // the shortest distance to the outline, signed by the shape's fill. The nearest
+                    // edge's OWN directed sign (min.Distance's sign) is a per-edge pseudo-sign and it
+                    // DISAGREES with the fill wherever the nearest edge belongs to a contour whose
+                    // local orientation does not match the global non-zero winding — e.g. at the '@'
+                    // inner-wall column, where it inverted a 13-pixel foreground band to -range/2 and
+                    // drew the "SDF notch" the reviewer flagged at that column. msdfgen's generateSDF
+                    // signs the true distance via its scanline/overlap fill, NOT the nearest edge; the
+                    // faithful equivalent against our model is Shape.Contains (non-zero winding),
+                    // which is already the authoritative inside test used everywhere else. Magnitude
+                    // stays the nearest-edge distance; only the SIGN comes from the fill.
+                    double mag = Math.Abs(min.Distance);
+                    double signed = shape.Contains(p) ? mag : -mag;
+                    output[y * w + x] = (float)(signed / range + 0.5);
                 }
             }
 
