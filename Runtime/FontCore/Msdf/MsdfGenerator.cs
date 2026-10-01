@@ -19,6 +19,12 @@ namespace LightSide.Msdf
         public double TranslateY;
         /// <summary>Enable msdfgen-style error correction of interpolation artifacts.</summary>
         public bool ErrorCorrection;
+        /// <summary>
+        /// Enable the second-stage mid-region median-collapse repair ("Lift"). Kept as a separate
+        /// switch so the edge-colouring fix can be evaluated on its own; when faithful edge-colouring
+        /// alone clears the artifact gate this stays off.
+        /// </summary>
+        public bool LiftCollapse;
     }
 
     /// <summary>
@@ -106,7 +112,7 @@ namespace LightSide.Msdf
             // MsdfBuilder before generation), so each edge's directed-distance sign already means
             // "inside". No global field flip is applied here.
             if (cfg.ErrorCorrection)
-                ErrorCorrect(output, w, h);
+                ErrorCorrect(output, w, h, cfg.LiftCollapse);
 
             return output;
         }
@@ -119,7 +125,7 @@ namespace LightSide.Msdf
         /// edge there; such a pixel is collapsed to its own median, which cannot clash. Port of the
         /// crossing test in msdfgen's <c>msdfErrorCorrection</c> (Viktor Chlumsky, MIT).
         /// </summary>
-        private static void ErrorCorrect(float[] img, int w, int h)
+        private static void ErrorCorrect(float[] img, int w, int h, bool liftCollapse)
         {
             var clones = (float[])img.Clone();
 
@@ -148,35 +154,36 @@ namespace LightSide.Msdf
                 }
             }
 
-            // Second stage — mid-region median collapse. On a smooth contour whose long spline is
-            // coloured with a single two-channel colour (e.g. the inner wall of '@', 'O', 'e'), that
-            // one edge drives TWO channels to ~0.5 wherever it runs tangentially close to a sample
-            // column, leaving only the third channel (from the opposite wall, which shares NO channel
-            // with it) to vote "inside". The median then collapses to the edge value (~0.5) along an
-            // interior line even though every neighbour is solidly inside (or outside). A
-            // neighbour-crossing test cannot see this because the collapsed texel sits exactly ON 0.5
-            // (product == 0, never < 0). Repair it the way msdfgen's distance error-correction does:
-            // where a texel's median hugs the 0.5 contour yet its surrounding non-pinned neighbours
-            // agree firmly on ONE side, the texel is an interpolation artifact of the channel
-            // pairing, not a real edge — lift its median to that consensus so the silhouette stays
-            // continuous. Iterated twice so a collapse band up to two texels wide heals from its
-            // edges inward. The consensus requirement keeps every genuine edge, corner and 1px
-            // feature untouched: a real edge's neighbourhood straddles 0.5, it does not agree.
-            const float onEdge = 0.10f;  // |median-0.5| below this == "pinned to the edge"
-            const float firm = 0.06f;    // a neighbour this far past 0.5 is a firm vote
-            for (int pass = 0; pass < 2; pass++)
+            // Second stage — PINNED-PAIR collapse repair. A long two-channel spline running tangent
+            // to a sample column pins ITS TWO channels to ~0.5 down an interior line (CYAN pins G,B;
+            // the far wall supplies only the third channel). The median then reads 0.5 — a false edge
+            // in open field — even though the UNPINNED third channel, and every genuine neighbour,
+            // agree firmly on one side. Edge-colouring (long-spline whitening) removes most of these;
+            // this pass cleans the residue the colouring cannot reach (short tangent CYAN runs on
+            // '@''s inner ring). A texel is repaired only when its median hugs 0.5 AND two of its
+            // channels are a near-equal pinned pair AND its 8-neighbourhood votes firmly for ONE side
+            // with no dissent — a condition a real edge (whose neighbourhood straddles 0.5) can never
+            // meet, so corners, stems and 1px features are untouched. The repair sets the median to
+            // the firmly-agreed side, i.e. lets the honest unpinned channel win. Iterated twice so a
+            // 2-texel band heals inward. Equivalent in effect to msdfgen's distance error-correction
+            // for the pinned-pair case, expressed on the reconstructed field.
+            const float onEdge = 0.10f;   // |median-0.5| below this == pinned to the contour
+            const float firm = 0.06f;     // a neighbour this far past 0.5 is a firm vote
+            const float pairEps = 0.08f;  // two channels this close AND both near 0.5 == a pinned pair
+            for (int pass = 0; pass < 2 && liftCollapse; pass++)
             {
                 var src = (float[])img.Clone();
                 for (int y = 0; y < h; y++)
-                {
                     for (int x = 0; x < w; x++)
                     {
                         int idx = (y * w + x) * 3;
-                        float m = Median(src[idx], src[idx + 1], src[idx + 2]);
-                        if (Math.Abs(m - 0.5f) > onEdge) continue; // only touch edge-pinned texels
+                        float cr = src[idx], cg = src[idx + 1], cb = src[idx + 2];
+                        float m = Median(cr, cg, cb);
+                        if (Math.Abs(m - 0.5f) > onEdge) continue; // only edge-pinned texels
 
-                        // Tally the 8-neighbourhood: firm inside vs firm outside votes, ignoring
-                        // other pinned texels (which carry no reliable side).
+                        // Require an actual pinned PAIR: two channels near each other AND near 0.5.
+                        if (!PinnedPair(cr, cg, cb, pairEps)) continue;
+
                         int inside = 0, outside = 0;
                         for (int dy = -1; dy <= 1; dy++)
                             for (int dx = -1; dx <= 1; dx++)
@@ -190,31 +197,26 @@ namespace LightSide.Msdf
                                 else if (nm < -firm) outside++;
                             }
 
-                        // Lift only on an UNAMBIGUOUS consensus with no dissent — a genuine edge
-                        // always has firm votes on BOTH sides, so it can never satisfy this.
-                        if (inside >= 3 && outside == 0) Lift(img, idx, +1);
-                        else if (outside >= 3 && inside == 0) Lift(img, idx, -1);
+                        // Lift only on an unambiguous consensus with no dissent.
+                        if (inside >= 3 && outside == 0) { float keep = Math.Max(cr, Math.Max(cg, cb)); img[idx] = img[idx + 1] = img[idx + 2] = keep; }
+                        else if (outside >= 3 && inside == 0) { float keep = Math.Min(cr, Math.Min(cg, cb)); img[idx] = img[idx + 1] = img[idx + 2] = keep; }
                     }
-                }
             }
         }
 
         /// <summary>
-        /// Nudges an edge-pinned texel's median just across 0.5 to the given side (+1 inside / −1
-        /// outside) by setting its channels to the mean of its own interior value and the two
-        /// nearest neighbour medians would be overkill; the minimal, sign-faithful repair is to set
-        /// all three channels to a value firmly on the consensus side while preserving the texel's
-        /// own strongest channel so corners nearby keep their multi-channel character.
+        /// True when two of the three channels form a "pinned pair": they are within <paramref
+        /// name="eps"/> of each other AND both within <paramref name="eps"/> of the 0.5 contour. That
+        /// is the signature of a single tangent edge driving two channels to the contour value while
+        /// the third channel (the honest one) is left to carry the real side.
         /// </summary>
-        private static void Lift(float[] img, int idx, int side)
+        private static bool PinnedPair(float r, float g, float b, float eps)
         {
-            float r = img[idx], g = img[idx + 1], b = img[idx + 2];
-            float keep = side > 0 ? Math.Max(r, Math.Max(g, b)) : Math.Min(r, Math.Min(g, b));
-            // Pull the two off-side channels to match the kept extreme so the median follows it,
-            // but no further — this restores the silhouette without inventing distance beyond the
-            // texel's own strongest edge reading.
-            img[idx] = img[idx + 1] = img[idx + 2] = keep;
+            return NearPair(r, g, eps) || NearPair(g, b, eps) || NearPair(r, b, eps);
         }
+
+        private static bool NearPair(float a, float b, float eps) =>
+            Math.Abs(a - b) <= eps && Math.Abs(a - 0.5f) <= eps && Math.Abs(b - 0.5f) <= eps;
 
         /// <summary>
         /// True when, between pixels <paramref name="a"/> and <paramref name="b"/>, the number of
