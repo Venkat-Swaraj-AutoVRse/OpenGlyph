@@ -337,13 +337,26 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 
 ================================================================================
-8. ICU Thai Word Segmentation Dictionary
+8. ICU Word Segmentation Dictionaries (Thai, Lao, Khmer, Myanmar)
 ================================================================================
 
-   Website:   https://icu.unicode.org
-   File:      Defaults/ThaiDictionary.asset (derived from ICU thaidict.txt)
+   Project:   International Components for Unicode (ICU)
+   Source:    https://github.com/unicode-org/icu
+   Tag:       release-74-2 (pinned)
+   Path:      icu4c/source/data/brkitr/dictionaries/
+   Files:     thaidict.txt    -> Resources/Segmentation/ThaiDict.bytes
+              laodict.txt     -> Resources/Segmentation/LaoDict.bytes
+              khmerdict.txt   -> Resources/Segmentation/KhmerDict.bytes
+              burmesedict.txt -> Resources/Segmentation/MyanmarDict.bytes
    License:   Unicode License V3
-   Usage:     Thai word boundary detection for line breaking
+   Usage:     Word-boundary detection for line breaking of scripts written
+              without spaces (Unicode line-break class SA).
+
+   NOTE: OpenGlyph does not ship the ICU source text files. It ships only the
+   compact binary tries derived from them (a minimized DAWG of the word list),
+   generated offline by Tools~/DictGen. The word data is unmodified ICU data;
+   no ICU source code is copied. The segmentation algorithm is an independent
+   implementation of the publicly-described dictionary-based break iteration.
 
 Copyright (C) 2016 and later: Unicode, Inc. and others.
 Copyright (c) 2006-2015 International Business Machines Corporation,
@@ -385,3 +398,39 @@ authorization of the copyright holder.
 ================================================================================
 End of Third-Party Notices
 ================================================================================
+
+
+
+================================================================================
+9. msdfgen (Multi-channel signed distance field generator)
+================================================================================
+
+   Website:   https://github.com/Chlumsky/msdfgen
+   Author:    Viktor Chlumsky
+   License:   MIT License
+   Usage:     Algorithms for the managed MSDF glyph generator (OpenGlyph
+              Runtime/FontCore/Msdf/): edge signed-distance queries, edge
+              coloring, multi-channel field generation and error correction.
+              Ported to C# from the original C++ (edge-segments.cpp,
+              edge-coloring.cpp, msdfgen.cpp, equation-solver.cpp) and adapted
+              to OpenGlyph's GlyphOutline model. No original source is bundled.
+
+Copyright (c) 2016 - 2024 Viktor Chlumsky
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

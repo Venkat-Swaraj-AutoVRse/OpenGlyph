@@ -1,0 +1,649 @@
+name: native
+
+# Builds the OpenGlyph native layer (unitext_native, and the editor DLL where it applies)
+# for every shipped platform, runs the parity harness where the runner can execute the DLL,
+# verifies architecture + exported ut_* symbol counts, bundles the static targets into
+# SELF-CONTAINED archives (FreeType + HarfBuzz + libpng + zlib merged in, like the originals),
+# link-smoke-tests every bundled archive, uploads per-platform artifacts, and assembles them
+# into the Plugins/ tree.
+#
+# All jobs pin CMake 3.31.x (Blend2D's flag detection recurses on CMake >= 4; the runtime
+# links Blend2D via -DOPENGLYPH_ENABLE_BLEND2D=ON). Output names match Plugins/<platform>/ exactly.
+#
+# Symbol-count contract (verified in CI, fail otherwise):
+#   runtime libraries (unitext_native): 117 exported/defined ut_* symbols
+#   editor  libraries (unitext_native_editor): 8 exported/defined symbols
+
+on:
+  workflow_dispatch: {}
+  push:
+    paths:
+      - "NativeSource~/**"
+      - ".github/workflows/native.yml"
+
+env:
+  CMAKE_VERSION: "3.31.6"
+  UT_RUNTIME_SYMS: "117"
+  UT_EDITOR_SYMS: "8"
+
+jobs:
+  # ---------------------------------------------------------------- Windows x64 / ARM64
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, ARM64]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Configure
+        run: >
+          cmake -S "NativeSource~" -B build -G "Visual Studio 17 2022"
+          -A ${{ matrix.arch == 'x64' && 'x64' || 'ARM64' }}
+          -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Stage outputs
+        shell: pwsh
+        run: |
+          $d = if ('${{ matrix.arch }}' -eq 'x64') { 'Windows/x86_64' } else { 'Windows/ARM64' }
+          New-Item -ItemType Directory -Force "out/$d" | Out-Null
+          Copy-Item build/Release/unitext_native.dll "out/$d/"
+          if ('${{ matrix.arch }}' -eq 'x64') { Copy-Item build/Release/unitext_native_editor.dll "out/$d/" }
+      - name: Verify arch + ut_* symbol count
+        shell: pwsh
+        run: |
+          # Resolve dumpbin from the MSVC dev shell.
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsroot  = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $dumpbin = Get-ChildItem -Path "$vsroot\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
+                     Where-Object { $_.FullName -match '\\Hostx64\\x64\\' } | Select-Object -First 1 -Expand FullName
+          if (-not $dumpbin) { $dumpbin = (Get-ChildItem -Path "$vsroot\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Select-Object -First 1 -Expand FullName) }
+          Write-Output "dumpbin: $dumpbin"
+
+          function Check-Dll($path, $expectArch, $expectSyms, $kind) {
+            Write-Output "=== $path ==="
+            $hdr = & $dumpbin /headers $path | Select-String -Pattern 'machine \(' | Select-Object -First 1
+            Write-Output "  arch: $hdr"
+            if ($hdr -notmatch $expectArch) { throw "arch mismatch: expected $expectArch in '$hdr'" }
+            # Parse ONLY the export-table data rows: "<ordinal> <hint> <RVA> <name>". Taking the
+            # 4th column as the symbol name avoids matching the DLL's own file name (e.g.
+            # 'unitext_native.dll' in the summary) that a broad word-regex would wrongly count.
+            $names = & $dumpbin /exports $path |
+              Select-String -Pattern '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]{8}\s+(\S+)' |
+              ForEach-Object { $_.Matches[0].Groups[1].Value }
+            if ($kind -eq 'runtime') {
+              $set = $names | Where-Object { $_ -match '^ut_[A-Za-z0-9_]+$' }
+            } else {
+              $editor = 'get_font_codepoints','get_glyph_count','shape_text','subset_font','subset_font_remove_codepoints','subset_font_remove_glyphs','unitext_free_dialog_result','unitext_open_files_dialog'
+              $set = $names | Where-Object { $editor -contains $_ }
+            }
+            $set = $set | Sort-Object -Unique
+            Write-Output ("  exported $kind symbols: " + $set.Count)
+            if ($set.Count -ne $expectSyms) {
+              $set | ForEach-Object { Write-Output "    $_" }
+              throw "symbol count mismatch: expected $expectSyms, got $($set.Count)"
+            }
+          }
+          $d = if ('${{ matrix.arch }}' -eq 'x64') { 'Windows/x86_64' } else { 'Windows/ARM64' }
+          $expectArch = if ('${{ matrix.arch }}' -eq 'x64') { 'x64' } else { 'ARM64|AA64' }
+          Check-Dll "out/$d/unitext_native.dll" $expectArch ([int]$env:UT_RUNTIME_SYMS) 'runtime'
+          if ('${{ matrix.arch }}' -eq 'x64') {
+            Check-Dll "out/$d/unitext_native_editor.dll" 'x64' ([int]$env:UT_EDITOR_SYMS) 'editor'
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-${{ matrix.arch }}
+          path: out/
+      - name: Parity (x64 only; ARM64 cannot execute on x64 runner)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $orig = "Plugins/Windows/x86_64/unitext_native.dll"
+          Copy-Item $orig "$env:RUNNER_TEMP/unitext_native_orig.dll"
+          # Build-then-run (same pattern on all three OSes): build the harness, then run the
+          # built parity.dll with `dotnet <dll>` so no per-arch apphost is launched.
+          dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$env:RUNNER_TEMP/parity-bin"
+          # Hard gate: parity compares the committed Plugins/ binary (the accepted rebuilt
+          # baseline) against the freshly built DLL and must pass with 0 failures. The
+          # variable-font (mm_var / variations) checks need a REAL variable font — pass the
+          # tracked RobotoFlex-VF.ttf as the varFont arg. Defaults/ (static fonts) stays the
+          # fonts dir for the broad FT/HB/SDF/bitmap coverage. pwsh stops the job on a non-zero
+          # exit (the harness returns the failure count's sign via exit code 1).
+          dotnet "$env:RUNNER_TEMP/parity-bin/parity.dll" `
+            "$env:RUNNER_TEMP/unitext_native_orig.dll" `
+            "build/Release/unitext_native.dll" `
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
+          if ($LASTEXITCODE -ne 0) { throw "parity failed (exit $LASTEXITCODE)" }
+
+  # ---------------------------------------------------------------- Linux x64 / ARM64
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, ARM64]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          if [ "${{ matrix.arch }}" = "ARM64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          fi
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Configure
+        run: |
+          EXTRA=""
+          if [ "${{ matrix.arch }}" = "ARM64" ]; then
+            EXTRA="-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64"
+          fi
+          cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON $EXTRA
+      - name: Build
+        run: cmake --build build
+      - name: Stage outputs
+        run: |
+          D=$([ "${{ matrix.arch }}" = "x64" ] && echo Linux/x86_64 || echo Linux/ARM64)
+          mkdir -p "out/$D"
+          cp build/libunitext_native.so "out/$D/"
+          [ "${{ matrix.arch }}" = "x64" ] && cp build/libunitext_native_editor.so "out/$D/" || true
+      - name: Verify arch + ut_* symbol count
+        run: |
+          set -euo pipefail
+          NM=nm; OBJDUMP=objdump
+          EXPECT_ARCH="x86-64"
+          if [ "${{ matrix.arch }}" = "ARM64" ]; then NM=aarch64-linux-gnu-nm; OBJDUMP=aarch64-linux-gnu-objdump; EXPECT_ARCH="aarch64"; fi
+          D=$([ "${{ matrix.arch }}" = "x64" ] && echo Linux/x86_64 || echo Linux/ARM64)
+          check_so() {
+            local f="$1" expect="$2"
+            echo "=== $f ==="
+            file "$f"
+            # Capture arch descriptors to a variable first; piping into `grep -q` under
+            # `set -o pipefail` makes grep's early exit SIGPIPE the producer and fail the
+            # pipeline on a genuine MATCH.
+            local arch_info
+            arch_info="$(file "$f"; $OBJDUMP -f "$f" 2>/dev/null | grep -E 'architecture' || true)"
+            echo "$arch_info"
+            if ! printf '%s' "$arch_info" | grep -qiE "$EXPECT_ARCH"; then echo "ARCH FAIL: $f"; exit 1; fi
+            # Exported DEFINED symbols from the .dynsym table (-D). The version script tags
+            # dynamic symbols as `name@@OPENGLYPH_1.0`, so take the last field, strip the
+            # @version suffix, then match the bare name and dedup.
+            local n
+            n=$($NM -D --defined-only "$f" \
+                 | awk '{print $NF}' | sed 's/@.*//' \
+                 | grep -E '^(ut_[A-Za-z0-9_]+|get_glyph_count|shape_text|subset_font([A-Za-z_]*)?|unitext_[A-Za-z_]+|get_font_codepoints)$' \
+                 | sort -u | wc -l | tr -d ' ')
+            echo "  exported symbols: $n (expect $expect)"
+            if [ "$n" -ne "$expect" ]; then
+              echo "--- actual matching symbols:"
+              $NM -D --defined-only "$f" | awk '{print $NF}' | sed 's/@.*//' \
+                | grep -E '^(ut_|get_glyph_count|shape_text|subset_font|unitext_|get_font_codepoints)' | sort -u
+              echo "SYMBOL COUNT FAIL"; exit 1
+            fi
+          }
+          check_so "out/$D/libunitext_native.so" "$UT_RUNTIME_SYMS"
+          if [ "${{ matrix.arch }}" = "x64" ]; then check_so "out/$D/libunitext_native_editor.so" "$UT_EDITOR_SYMS"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-${{ matrix.arch }}
+          path: out/
+      - name: Parity (native x64 only)
+        if: matrix.arch == 'x64'
+        run: |
+          cp Plugins/Linux/x86_64/libunitext_native.so "$RUNNER_TEMP/libunitext_native_orig.so"
+          # Build-then-run (same pattern on all three OSes): build the harness, then run the
+          # built parity.dll with `dotnet <dll>` so no per-arch apphost is launched.
+          dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$RUNNER_TEMP/parity-bin"
+          # Hard gate: parity compares the committed Plugins/ binary (the accepted rebuilt
+          # baseline) against the freshly built .so and must pass with 0 failures. Variable-font
+          # checks use the tracked RobotoFlex-VF.ttf; Defaults/ stays the fonts dir for static
+          # coverage. No `|| true` — the job fails on a non-zero harness exit (bash -e + the
+          # explicit check below).
+          dotnet "$RUNNER_TEMP/parity-bin/parity.dll" \
+            "$RUNNER_TEMP/libunitext_native_orig.so" \
+            "build/libunitext_native.so" \
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
+          rc=$?; if [ $rc -ne 0 ]; then echo "parity failed (exit $rc)"; exit $rc; fi
+
+  # ---------------------------------------------------------------- macOS universal
+  # Built as TWO single-arch passes then lipo'd. Blend2D's JIT + embedded asmjit arch
+  # detection is unambiguous per single arch (as on Windows x64 / Linux x64+ARM64), but a
+  # single universal (arm64;x86_64) pass leaves BLEND2D_ARCH_* undetected and the embedded
+  # asmjit backend is not compiled into every slice -> undefined asmjit::CodeHolder symbols
+  # at link / "pipecompiler_a64.cpp.o has no symbols" for x86_64. Separate passes + lipo
+  # keeps Blend2D ON on both slices and produces the same universal dylib.
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Build arm64 slice
+        run: |
+          cmake -S "NativeSource~" -B build-arm64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON \
+            "-DCMAKE_OSX_ARCHITECTURES=arm64"
+          cmake --build build-arm64
+      - name: Build x86_64 slice
+        run: |
+          cmake -S "NativeSource~" -B build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON \
+            "-DCMAKE_OSX_ARCHITECTURES=x86_64"
+          cmake --build build-x64
+      - name: Lipo universal + stage outputs
+        run: |
+          mkdir -p out/macOS
+          lipo -create \
+            build-arm64/libunitext_native.dylib \
+            build-x64/libunitext_native.dylib \
+            -output out/macOS/libunitext_native.dylib
+          lipo -create \
+            build-arm64/libunitext_native_editor.dylib \
+            build-x64/libunitext_native_editor.dylib \
+            -output out/macOS/libunitext_native_editor.dylib
+          lipo -info out/macOS/libunitext_native.dylib
+      - name: Verify arch + ut_* symbol count
+        run: |
+          set -euo pipefail
+          check_dylib() {
+            local f="$1" expect="$2"
+            echo "=== $f ==="
+            file "$f"
+            lipo -info "$f"
+            # universal: must carry both arm64 and x86_64 (capture first; grep -q + pipefail
+            # SIGPIPE's lipo and would fail on a MATCH).
+            local li
+            li="$(lipo -info "$f")"
+            printf '%s' "$li" | grep -q "arm64"  || { echo "ARCH FAIL: no arm64 in $f"; exit 1; }
+            printf '%s' "$li" | grep -q "x86_64" || { echo "ARCH FAIL: no x86_64 in $f"; exit 1; }
+            # Exported DEFINED external symbols (-gU). A universal binary lists each symbol
+            # once PER ARCH, so take the name field, strip the Mach-O leading underscore, and
+            # dedup before counting.
+            local n
+            n=$(nm -gU "$f" | awk '{print $NF}' | sed 's/^_//' \
+                 | grep -E '^(ut_[A-Za-z0-9_]+|get_glyph_count|shape_text|subset_font([A-Za-z_]*)?|unitext_[A-Za-z_]+|get_font_codepoints)$' \
+                 | sort -u | wc -l | tr -d ' ')
+            echo "  exported symbols: $n (expect $expect)"
+            if [ "$n" -ne "$expect" ]; then
+              echo "--- actual matching symbols:"
+              nm -gU "$f" | awk '{print $NF}' | sed 's/^_//' \
+                | grep -E '^(ut_|get_glyph_count|shape_text|subset_font|unitext_|get_font_codepoints)' | sort -u
+              echo "SYMBOL COUNT FAIL"; exit 1
+            fi
+          }
+          check_dylib out/macOS/libunitext_native.dylib "$UT_RUNTIME_SYMS"
+          check_dylib out/macOS/libunitext_native_editor.dylib "$UT_EDITOR_SYMS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-macos
+          path: out/
+      - name: Parity (arm64 runner executes the arm64 slice)
+        run: |
+          cp Plugins/macOS/libunitext_native.dylib "$RUNNER_TEMP/orig.dylib"
+          # Build-then-run (same pattern on all three OSes): build the harness, then run the
+          # built parity.dll with `dotnet <dll>`. The csproj is AnyCPU, so parity.dll loads
+          # under the arm64 runner's .NET host (the old x64-pinned `dotnet run` apphost raised
+          # System.IO.FileLoadException 'parity', exit 134, and never ran a single check).
+          dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$RUNNER_TEMP/parity-bin"
+          # Hard gate: parity compares the committed Plugins/ binary (the accepted rebuilt
+          # baseline) against the freshly built arm64 .dylib and must pass with 0 failures.
+          # Variable-font checks use the tracked RobotoFlex-VF.ttf; Defaults/ stays the fonts
+          # dir for static coverage. No `|| true` — the job fails on a non-zero harness exit.
+          dotnet "$RUNNER_TEMP/parity-bin/parity.dll" \
+            "$RUNNER_TEMP/orig.dylib" "build-arm64/libunitext_native.dylib" \
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
+          rc=$?; if [ $rc -ne 0 ]; then echo "parity failed (exit $rc)"; exit $rc; fi
+
+  # ---------------------------------------------------------------- Android (4 ABIs)
+  android:
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
+    runs-on: ubuntu-22.04
+    env:
+      NDK_VERSION: "26.3.11579264"   # NDK r26d, pinned
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Install pinned NDK
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;${NDK_VERSION}"
+      - name: Configure
+        run: >
+          cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=${ANDROID_HOME}/ndk/${NDK_VERSION}/build/cmake/android.toolchain.cmake
+          -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-24
+          -DOPENGLYPH_ENABLE_BLEND2D=ON
+      - name: Build
+        run: cmake --build build
+      - name: Stage outputs
+        run: |
+          mkdir -p "out/Android/${{ matrix.abi }}"
+          cp build/libunitext_native.so "out/Android/${{ matrix.abi }}/"
+      - name: Verify arch + ut_* symbol count
+        run: |
+          set -euo pipefail
+          NM="$(find ${ANDROID_HOME}/ndk/${NDK_VERSION} -name 'llvm-nm' | head -1)"
+          OBJDUMP="$(find ${ANDROID_HOME}/ndk/${NDK_VERSION} -name 'llvm-objdump' | head -1)"
+          f="out/Android/${{ matrix.abi }}/libunitext_native.so"
+          echo "=== $f ==="
+          file "$f"
+          "$OBJDUMP" -f "$f" | grep -iE 'architecture|file format' || true
+          case "${{ matrix.abi }}" in
+            arm64-v8a)   EXPECT='aarch64|elf64-littleaarch64' ;;
+            armeabi-v7a) EXPECT='arm|elf32-littlearm' ;;
+            x86)         EXPECT='i386|elf32-i386' ;;
+            x86_64)      EXPECT='x86-64|x86_64|elf64-x86-64' ;;
+          esac
+          # Capture to a var first — `grep -q` early-exit + `set -o pipefail` fails the
+          # pipeline on a MATCH when the producer is SIGPIPE'd mid-stream.
+          arch_info="$(file "$f"; "$OBJDUMP" -f "$f" 2>/dev/null | grep -iE 'architecture|file format' || true)"
+          echo "$arch_info"
+          if ! printf '%s' "$arch_info" | grep -qiE "$EXPECT"; then echo "ARCH FAIL for ${{ matrix.abi }}"; exit 1; fi
+          n=$("$NM" -D --defined-only "$f" \
+               | awk '{print $NF}' | sed 's/@.*//' \
+               | grep -E '^(ut_[A-Za-z0-9_]+)$' | sort -u | wc -l | tr -d ' ')
+          echo "  exported ut_* symbols: $n (expect $UT_RUNTIME_SYMS)"
+          if [ "$n" -ne "$UT_RUNTIME_SYMS" ]; then
+            echo "--- actual ut_* symbols:"
+            "$NM" -D --defined-only "$f" | awk '{print $NF}' | sed 's/@.*//' | grep -E '^ut_' | sort -u
+            echo "SYMBOL COUNT FAIL"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-android-${{ matrix.abi }}
+          path: out/
+
+  # ---------------------------------------------------------------- iOS (xcframework) + tvOS
+  # STATIC targets must ship SELF-CONTAINED archives (FreeType + HarfBuzz + libpng + zlib
+  # merged into one .a), like the originals, so they link in a Unity player. CMake does NOT
+  # merge a static library's PRIVATE link deps into its own .a, so the plain target archive is
+  # a thin ~31 KB file of only ut_* objects. We merge every dependency .a produced under the
+  # build tree with `libtool -static`. Blend2D is OFF for these targets, so there is no
+  # blend2d/asmjit archive to exclude (the exclusion filter below is belt-and-suspenders).
+  apple_embedded:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Build iOS device (arm64, STATIC)
+        run: >
+          cmake -S "NativeSource~" -B build-ios -G Xcode
+          -DCMAKE_SYSTEM_NAME=iOS "-DCMAKE_OSX_ARCHITECTURES=arm64"
+          -DCMAKE_OSX_SYSROOT=iphoneos -DOPENGLYPH_ENABLE_BLEND2D=OFF &&
+          cmake --build build-ios --config Release
+      - name: Build iOS simulator (arm64 + x86_64, STATIC)
+        run: >
+          cmake -S "NativeSource~" -B build-iossim -G Xcode
+          -DCMAKE_SYSTEM_NAME=iOS "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+          -DCMAKE_OSX_SYSROOT=iphonesimulator -DOPENGLYPH_ENABLE_BLEND2D=OFF &&
+          cmake --build build-iossim --config Release
+      - name: Build tvOS (STATIC)
+        run: |
+          TVOS_SDK="$(xcrun --sdk appletvos --show-sdk-path)"
+          echo "Resolved tvOS SDK: $TVOS_SDK"
+          cmake -S "NativeSource~" -B build-tvos -G Xcode \
+            -DCMAKE_SYSTEM_NAME=tvOS "-DCMAKE_OSX_ARCHITECTURES=arm64" \
+            -DCMAKE_OSX_SYSROOT="$TVOS_SDK" -DOPENGLYPH_ENABLE_BLEND2D=OFF
+          cmake --build build-tvos --config Release
+      - name: Bundle self-contained archives (libtool -static)
+        run: |
+          set -euo pipefail
+          # Collect every static archive under a build tree EXCEPT blend2d/asmjit (disabled here),
+          # merge the lot into one self-contained archive with libtool -static.
+          bundle() {
+            local tree="$1" out="$2"
+            local libs
+            # Bundle exactly what the runtime STATIC target links: libunitext_native.a +
+            # freetype + harfbuzz + libpng + zlib. Exclude harfbuzz-subset (editor-only, and
+            # it duplicates the CFF/number TUs already in libharfbuzz.a) and blend2d/asmjit
+            # (disabled for these targets).
+            libs=$(find "$tree" -name '*.a' \
+                     ! -iname '*harfbuzz-subset*' \
+                     ! -iname '*blend2d*' ! -iname '*asmjit*' | sort -u)
+            echo "--- bundling into $out from:"; echo "$libs"
+            # shellcheck disable=SC2086
+            libtool -static -o "$out" $libs
+            echo "--- bundled $out:"; ls -l "$out"
+          }
+          mkdir -p "$RUNNER_TEMP/bundled"
+          bundle build-ios    "$RUNNER_TEMP/bundled/libunitext_native_device.a"
+          bundle build-iossim "$RUNNER_TEMP/bundled/libunitext_native_sim.a"
+          bundle build-tvos   "$RUNNER_TEMP/bundled/libunitext_native_tvos.a"
+      - name: Link smoke test (device / simulator / tvOS)
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/smoke.c" <<'EOF'
+          #include <stddef.h>
+          /* Reference a handful of ut_* exports; forward-declare to avoid header deps. */
+          extern void *ut_ft_init(void);
+          extern void *ut_hb_buffer_create(void);
+          extern int   ut_ft_get_outline_data(void);
+          int main(void) {
+            volatile void *a = (void*)&ut_ft_init;
+            volatile void *b = (void*)&ut_hb_buffer_create;
+            volatile void *c = (void*)&ut_ft_get_outline_data;
+            return (a && b && c) ? 0 : 1;
+          }
+          EOF
+          smoke() {
+            local sdk="$1" arch="$2" lib="$3" tag="$4"
+            local sysroot; sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
+            echo "=== link smoke: $tag ($sdk/$arch) against $lib ==="
+            # Link an executable against ONLY the bundled archive. main() references three ut_*
+            # entry points, so the linker pulls their objects and must resolve every transitive
+            # FreeType/HarfBuzz/libpng/zlib symbol they reach from the SAME archive — a missing
+            # BUNDLED dependency symbol fails HERE. HarfBuzz's Apple CoreText backend references
+            # CoreFoundation/CoreGraphics/CoreText (OS frameworks a real Unity player links too;
+            # they are NOT bundled), so provide them. (No -all_load: forcing every object in
+            # surfaces harfbuzz's benign internal duplicate TUs, which on-demand linking never
+            # pulls, and is not what a Unity player link does.)
+            clang -isysroot "$sysroot" -arch "$arch" \
+              -target "$arch-apple-$tag" \
+              "$RUNNER_TEMP/smoke.c" -o "$RUNNER_TEMP/smoke_$tag" \
+              "$lib" -lc++ \
+              -framework CoreFoundation -framework CoreGraphics -framework CoreText \
+              2> "$RUNNER_TEMP/smoke_$tag.err" || { echo "LINK SMOKE FAIL ($tag):"; cat "$RUNNER_TEMP/smoke_$tag.err"; exit 1; }
+            if grep -qiE 'undefined symbol|Undefined symbols' "$RUNNER_TEMP/smoke_$tag.err"; then
+              echo "LINK SMOKE FAIL ($tag): undefined symbols"; cat "$RUNNER_TEMP/smoke_$tag.err"; exit 1
+            fi
+            echo "  OK ($tag)"
+          }
+          smoke iphoneos        arm64  "$RUNNER_TEMP/bundled/libunitext_native_device.a" ios
+          smoke iphonesimulator arm64  "$RUNNER_TEMP/bundled/libunitext_native_sim.a"    ios-simulator
+          smoke appletvos       arm64  "$RUNNER_TEMP/bundled/libunitext_native_tvos.a"   tvos
+      - name: Verify arch + ut_* symbol count (bundled archives)
+        run: |
+          set -euo pipefail
+          verify_a() {
+            local f="$1" tag="$2"
+            echo "=== $f ($tag) ==="
+            file "$f"
+            lipo -info "$f" || true
+            # Count DEFINED external ut_* symbols across the archive. A fat archive lists each
+            # symbol once per arch, so strip the Mach-O leading underscore and dedup by name.
+            local n
+            n=$(nm -gU "$f" 2>/dev/null | awk '{print $NF}' | sed 's/^_//' \
+                 | grep -E '^ut_[A-Za-z0-9_]+$' | sort -u | wc -l | tr -d ' ')
+            echo "  defined ut_* symbols: $n (expect $UT_RUNTIME_SYMS)"
+            if [ "$n" -ne "$UT_RUNTIME_SYMS" ]; then
+              nm -gU "$f" 2>/dev/null | awk '{print $NF}' | sed 's/^_//' | grep -E '^ut_' | sort -u
+              echo "SYMBOL COUNT FAIL ($tag)"; exit 1
+            fi
+          }
+          verify_a "$RUNNER_TEMP/bundled/libunitext_native_device.a" ios-device
+          verify_a "$RUNNER_TEMP/bundled/libunitext_native_sim.a"    ios-sim
+          # device slice is arm64-only, sim is arm64+x86_64 (capture; grep -q + pipefail would
+          # SIGPIPE lipo and fail on a MATCH).
+          sim_arch="$(lipo -info "$RUNNER_TEMP/bundled/libunitext_native_sim.a")"
+          printf '%s' "$sim_arch" | grep -q x86_64 || { echo "sim archive missing x86_64"; exit 1; }
+          verify_a "$RUNNER_TEMP/bundled/libunitext_native_tvos.a"   tvos
+      - name: Package xcframework + stage outputs
+        run: |
+          set -euo pipefail
+          mkdir -p out/iOS out/tvOS
+          # xcframework layout matches Plugins/iOS/libunitext_native.xcframework/ with the
+          # shipped slice names/identifiers (ios-arm64 / ios-arm64_x86_64-simulator).
+          xcodebuild -create-xcframework \
+            -library "$RUNNER_TEMP/bundled/libunitext_native_device.a" \
+            -library "$RUNNER_TEMP/bundled/libunitext_native_sim.a" \
+            -output "out/iOS/libunitext_native.xcframework"
+          echo "--- xcframework contents:"; find out/iOS/libunitext_native.xcframework -type f
+          cp "$RUNNER_TEMP/bundled/libunitext_native_tvos.a" out/tvOS/libunitext_native.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-apple-embedded
+          path: out/
+
+  # ---------------------------------------------------------------- WebGL (emscripten, STATIC)
+  # Same self-contained requirement as the Apple static targets: merge every dependency .a
+  # (FreeType + HarfBuzz + libpng + zlib) with the ut_* objects into ONE archive via emar.
+  # Blend2D is OFF on wasm, so there is no blend2d/asmjit archive to exclude.
+  webgl:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Setup emsdk (pinned)
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "3.1.64"
+      - name: Configure + build (static .a)
+        run: |
+          emcmake cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGLYPH_ENABLE_BLEND2D=OFF   # Blend2D JIT unsupported on wasm; COLR uses the JS path
+          cmake --build build
+      - name: Bundle self-contained archive (emar MRI)
+        run: |
+          set -euo pipefail
+          LIBS=$(find build -name '*.a' ! -iname '*harfbuzz-subset*' ! -iname '*blend2d*' ! -iname '*asmjit*' | sort -u)
+          echo "--- merging into libunitext_native.a from:"; echo "$LIBS"
+          # Build an MRI script: create the output, add every member archive, save.
+          MRI="$RUNNER_TEMP/merge.mri"
+          echo "create $RUNNER_TEMP/libunitext_native.a" > "$MRI"
+          for a in $LIBS; do echo "addlib $a" >> "$MRI"; done
+          echo "save" >> "$MRI"
+          echo "end"  >> "$MRI"
+          cat "$MRI"
+          emar -M < "$MRI"
+          emranlib "$RUNNER_TEMP/libunitext_native.a" || true
+          ls -l "$RUNNER_TEMP/libunitext_native.a"
+      - name: Stage outputs
+        run: |
+          mkdir -p out/WebGL
+          cp "$RUNNER_TEMP/libunitext_native.a" out/WebGL/libunitext_native.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-webgl
+          path: out/
+      - name: Link smoke test (emcc)
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/smoke.c" <<'EOF'
+          extern void *ut_ft_init(void);
+          extern void *ut_hb_buffer_create(void);
+          extern int   ut_ft_get_outline_data(void);
+          int main(void) {
+            volatile void *a = (void*)&ut_ft_init;
+            volatile void *b = (void*)&ut_hb_buffer_create;
+            volatile void *c = (void*)&ut_ft_get_outline_data;
+            return (a && b && c) ? 0 : 1;
+          }
+          EOF
+          # Link against ONLY the bundled archive. main() references three ut_* entry points,
+          # so wasm-ld pulls their objects and must resolve every transitive FreeType/HarfBuzz/
+          # libpng/zlib symbol from the SAME archive; a missing dependency symbol fails here.
+          # (No --whole-archive: forcing every object in surfaces harfbuzz's benign internal
+          # duplicate TUs, which on-demand linking never pulls.)
+          emcc "$RUNNER_TEMP/smoke.c" -o "$RUNNER_TEMP/smoke.js" \
+            "$RUNNER_TEMP/libunitext_native.a" \
+            2> "$RUNNER_TEMP/smoke.err" || { echo "LINK SMOKE FAIL (webgl):"; cat "$RUNNER_TEMP/smoke.err"; exit 1; }
+          if grep -qiE 'undefined symbol' "$RUNNER_TEMP/smoke.err"; then
+            echo "LINK SMOKE FAIL (webgl): undefined symbols"; cat "$RUNNER_TEMP/smoke.err"; exit 1
+          fi
+          echo "  OK (webgl)"
+      - name: Verify arch + ut_* symbol count
+        run: |
+          # NOTE: no `set -o pipefail` here. `llvm-nm`/`emar` over an ar archive can return
+          # non-zero or get SIGPIPE'd by a downstream `head`, which under pipefail+`set -e`
+          # would abort the step on an otherwise-successful probe. Guard each check explicitly.
+          set -u
+          f="$RUNNER_TEMP/libunitext_native.a"
+          echo "=== $f ==="
+          file "$f"
+          # Extract one member object and confirm the unambiguous WebAssembly magic (\0asm).
+          mkdir -p "$RUNNER_TEMP/arxt"
+          member_name="$(emar t "$f" 2>/dev/null | grep -E '\.o$' | head -1)"
+          ( cd "$RUNNER_TEMP/arxt" && emar x "$f" "$member_name" )
+          member="$RUNNER_TEMP/arxt/$member_name"
+          echo "probe member: $member"
+          file "$member" || true
+          magic="$(head -c 4 "$member" | od -An -tx1 | tr -d ' \n')"
+          echo "member magic: $magic (wasm = 0061736d)"
+          if [ "$magic" != "0061736d" ]; then echo "ARCH FAIL: member not WebAssembly (\\0asm)"; exit 1; fi
+          # llvm-nm over the emscripten AR archive emits nothing on this toolchain, so extract
+          # every member object and run nm on the objects (nm reads a wasm .o reliably). Count
+          # ut_ identifiers deduped. Try emnm, then llvm-nm, as the symbol lister.
+          rm -rf "$RUNNER_TEMP/allobj"; mkdir -p "$RUNNER_TEMP/allobj"
+          ( cd "$RUNNER_TEMP/allobj" && emar x "$f" )
+          NMTOOL=""
+          for cand in emnm llvm-nm; do if command -v "$cand" >/dev/null 2>&1; then NMTOOL="$cand"; break; fi; done
+          echo "nm tool: $NMTOOL"
+          : > "$RUNNER_TEMP/wnm.txt"
+          for o in "$RUNNER_TEMP/allobj"/*.o; do
+            "$NMTOOL" --defined-only "$o" 2>/dev/null >> "$RUNNER_TEMP/wnm.txt" || "$NMTOOL" "$o" 2>/dev/null >> "$RUNNER_TEMP/wnm.txt" || true
+          done
+          echo "--- nm sample (first 5 of $(wc -l < "$RUNNER_TEMP/wnm.txt") lines):"
+          sed -n '1,5p' "$RUNNER_TEMP/wnm.txt" || true
+          # Keep only DEFINED symbols (drop type U/u/w = undefined/weak-undef), then pull ut_ names.
+          n="$(grep -viE '^[0-9a-fA-F ]* [Uuw] ' "$RUNNER_TEMP/wnm.txt" | grep -oE '\but_[A-Za-z0-9_]+\b' | sort -u | wc -l | tr -d ' ')"
+          echo "  defined ut_* symbols: $n (expect $UT_RUNTIME_SYMS)"
+          if [ "$n" != "$UT_RUNTIME_SYMS" ]; then
+            echo "--- actual ut_* symbols:"
+            grep -viE '^[0-9a-fA-F ]* [Uuw] ' "$RUNNER_TEMP/wnm.txt" | grep -oE '\but_[A-Za-z0-9_]+\b' | sort -u
+            echo "SYMBOL COUNT FAIL"; exit 1
+          fi
+
+  # ---------------------------------------------------------------- Assemble Plugins/ tree
+  assemble:
+    needs: [windows, linux, macos, android, apple_embedded, webgl]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Lay out Plugins/ tree
+        run: |
+          set -euo pipefail
+          mkdir -p Plugins
+          # every job staged under out/<platform>/...; merge each artifact's out/ tree into Plugins/
+          for a in artifacts/*/; do
+            if [ -d "$a" ]; then cp -a "$a"* Plugins/ 2>/dev/null || true; fi
+          done
+          echo "=== assembled Plugins/ tree ==="
+          find Plugins -type f | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugins-tree
+          path: Plugins/

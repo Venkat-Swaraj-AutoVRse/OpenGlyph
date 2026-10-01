@@ -71,6 +71,34 @@ Select a UniTextFont asset to configure in the Inspector:
 
 After changing settings, click **Apply** to rebuild the atlas.
 
+### 2.3 Pixel-Perfect Rendering (pixel & bitmap fonts)
+
+Pixel fonts (e.g. Silkscreen, Press Start 2P) and bitmap-strike fonts look crisp only when every
+glyph edge lands exactly on a device pixel. Enabling **Pixel Perfect** on a font asset makes
+OpenGlyph render them with no blur and no half-pixel misalignment:
+
+- **Detection.** OpenGlyph analyses the font on load (`UniTextFont.PixelFont`). It reports a
+  *pixel grid* when the glyph outlines lie on a regular lattice — the coarsest lattice gives the
+  font's **native pixels-per-em** — and/or *bitmap strikes* (EBDT/CBDT/sbix) with their fixed
+  sizes. A normal vector font (e.g. NotoSans) is never classified as a pixel font, so it is
+  unaffected. Detection uses the native outline export when present and degrades gracefully (no
+  grid claim) when it is not.
+- **Rendering.** When Pixel Perfect is on *and* the font is actually a pixel/bitmap font
+  (`PixelPerfectActive`), glyphs are rasterised in **Mono** (1-bit, texels only 0 or 255 — no
+  anti-aliasing) at the native size or an **integer multiple** of it, into a **point-filtered atlas
+  with no mipmaps**. Glyph quad corners and the text origin are **snapped to the device pixel grid**,
+  accounting for the canvas `scaleFactor`.
+- **Integer scales only.** The sampling size is chosen as the nearest integer multiple of the
+  native pixels-per-em (`ChoosePixelPerfectPpem`). At canvas scale factors 1 and 2 (and any integer),
+  edges are exactly on device pixels.
+- **Non-integer scale factor (e.g. 1.5) — documented fallback.** Corners are still snapped to the
+  nearest **device** pixel (`round(local * scaleFactor) / scaleFactor`), so the result stays crisp on
+  the physical grid; the trade-off is a coarser local-space snap step (1 / scaleFactor local units).
+  Crispness is preserved; only local quantisation is coarser than at integer scales.
+
+SDF, MSDF and Smooth modes are completely unaffected — Pixel Perfect only engages for a font that is
+both flagged and detected as a pixel/bitmap font.
+
 The Inspector also shows:
 - **Font Data Status** — whether font bytes are embedded
 - **Runtime Data** — glyph count, character count, atlas memory
@@ -256,6 +284,56 @@ Create optimized subset fonts by keeping or removing specific character ranges. 
 | European app, no Asian scripts | Remove | Devanagari, Bengali, Tamil, Thai, CJK, etc. |
 | Localized to Arabic + English | Keep | Basic Latin + Arabic + Digits + Punctuation |
 | Remove unused emoji from Noto | Remove | Custom text with emoji codepoints |
+
+---
+
+## 2.9 Word segmentation (Thai, Lao, Khmer, Myanmar)
+
+Thai, Lao, Khmer and Myanmar are written **without spaces between words**
+(Unicode line-break class **SA**, "complex context"). Plain UAX #14 line
+breaking therefore treats a whole run as one unbreakable token and cannot wrap
+it. OpenGlyph ships an opt-in **dictionary segmenter** that finds word
+boundaries inside such runs so lines break at real words — never mid-word and
+never inside a grapheme cluster (a base plus its vowel signs / tone marks, or a
+Khmer coeng stack).
+
+### Enabling it (opt-in, zero cost when unused)
+
+Assign a per-script dictionary asset under
+**Project Settings → UniText → Word Segmentation Dictionaries**. The dictionary
+`.bytes` assets live under `Dictionaries/` **outside any `Resources` folder**, so
+a project that assigns none ships no dictionary bytes and behaves exactly as
+before (a run gets no interior breaks), emitting a single one-time warning per
+unconfigured SA script it actually encounters. Assign only the scripts you need.
+
+The segmenter is a faithful re-implementation of ICU's dictionary break
+iteration (ICU4C `dictbe.cpp`): a forward scan with a 3-word lookahead,
+per-script begin/end-of-word sets and root/prefix combine thresholds, with every
+emitted boundary filtered to a UAX #29 grapheme-cluster boundary.
+
+### Accuracy and the per-script F1 gates
+
+Segmentation quality is measured as precision / recall / **F1** of the produced
+word boundaries against ICU's word `BreakIterator` over pinned natural-text
+fixtures (see `Tests/Editor/Fixtures/SOURCES.md`). The accuracy test gates each
+script at a minimum F1.
+
+**Lao is gated at F1 ≥ 0.90, deliberately lower than the other scripts.** This
+is not a quality regression in OpenGlyph — it is a property of which Lao
+dictionary ICU itself ships:
+
+- Measured against **ICU's current `laodict`**, OpenGlyph's segmenter caps at
+  about **F1 0.92**: the modern `laodict` disagrees with ICU's own word
+  `BreakIterator` on a non-trivial fraction of boundaries, so no faithful
+  re-implementation can exceed that ceiling against this reference.
+- Measured against the **ICU-60-vintage `laodict`**, the same code reaches
+  **F1 0.9985** (essentially exact).
+
+The gate is set to **0.90** so it holds regardless of which vintage of the Lao
+dictionary a consumer builds against, with headroom below the 0.92 ceiling for
+fixture variation. Thai, Khmer and Myanmar have no such reference disagreement
+and are gated higher. If you build Lao dictionaries from the ICU-60 vintage you
+should expect near-exact segmentation; the 0.90 figure is a floor, not a target.
 
 ---
 

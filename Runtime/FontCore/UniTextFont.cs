@@ -81,6 +81,18 @@ namespace LightSide
         [Tooltip("Glyph rendering mode (SDF, bitmap, etc.).")]
         internal UniTextRenderMode atlasRenderMode = UniTextRenderMode.SDF;
 
+        [SerializeField]
+        [Tooltip("Pixel-perfect rendering: render Mono at the font's native pixel size (or an integer multiple), point-filter the atlas with no mipmaps, and snap glyph quads to the device pixel grid. Intended for pixel/bitmap fonts. Has no effect on SDF/MSDF/Smooth atlases.")]
+        internal bool pixelPerfect = false;
+
+        [SerializeField]
+        [Tooltip("Cached result of pixel-font analysis (outline grid + bitmap strikes). Populated by DetectPixelFont(); serialized so it survives without re-probing the native outline export.")]
+        internal PixelFontInfo pixelFontInfo;
+
+        [SerializeField]
+        [Tooltip("True once DetectPixelFont() has run and pixelFontInfo is authoritative.")]
+        internal bool pixelFontInfoResolved = false;
+
         [NonSerialized]
         protected List<GlyphRect> usedGlyphRects;
 
@@ -114,6 +126,24 @@ namespace LightSide
 #if !UNITY_WEBGL || UNITY_EDITOR
         [NonSerialized] private FreeTypeFacePool sdfFacePool;
 #endif
+
+        // MSDF: latched once the native outline export is found missing, so we stop retrying and
+        // fall back to SDF for the rest of this font's lifetime (with a one-time warning).
+        [NonSerialized] private bool msdfOutlineUnavailable;
+        [NonSerialized] private bool msdfFallbackWarned;
+        [NonSerialized] private IntPtr msdfFace;
+
+        // Effective render mode, resolved from the SERIALIZED atlasRenderMode by probing the native
+        // outline export up front. When atlasRenderMode == Msdf but the export is missing, this
+        // resolves to SDF so the atlas format, padding, and shader selection are all coherent.
+        // UniTextRenderMode has no sentinel, so a separate "resolved" flag guards it.
+        [NonSerialized] private bool msdfModeResolved;
+        [NonSerialized] private UniTextRenderMode effectiveRenderMode;
+
+        // Optional injected outline source (tests). When set, the native probe is bypassed and this
+        // source's IsAvailable decides MSDF vs SDF, so both branches are testable deterministically
+        // regardless of which native binary is installed.
+        [NonSerialized] private Msdf.IGlyphOutlineSource injectedOutlineSource;
 
         [ThreadStatic] private static List<uint> toAddList;
 
@@ -224,19 +254,230 @@ namespace LightSide
         /// <summary>Gets the SDF spread strength (0-1). Padding = PointSize * SpreadStrength.</summary>
         public float SpreadStrength => spreadStrength;
 
-        /// <summary>Gets the padding between glyphs in the atlas. For SDF: computed from SpreadStrength. For COLOR/bitmap: minimal.</summary>
+        /// <summary>Gets the padding between glyphs in the atlas. For SDF/MSDF: computed from SpreadStrength. For COLOR/bitmap: minimal.</summary>
         public int AtlasPadding
         {
             get
             {
-                if (atlasRenderMode != UniTextRenderMode.SDF)
+                var mode = EffectiveRenderMode;
+                if (mode != UniTextRenderMode.SDF && mode != UniTextRenderMode.Msdf)
                     return 1;
                 return Mathf.Max(1, Mathf.RoundToInt(faceInfo.pointSize * spreadStrength));
             }
         }
 
-        /// <summary>Gets the glyph render mode (SDF, bitmap, etc.).</summary>
-        public UniTextRenderMode AtlasRenderMode => atlasRenderMode;
+        /// <summary>True when the atlas stores a distance field (SDF or MSDF) rather than a bitmap.</summary>
+        internal bool IsDistanceFieldMode =>
+            EffectiveRenderMode == UniTextRenderMode.SDF || EffectiveRenderMode == UniTextRenderMode.Msdf;
+
+        /// <summary>True when the effective mode is a rasterised bitmap (Smooth grayscale or Mono 1-bit).</summary>
+        internal bool IsBitmapMode =>
+            EffectiveRenderMode == UniTextRenderMode.Smooth || EffectiveRenderMode == UniTextRenderMode.Mono;
+
+        /// <summary>
+        /// True when this font renders single-channel coverage bitmaps (Smooth/Mono) into an Alpha8
+        /// atlas. Excludes color fonts (EmojiFont), whose Smooth atlas is RGBA color, not coverage.
+        /// </summary>
+        internal bool IsCoverageBitmapMode => IsBitmapMode && !IsColor;
+
+        /// <summary>
+        /// Gets the glyph render mode ACTUALLY in effect. Equal to the configured mode except that
+        /// <see cref="UniTextRenderMode.Msdf"/> degrades to <see cref="UniTextRenderMode.SDF"/> when
+        /// the native outline export (or an injected source) is unavailable. This is what the atlas
+        /// format, padding, and shader selection follow, so a missing export can never leave the
+        /// font in a half-MSDF state.
+        /// </summary>
+        public UniTextRenderMode AtlasRenderMode => EffectiveRenderMode;
+
+        /// <summary>The configured (serialized) render mode, before MSDF availability resolution.</summary>
+        public UniTextRenderMode ConfiguredRenderMode => atlasRenderMode;
+
+        /// <summary>
+        /// Resolves and caches the effective render mode. For Msdf, probes the native outline export
+        /// (or the injected source) exactly once; if unavailable, degrades to SDF and warns once.
+        /// </summary>
+        internal UniTextRenderMode EffectiveRenderMode
+        {
+            get
+            {
+                if (msdfModeResolved) return effectiveRenderMode;
+
+                if (atlasRenderMode != UniTextRenderMode.Msdf)
+                {
+                    effectiveRenderMode = atlasRenderMode;
+                    msdfModeResolved = true;
+                    return effectiveRenderMode;
+                }
+
+                bool available;
+                if (injectedOutlineSource != null)
+                {
+                    available = injectedOutlineSource.IsAvailable;
+                }
+                else
+                {
+                    var face = EnsureMsdfFace();
+                    available = face != IntPtr.Zero && Msdf.MsdfNative.Probe(face);
+                }
+
+                effectiveRenderMode = available ? UniTextRenderMode.Msdf : UniTextRenderMode.SDF;
+                msdfModeResolved = true;
+                msdfOutlineUnavailable = !available;
+
+                if (!available && !msdfFallbackWarned)
+                {
+                    msdfFallbackWarned = true;
+                    Cat.MeowWarnFormat("[MSDF] {0}: native outline export 'ut_ft_get_outline_data' unavailable; using SDF (Alpha8) atlas instead.", name);
+                }
+                return effectiveRenderMode;
+            }
+        }
+
+        /// <summary>
+        /// TEST HOOK: injects an <see cref="Msdf.IGlyphOutlineSource"/> so the MSDF/SDF-fallback
+        /// decision and the RGB24 render path can be exercised deterministically without depending
+        /// on which native binary is installed. Resets any prior mode resolution.
+        /// </summary>
+        internal void SetOutlineSourceForTesting(Msdf.IGlyphOutlineSource source)
+        {
+            injectedOutlineSource = source;
+            msdfModeResolved = false;
+            msdfOutlineUnavailable = false;
+            msdfFallbackWarned = false;
+
+            // Discard any atlas already created under the previous (possibly SDF-fallback) mode so
+            // the next glyph batch re-derives the format from the freshly resolved effective mode.
+            if (atlasTextures != null)
+            {
+                foreach (var tex in atlasTextures)
+                    ObjectUtils.SafeDestroy(tex);
+                atlasTextures.Clear();
+            }
+            glyphTable?.Clear();
+            glyphLookupDictionary?.Clear();
+            glyphIndexList?.Clear();
+            usedGlyphRects?.Clear();
+            freeGlyphRects?.Clear();
+            shelfX = shelfY = shelfHeight = 0;
+        }
+
+        #region Pixel Font (Phase 1c)
+
+        /// <summary>
+        /// Whether pixel-perfect rendering is requested for this font. Only meaningful when the font
+        /// is actually a pixel/bitmap font (see <see cref="PixelFont"/>.<c>IsPixelFont</c>); the
+        /// renderer treats it as off for SDF/MSDF/Smooth atlases.
+        /// </summary>
+        public bool PixelPerfect
+        {
+            get => pixelPerfect;
+            internal set => pixelPerfect = value;
+        }
+
+        /// <summary>
+        /// The cached pixel-font analysis (outline grid + embedded bitmap strikes). Lazily computed
+        /// via <see cref="DetectPixelFont"/> on first access. Read-only for callers.
+        /// </summary>
+        public PixelFontInfo PixelFont
+        {
+            get
+            {
+                if (!pixelFontInfoResolved)
+                    DetectPixelFont();
+                return pixelFontInfo;
+            }
+        }
+
+        /// <summary>
+        /// True when pixel-perfect rendering is BOTH requested and applicable (the font is a pixel or
+        /// bitmap font). This is the flag the mesh generator / atlas path should gate on.
+        /// </summary>
+        public bool PixelPerfectActive => pixelPerfect && PixelFont.IsPixelFont;
+
+        // Test hook: lets EditMode tests supply a managed outline provider (e.g. a TrueType glyf
+        // reader) so grid detection is exercised without depending on the native outline export.
+        [NonSerialized] private IPixelGridOutlineProvider injectedGridProvider;
+
+        /// <summary>
+        /// TEST HOOK: injects an outline provider for pixel-grid detection and forces re-analysis on
+        /// next <see cref="PixelFont"/> access. Does not touch render mode or atlases.
+        /// </summary>
+        internal void SetGridProviderForTesting(IPixelGridOutlineProvider provider)
+        {
+            injectedGridProvider = provider;
+            pixelFontInfoResolved = false;
+        }
+
+        /// <summary>
+        /// Analyses this font for pixel-font characteristics and caches the result in
+        /// <see cref="pixelFontInfo"/>. Reads embedded bitmap-strike sizes from the face, then probes
+        /// the outline grid via the native outline export (or an injected managed provider in tests).
+        /// Degrades gracefully when the outline export is unavailable — grid detection is simply
+        /// skipped and <see cref="PixelFontInfo.outlineDataAvailable"/> is false. Never renders and
+        /// never mutates the atlas or render mode.
+        /// </summary>
+        /// <returns>The freshly computed <see cref="PixelFontInfo"/>.</returns>
+        public PixelFontInfo DetectPixelFont()
+        {
+            int[] strikeSizes = Array.Empty<int>();
+            IPixelGridOutlineProvider provider = injectedGridProvider;
+
+            if (provider == null && HasFontData)
+            {
+                var face = EnsureFTFace();
+                if (face != IntPtr.Zero)
+                {
+                    var fi = FT.GetFaceInfo(face);
+                    if (fi.numFixedSizes > 0)
+                        strikeSizes = FT.GetAllFixedSizes(face) ?? Array.Empty<int>();
+
+                    int upem = unitsPerEm > 0 ? unitsPerEm : (fi.unitsPerEm > 0 ? fi.unitsPerEm : 1000);
+                    provider = new FreeTypeOutlineGridProvider(face, upem);
+                }
+            }
+
+            pixelFontInfo = PixelFontDetection.Analyze(provider, strikeSizes);
+            pixelFontInfoResolved = true;
+            return pixelFontInfo;
+        }
+
+        /// <summary>
+        /// Chooses the integer atlas sampling ppem for pixel-perfect Mono rendering, given a desired
+        /// ppem. Returns the nearest integer MULTIPLE of the native pixels-per-em that is ≥ the
+        /// native size. When the font has bitmap strikes but no detected grid, snaps to the nearest
+        /// available strike. Fallback (documented): if neither applies, rounds the request up to the
+        /// nearest whole pixel. Never returns less than 1.
+        /// </summary>
+        /// <param name="desiredPpem">Requested sampling size in pixels-per-em.</param>
+        /// <returns>An integer ppem suitable for a crisp, aliasing-free Mono atlas.</returns>
+        public int ChoosePixelPerfectPpem(float desiredPpem)
+        {
+            var info = PixelFont;
+
+            if (info.isPixelGrid && info.nativePixelsPerEm > 0)
+            {
+                int native = info.nativePixelsPerEm;
+                int mult = Mathf.Max(1, Mathf.RoundToInt(desiredPpem / native));
+                return native * mult;
+            }
+
+            if (info.hasBitmapStrikes && info.bitmapStrikeSizes is { Length: > 0 })
+            {
+                int best = info.bitmapStrikeSizes[0];
+                int bestDiff = Mathf.Abs(best - Mathf.RoundToInt(desiredPpem));
+                for (int i = 1; i < info.bitmapStrikeSizes.Length; i++)
+                {
+                    int diff = Mathf.Abs(info.bitmapStrikeSizes[i] - Mathf.RoundToInt(desiredPpem));
+                    if (diff < bestDiff) { bestDiff = diff; best = info.bitmapStrikeSizes[i]; }
+                }
+                return Mathf.Max(1, best);
+            }
+
+            // Documented fallback for a non-pixel font asked to render pixel-perfect: whole-pixel ppem.
+            return Mathf.Max(1, Mathf.CeilToInt(desiredPpem));
+        }
+
+        #endregion
 
         /// <summary>Gets the glyph lookup table (glyph index → Glyph).</summary>
         public Dictionary<uint, Glyph> GlyphLookupTable
@@ -446,6 +687,19 @@ namespace LightSide
                 FT.UnloadFace(ftFace);
                 ftFace = IntPtr.Zero;
             }
+            if (msdfFace != IntPtr.Zero)
+            {
+                FT.UnloadFace(msdfFace);
+                msdfFace = IntPtr.Zero;
+            }
+            // Force re-resolution of the effective render mode on next use (unless a test source
+            // is injected, which owns availability itself).
+            if (injectedOutlineSource == null)
+            {
+                msdfModeResolved = false;
+                msdfOutlineUnavailable = false;
+                msdfFallbackWarned = false;
+            }
         }
 
         /// <summary>
@@ -567,6 +821,15 @@ namespace LightSide
             public int pointSize;
             public int spread;
             public float metricsConversion;
+            /// <summary>True when this batch must be rendered pixel-perfect (Mono, 0/255, no spread).</summary>
+            public bool pixelPerfect;
+            /// <summary>
+            /// True when this batch renders single-channel coverage bitmaps (Smooth grayscale or Mono
+            /// 1-bit) for a regular (non-color) font. Pixel-perfect is a special case of this.
+            /// </summary>
+            public bool coverageBitmap;
+            /// <summary>The effective render mode captured when the batch was prepared.</summary>
+            public UniTextRenderMode renderMode;
         }
 
         /// <summary>
@@ -592,6 +855,17 @@ namespace LightSide
 
             var pointSize = faceInfo.pointSize > 0 ? faceInfo.pointSize : 90;
             var spread = AtlasPadding;
+
+            // Bitmap coverage modes (Smooth grayscale, Mono 1-bit) for regular fonts have no distance
+            // field, so no spread. Pixel-perfect is a special case: it additionally samples at an
+            // integer multiple of the font's native pixels-per-em.
+            bool coverageBitmap = IsCoverageBitmapMode;
+            bool pixelPerfect = PixelPerfectActive;
+            if (coverageBitmap || pixelPerfect)
+                spread = 0;
+            if (pixelPerfect)
+                pointSize = ChoosePixelPerfectPpem(pointSize);
+
             var metricsConversion = pointSize > 0 && pointSize != unitsPerEm
                 ? (float)unitsPerEm / pointSize
                 : 1f;
@@ -614,7 +888,10 @@ namespace LightSide
                 filteredGlyphs = owned,
                 pointSize = pointSize,
                 spread = spread,
-                metricsConversion = metricsConversion
+                metricsConversion = metricsConversion,
+                pixelPerfect = pixelPerfect,
+                coverageBitmap = coverageBitmap || pixelPerfect,
+                renderMode = EffectiveRenderMode
             };
         }
 
@@ -625,6 +902,43 @@ namespace LightSide
         /// <returns>Rendered glyph data (SdfRenderedGlyph[] for SDF fonts). Null on failure.</returns>
         public virtual object RenderPreparedBatch(PreparedBatch batch)
         {
+            // Coverage-bitmap path (Smooth grayscale + Mono 1-bit) for regular fonts. Renders
+            // single-channel Alpha8 coverage at the batch ppem. Rendered sequentially on the shared
+            // face (mono/normal render state is per-face). Bypasses SDF/MSDF entirely, so those modes
+            // are byte-for-byte unaffected. EmojiFont overrides this method, so color never reaches here.
+            if (batch.coverageBitmap)
+            {
+                var face = EnsureFTFace();
+                if (face == IntPtr.Zero) return null;
+                bool mono = batch.pixelPerfect || batch.renderMode == UniTextRenderMode.Mono;
+                var cov = new SdfRenderedGlyph[batch.filteredGlyphs.Count];
+                for (int i = 0; i < batch.filteredGlyphs.Count; i++)
+                {
+                    if (mono)
+                        MonoGlyphRenderer.TryRender(face, batch.filteredGlyphs[i], batch.pointSize, out cov[i]);
+                    else
+                        SmoothGlyphRenderer.TryRender(face, batch.filteredGlyphs[i], batch.pointSize, out cov[i]);
+                }
+                return cov;
+            }
+
+            // Resolve the effective mode up front (probes the export exactly once). This is what the
+            // atlas format follows, so MSDF is only ever attempted when it can actually be produced.
+            if (EffectiveRenderMode == UniTextRenderMode.Msdf)
+            {
+                var msdf = RenderMsdfBatch(batch);
+                if (msdf != null)
+                    return msdf;
+                // Should not happen after a successful probe, but stay safe: degrade permanently.
+                if (!msdfFallbackWarned)
+                {
+                    msdfFallbackWarned = true;
+                    Cat.MeowWarnFormat("[MSDF] {0}: outline rendering failed after a positive probe; falling back to SDF.", name);
+                }
+                effectiveRenderMode = UniTextRenderMode.SDF;
+                msdfOutlineUnavailable = true;
+            }
+
 #if !UNITY_WEBGL || UNITY_EDITOR
             return sdfFacePool.RenderSdfBatch(batch.filteredGlyphs, batch.pointSize,
                 FT.LOAD_DEFAULT | FT.LOAD_NO_BITMAP, batch.spread);
@@ -637,6 +951,63 @@ namespace LightSide
                     FT.LOAD_DEFAULT | FT.LOAD_NO_BITMAP, batch.spread, out rendered[i]);
             return rendered;
 #endif
+        }
+
+        /// <summary>
+        /// Renders a batch as MSDF using the injected source (tests) or a dedicated FreeType face
+        /// via the native outline export. Returns null only on a hard failure after the up-front
+        /// probe already reported the source available. Rendered sequentially to bound memory.
+        /// </summary>
+        private SdfRenderedGlyph[] RenderMsdfBatch(PreparedBatch batch)
+        {
+            Msdf.IGlyphOutlineSource source = injectedOutlineSource;
+            IntPtr face = IntPtr.Zero;
+
+            if (source == null)
+            {
+                face = EnsureMsdfFace();
+                if (face == IntPtr.Zero) return null;
+                source = new Msdf.FreeTypeOutlineSource(face,
+                    (gi, ppem) =>
+                    {
+                        if (!FT.SetPixelSize(face, ppem)) return false;
+                        return FT.LoadGlyph(face, gi, FT.LOAD_DEFAULT | FT.LOAD_NO_HINTING);
+                    });
+            }
+
+            if (!source.IsAvailable)
+                return null;
+
+            var list = batch.filteredGlyphs;
+            var results = new SdfRenderedGlyph[list.Count];
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (!Msdf.MsdfGlyphRenderer.TryRender(face, list[i], batch.pointSize, batch.spread,
+                        source, out results[i], out bool unavailable))
+                {
+                    if (unavailable)
+                    {
+                        // Return already-rendered pixels to the pool before bailing.
+                        for (int j = 0; j <= i; j++)
+                            if (results[j].sdfPixels != null)
+                            {
+                                UniTextArrayPool<byte>.Return(results[j].sdfPixels);
+                                results[j].sdfPixels = null;
+                            }
+                        return null;
+                    }
+                }
+            }
+            return results;
+        }
+
+        private IntPtr EnsureMsdfFace()
+        {
+            if (msdfFace != IntPtr.Zero) return msdfFace;
+            if (fontData == null || fontData.Length == 0) return IntPtr.Zero;
+            if (!FT.IsInitialized) FT.Initialize();
+            msdfFace = FT.LoadFace(fontData, cachedFaceIndex < 0 ? 0 : cachedFaceIndex);
+            return msdfFace;
         }
 
         /// <summary>
@@ -717,7 +1088,20 @@ namespace LightSide
                     var raw = curAtlas.GetRawTextureData<byte>();
                     cachedAtlasPtr = (byte*)Unity.Collections.LowLevel.Unsafe.NativeArrayUnsafeUtility.GetUnsafePtr(raw);
                 }
-                CopySdfBitmapToAtlas(r.sdfPixels, r.bmpWidth, r.bmpHeight, packRect.x, packRect.y, cachedAtlasW, cachedAtlasPtr);
+                int glyphChannels = r.channels > 0 ? r.channels : 1;
+                int atlasChannels = curAtlas.format == TextureFormat.RGB24 ? 3
+                    : curAtlas.format == TextureFormat.RGBA32 ? 4 : 1;
+                if (glyphChannels != atlasChannels)
+                {
+                    // Coherence guard: a glyph's channel count must match the atlas format. If they
+                    // ever disagree (e.g. an SDF-fallback glyph reaching an RGB atlas), skip it
+                    // rather than write mis-strided bytes that masquerade as multi-channel data.
+                    Cat.MeowWarnFormat("[PackRenderedBatch] {0}: glyph {1} channels ({2}) != atlas channels ({3}); skipped.",
+                        name, glyphIndex, glyphChannels, atlasChannels);
+                    ReturnSdfPixels(ref r);
+                    continue;
+                }
+                CopySdfBitmapToAtlas(r.sdfPixels, r.bmpWidth, r.bmpHeight, packRect.x, packRect.y, cachedAtlasW, cachedAtlasPtr, glyphChannels);
                 ReturnSdfPixels(ref r);
 
                 int outlineW = r.bmpWidth - 2 * spread;
@@ -776,17 +1160,20 @@ namespace LightSide
         }
 
         /// <summary>
-        /// Copies a pre-rendered SDF bitmap (Alpha8, already Y-flipped by native) to the atlas.
+        /// Copies a pre-rendered distance-field bitmap to the atlas. Handles 1-channel (Alpha8 SDF)
+        /// and 3-channel (RGB24 MSDF) payloads; the source is already Y-oriented for the atlas.
         /// </summary>
         private static unsafe void CopySdfBitmapToAtlas(byte[] sdfPixels, int bw, int bh,
-            int packX, int packY, int atlasW, byte* atlasPtr)
+            int packX, int packY, int atlasW, byte* atlasPtr, int channels)
         {
+            int rowBytes = bw * channels;
+            int atlasStride = atlasW * channels;
             fixed (byte* src = sdfPixels)
             {
                 for (int y = 0; y < bh; y++)
                 {
-                    int dstOffset = (packY + y) * atlasW + packX;
-                    Buffer.MemoryCopy(src + y * bw, atlasPtr + dstOffset, bw, bw);
+                    int dstOffset = (packY + y) * atlasStride + packX * channels;
+                    Buffer.MemoryCopy(src + y * rowBytes, atlasPtr + dstOffset, rowBytes, rowBytes);
                 }
             }
         }
@@ -826,8 +1213,24 @@ namespace LightSide
 
         protected unsafe void CreateNewAtlasTexture()
         {
-            var texFormat = atlasRenderMode == UniTextRenderMode.SDF ? TextureFormat.Alpha8 : TextureFormat.RGBA32;
+            var mode = EffectiveRenderMode;
+            var texFormat = mode == UniTextRenderMode.SDF ? TextureFormat.Alpha8
+                : mode == UniTextRenderMode.Msdf ? TextureFormat.RGB24
+                : TextureFormat.RGBA32;
+
+            // Regular (non-color) Smooth/Mono render single-channel coverage — store it in Alpha8 so
+            // the channel-coherence guard in PackRenderedBatch accepts it. Color Smooth (EmojiFont)
+            // keeps RGBA32. SDF/MSDF are unchanged.
+            if (IsCoverageBitmapMode)
+                texFormat = TextureFormat.Alpha8;
+
             var texture = new Texture2D(atlasSize, atlasSize, texFormat, false);
+
+            // Filtering: Mono and pixel-perfect require Point (no bilinear blur, crisp integer scale);
+            // Smooth (AA coverage) uses the default Bilinear so its gradients interpolate smoothly.
+            // SDF/MSDF and color Smooth keep the historical Bilinear default — byte-for-byte unchanged.
+            if (PixelPerfectActive || (IsCoverageBitmapMode && mode == UniTextRenderMode.Mono))
+                texture.filterMode = FilterMode.Point;
 
             var rawData = texture.GetRawTextureData<byte>();
             Unity.Collections.LowLevel.Unsafe.UnsafeUtility.MemClear(

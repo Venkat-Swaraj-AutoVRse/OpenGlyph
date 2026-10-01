@@ -7,7 +7,7 @@ using static System.Runtime.InteropServices.CallingConvention;
 
 namespace LightSide
 {
-    internal static unsafe class FT
+    internal static unsafe partial class FT
     {
         #region Enums & Constants
 

@@ -2,6 +2,23 @@
 #define UNITEXT_INCLUDED
 
 // ============================================
+// Distance-field sampling mode (SDF vs MSDF)
+// ============================================
+// Shaders that define UNITEXT_MSDF before including this header sample the reconstructed
+// distance as the median of the RGB atlas channels (multi-channel SDF, corner-preserving);
+// otherwise they read the single Alpha8 channel. UNITEXT_SAMPLE_DF is the one place the two
+// modes differ, so every shared distance read below routes through it.
+#ifndef UNITEXT_DF_SAMPLE_DEFINED
+#define UNITEXT_DF_SAMPLE_DEFINED
+half UniTextMedian3_(half3 rgb) { return max(min(rgb.r, rgb.g), min(max(rgb.r, rgb.g), rgb.b)); }
+#ifdef UNITEXT_MSDF
+    #define UNITEXT_SAMPLE_DF(tex, uv) UniTextMedian3_(tex2D(tex, uv).rgb)
+#else
+    #define UNITEXT_SAMPLE_DF(tex, uv) (tex2D(tex, uv).a)
+#endif
+#endif // UNITEXT_DF_SAMPLE_DEFINED
+
+// ============================================
 // Effect Normalization Constants
 // ============================================
 
@@ -74,10 +91,10 @@ float3 GetSurfaceNormal(float4 h, float bias, float gradientScale)
 float3 GetSurfaceNormal(float2 uv, float bias, float3 delta, float gradientScale)
 {
 	// Read "height field"
-  float4 h = {tex2D(_MainTex, uv - delta.xz).a,
-				tex2D(_MainTex, uv + delta.xz).a,
-				tex2D(_MainTex, uv - delta.zy).a,
-				tex2D(_MainTex, uv + delta.zy).a};
+  float4 h = {UNITEXT_SAMPLE_DF(_MainTex, uv - delta.xz),
+				UNITEXT_SAMPLE_DF(_MainTex, uv + delta.xz),
+				UNITEXT_SAMPLE_DF(_MainTex, uv - delta.zy),
+				UNITEXT_SAMPLE_DF(_MainTex, uv + delta.zy)};
 
 	return GetSurfaceNormal(h, bias, gradientScale);
 }
