@@ -78,6 +78,22 @@ namespace LightSide
         /// </summary>
         public static int SharedAtlasPageBudget => Instance != null ? Instance.sharedAtlasPageBudget : 0;
 
+        [SerializeField]
+        [Tooltip("Render Architecture R2: when ON, each UniText component draws through a SINGLE " +
+                 "CanvasRenderer per draw group (at most two: SDF/coverage + MSDF/color) using the " +
+                 "UniText/Uber shader, a shared Texture2DArray atlas and a float-texture style table, " +
+                 "instead of one child CanvasRenderer per font/atlas/pass. OFF (default) keeps the " +
+                 "legacy per-segment renderer path, byte-for-byte unchanged. A component may override " +
+                 "this per-instance.")]
+        private bool useUnifiedRenderer = false;
+
+        /// <summary>
+        /// Project-wide default for the Render-Architecture R2 unified single-renderer path. False
+        /// (default) keeps the legacy per-segment CanvasRenderer path unchanged. A
+        /// <c>UniText</c> component may override this per instance.
+        /// </summary>
+        public static bool UseUnifiedRenderer => Instance != null && Instance.useUnifiedRenderer;
+
         public static event Action Changed;
 
     #if UNITY_EDITOR
