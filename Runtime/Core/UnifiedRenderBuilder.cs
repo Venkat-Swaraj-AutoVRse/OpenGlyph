@@ -35,6 +35,7 @@ namespace LightSide
         private static readonly int StyleTex = Shader.PropertyToID("_StyleTex");
         private static readonly int StyleTexWidth = Shader.PropertyToID("_StyleTexWidth");
         private static readonly int StyleTexHeight = Shader.PropertyToID("_StyleTexHeight");
+        private static readonly int AtlasSize = Shader.PropertyToID("_AtlasSize");
 
         private static Shader _uberShader;
         private static Shader UberShader => _uberShader != null ? _uberShader : (_uberShader = Shader.Find("UniText/Uber"));
@@ -158,6 +159,7 @@ namespace LightSide
                 mat.SetTexture(StyleTex, styleTex);
                 mat.SetFloat(StyleTexWidth, SharedStyles.Width);
                 mat.SetFloat(StyleTexHeight, Mathf.Max(1, SharedStyles.Count));
+                mat.SetFloat(AtlasSize, g.pageSize > 0 ? g.pageSize : 1024);
 
                 // Array bound via material _MainTexArray; CanvasRenderer texture MUST be null (a
                 // Texture2DArray trips a native kTexDim2D assert in CanvasRenderer.SetTexture).
