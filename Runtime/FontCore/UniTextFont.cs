@@ -811,6 +811,166 @@ namespace LightSide
             return glyphLookupDictionary != null && glyphLookupDictionary.ContainsKey(glyphIndex);
         }
 
+        // ---- Phase 2: variation-keyed atlas facet -------------------------------
+        // Variable-font instances cannot share a glyph cell with each other or with the default
+        // instance: wght 400 and 700 of the SAME face produce different outlines. We therefore key
+        // a secondary glyph store by (VariationKey -> glyphIndex -> Glyph). VariationKey.None keeps
+        // the original single-dictionary behaviour untouched (zero cost / no regression for static
+        // fonts). The design coordinates are applied to the FreeType face before rasterizing, so the
+        // stored bitmap is the varied shape across SDF, MSDF, Smooth and Mono.
+        [NonSerialized] private Dictionary<VariationKey, Dictionary<uint, Glyph>> variationGlyphLookup;
+
+        /// <summary>True when the glyph is rasterized for the given variation instance.</summary>
+        public bool HasGlyphInAtlas(uint glyphIndex, VariationKey key)
+        {
+            if (key.IsNone) return HasGlyphInAtlas(glyphIndex);
+            return variationGlyphLookup != null
+                   && variationGlyphLookup.TryGetValue(key, out var d)
+                   && d.ContainsKey(glyphIndex);
+        }
+
+        /// <summary>Gets a glyph for a specific variation instance (None == the default store).</summary>
+        public bool TryGetGlyph(uint glyphIndex, VariationKey key, out Glyph glyph)
+        {
+            glyph = default;
+            if (key.IsNone)
+            {
+                var tbl = GlyphLookupTable;
+                return tbl != null && tbl.TryGetValue(glyphIndex, out glyph);
+            }
+            return variationGlyphLookup != null
+                   && variationGlyphLookup.TryGetValue(key, out var d)
+                   && d.TryGetValue(glyphIndex, out glyph);
+        }
+
+        /// <summary>
+        /// Ensures <paramref name="glyphIndices"/> are rasterized into the atlas for the variable-font
+        /// instance <paramref name="key"/> (design coords <paramref name="coords"/> for axes
+        /// <paramref name="tags"/>), stored under a per-key sub-dictionary so instances never share a
+        /// cell. No-op for <see cref="VariationKey.None"/> or a static font (use the normal batch path).
+        /// Returns the number of glyphs added. Main-thread only (atlas mutation).
+        /// </summary>
+        public int EnsureGlyphsForVariation(List<uint> glyphIndices, VariationKey key, uint[] tags, float[] coords)
+        {
+            if (key.IsNone || glyphIndices == null || glyphIndices.Count == 0) return 0;
+            if (fontData == null || fontData.Length == 0) return 0;
+
+            var face = EnsureFTFace();
+            if (face == IntPtr.Zero) return 0;
+
+            var mode0 = EffectiveRenderMode;
+            // MSDF renders from a separate face; apply the variation to whichever face will raster.
+            IntPtr msdfVarFace = IntPtr.Zero;
+            if (mode0 == UniTextRenderMode.Msdf)
+            {
+                msdfVarFace = EnsureMsdfFace();
+                if (msdfVarFace != IntPtr.Zero && tags != null && coords != null && coords.Length > 0)
+                    FTVar.SetDesignCoordinates(msdfVarFace, coords);
+            }
+            // Apply the variation design coordinates to the coverage/SDF face before rasterizing.
+            if (tags != null && coords != null && coords.Length > 0)
+                FTVar.SetDesignCoordinates(face, coords);
+
+            variationGlyphLookup ??= new Dictionary<VariationKey, Dictionary<uint, Glyph>>();
+            if (!variationGlyphLookup.TryGetValue(key, out var store))
+            {
+                store = new Dictionary<uint, Glyph>();
+                variationGlyphLookup[key] = store;
+            }
+
+            var pointSize = faceInfo.pointSize > 0 ? faceInfo.pointSize : 90;
+            var spread = AtlasPadding;
+            bool coverage = IsCoverageBitmapMode || PixelPerfectActive;
+            if (coverage) spread = 0;
+            var metricsConversion = pointSize > 0 && pointSize != unitsPerEm ? (float)unitsPerEm / pointSize : 1f;
+
+            bool msdfAvailable = mode0 == UniTextRenderMode.Msdf && msdfVarFace != IntPtr.Zero && Msdf.MsdfNative.Probe(msdfVarFace);
+
+            int added = 0;
+            foreach (var gi in glyphIndices)
+            {
+                if (store.ContainsKey(gi)) continue;
+
+                SdfRenderedGlyph r;
+                bool ok;
+                if (mode0 == UniTextRenderMode.Mono)
+                    ok = MonoGlyphRenderer.TryRender(face, gi, pointSize, out r);
+                else if (mode0 == UniTextRenderMode.Smooth)
+                    ok = SmoothGlyphRenderer.TryRender(face, gi, pointSize, out r);
+                else if (msdfAvailable)
+                    ok = Msdf.MsdfGlyphRenderer.TryRender(msdfVarFace, gi, pointSize, spread, injectedOutlineSource, out r, out _);
+                else
+                    ok = SdfGlyphRenderer.TryRender(face, gi, pointSize, FT.LOAD_DEFAULT | FT.LOAD_NO_BITMAP, spread, out r);
+
+                if (!ok || !r.isValid) { if (ok) ReturnSdfPixels(ref r); continue; }
+
+                var glyph = PackOneVariedGlyph(ref r, gi, spread, metricsConversion);
+                store[gi] = glyph;
+                added++;
+            }
+
+            // Restore both faces to the default instance so the plain path is unaffected.
+            if (tags != null)
+            {
+                FTVar.SetNamedInstance(face, 0);
+                if (msdfVarFace != IntPtr.Zero) FTVar.SetNamedInstance(msdfVarFace, 0);
+            }
+            if (atlasTextures != null && atlasTextures.Count > 0)
+                atlasTextures[^1].Apply(false, false);
+            return added;
+        }
+
+        // Packs one already-rendered varied glyph into the current atlas (shelf-packed), returning
+        // its Glyph record. Mirrors the relevant branch of PackRenderedBatch for a single glyph.
+        private unsafe Glyph PackOneVariedGlyph(ref SdfRenderedGlyph r, uint glyphIndex, int spread, float metricsConversion)
+        {
+            float advanceDU = (r.metricAdvanceX26_6 / 64f) * metricsConversion;
+
+            if (r.sdfPixels == null)
+            {
+                return new Glyph(glyphIndex, new GlyphMetrics(
+                    r.metricWidth * metricsConversion, r.metricHeight * metricsConversion,
+                    r.metricBearingX * metricsConversion, r.metricBearingY * metricsConversion, advanceDU),
+                    GlyphRect.zero, 0);
+            }
+
+            if (atlasTextures == null || atlasTextures.Count == 0)
+                CreateNewAtlasTexture();
+
+            if (!TryPackGlyphShelf(r.bmpWidth, r.bmpHeight, out var packRect))
+            {
+                atlasTextures[^1].Apply(false, false);
+                CreateNewAtlasTexture();
+                if (!TryPackGlyphShelf(r.bmpWidth, r.bmpHeight, out packRect))
+                {
+                    ReturnSdfPixels(ref r);
+                    return new Glyph(glyphIndex, default, GlyphRect.zero, 0);
+                }
+            }
+
+            var curAtlas = atlasTextures[^1];
+            int atlasChannels = curAtlas.format == TextureFormat.RGB24 ? 3 : curAtlas.format == TextureFormat.RGBA32 ? 4 : 1;
+            int glyphChannels = r.channels > 0 ? r.channels : 1;
+            if (glyphChannels == atlasChannels)
+            {
+                var raw = curAtlas.GetRawTextureData<byte>();
+                byte* atlasPtr = (byte*)Unity.Collections.LowLevel.Unsafe.NativeArrayUnsafeUtility.GetUnsafePtr(raw);
+                CopySdfBitmapToAtlas(r.sdfPixels, r.bmpWidth, r.bmpHeight, packRect.x, packRect.y, curAtlas.width, atlasPtr, glyphChannels);
+            }
+            ReturnSdfPixels(ref r);
+
+            int outlineW = Mathf.Max(0, r.bmpWidth - 2 * spread);
+            int outlineH = Mathf.Max(0, r.bmpHeight - 2 * spread);
+            float outlineBearingX = (r.bitmapLeft + spread) * metricsConversion;
+            float outlineBearingY = (r.bitmapTop - spread) * metricsConversion;
+            var glyphRect = new GlyphRect(packRect.x + spread, packRect.y + spread, outlineW, outlineH);
+
+            return new Glyph(glyphIndex, new GlyphMetrics(
+                outlineW * metricsConversion, outlineH * metricsConversion,
+                outlineBearingX, outlineBearingY, advanceDU),
+                glyphRect, atlasTextures.Count - 1);
+        }
+
         /// <summary>
         /// Prepared batch data for the split rendering pipeline.
         /// Created by <see cref="PrepareGlyphBatch"/>, consumed by <see cref="RenderPreparedBatch"/> and <see cref="PackRenderedBatch"/>.
