@@ -268,6 +268,14 @@ namespace LightSide
         /// <summary>The font ID used for this glyph.</summary>
         public int fontId;
 
+        /// <summary>The variable-font instance key for this glyph; None for a static face (Phase 2).</summary>
+        public VariationKey variationKey;
+
+        /// <summary>True when this glyph's run used a real bold face (suppress synthetic bold) (Phase 2).</summary>
+        public bool realBold;
+        /// <summary>True when this glyph's run used a real italic/oblique face (suppress synthetic italic) (Phase 2).</summary>
+        public bool realItalic;
+
         /// <summary>Index into the shaped glyphs buffer.</summary>
         public int shapedGlyphIndex;
 

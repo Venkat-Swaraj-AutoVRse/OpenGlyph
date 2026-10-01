@@ -158,5 +158,42 @@ namespace LightSide.Tests
             Assert.AreNotEqual(w400, w700,
                 $"Same text through TextProcessor must differ in width between wght 400 ({w400}) and 700 ({w700}).");
         }
+
+        [Test]
+        public void PositionedGlyphs_BoldSpan_CarryRealBold_ForSynthesisSuppression()
+        {
+            var fam = ScriptableObject.CreateInstance<FontFamily>();
+            fam.familyName = "Noto Sans";
+            fam.AddFace(_regular); fam.AddFace(_bold);
+            _created.Add(fam);
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>();
+            stack.fonts.Add(_regular); stack.family = fam;
+            _created.Add(stack);
+            var provider = new UniTextFontProvider(stack, null, 48f);
+
+            var buffers = new UniTextBuffers();
+            buffers.EnsureRentBuffers(32);
+            var proc = new TextProcessor(buffers);
+            proc.SetFontProvider(provider);
+            // "RbR": middle bold.
+            proc.SetStyleSource(true, FontStyleSpec.Normal, new byte[] { 0, 1, 0 }, null);
+            var settings = new TextProcessSettings { fontSize = 48f, baseDirection = TextDirection.Auto,
+                MaxWidth = TextProcessSettings.FloatMax, MaxHeight = TextProcessSettings.FloatMax };
+            proc.EnsureFirstPass("RbR", settings);
+            proc.EnsureLines(TextProcessSettings.FloatMax, 48f, wordWrap: false);
+            proc.EnsurePositions(settings);
+
+            int boldId = UniTextFontProvider.GetFontId(_bold);
+            bool anyRealBold = false, anyRegularNotBold = false;
+            var pg = proc.PositionedGlyphs;
+            for (int i = 0; i < pg.Length; i++)
+            {
+                if (pg[i].fontId == boldId) { if (pg[i].realBold) anyRealBold = true; }
+                else if (!pg[i].realBold) anyRegularNotBold = true;
+            }
+            buffers.EnsureReturnBuffers();
+            Assert.IsTrue(anyRealBold, "The bold-face glyph must carry realBold=true (suppresses faux bold).");
+            Assert.IsTrue(anyRegularNotBold, "Regular glyphs must carry realBold=false.");
+        }
     }
 }

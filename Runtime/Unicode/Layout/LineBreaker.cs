@@ -201,7 +201,10 @@ namespace LightSide
                     width = partialWidth,
                     direction = run.direction,
                     bidiLevel = run.bidiLevel,
-                    fontId = run.fontId
+                    fontId = run.fontId,
+                    variationKey = run.variationKey,
+                    realBold = run.realBold,
+                    realItalic = run.realItalic
                 };
                 lineRunCount++;
             }

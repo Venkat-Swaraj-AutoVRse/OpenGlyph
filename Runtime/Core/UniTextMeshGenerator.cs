@@ -149,6 +149,14 @@ namespace LightSide
         /// <remarks>Valid during <see cref="OnGlyph"/> callback. Maps back to codepoint indices.</remarks>
         public int currentCluster;
 
+        /// <summary>True when the current glyph's run used a real bold face (Phase 2: suppress synthetic bold).</summary>
+        /// <remarks>Valid during <see cref="OnGlyph"/> callback.</remarks>
+        public bool currentRealBold;
+
+        /// <summary>True when the current glyph's run used a real italic/oblique face (Phase 2: suppress synthetic italic).</summary>
+        /// <remarks>Valid during <see cref="OnGlyph"/> callback.</remarks>
+        public bool currentRealItalic;
+
         /// <summary>X position of the current glyph in text coordinates.</summary>
         /// <remarks>Valid during <see cref="OnGlyph"/> callback.</remarks>
         public float x;
@@ -901,6 +909,8 @@ namespace LightSide
                 tris[triangleCount + 5] = localI0;
 
                 currentCluster = cluster;
+                currentRealBold = glyph.realBold;
+                currentRealItalic = glyph.realItalic;
                 x = glyph.x;
                 y = glyph.y;
                 width = widthScaled;
