@@ -550,12 +550,14 @@ namespace OpenGlyph.Benchmarks
                 for (int it = -warmups; it < iterations; it++)
                 {
                     bool measure = it >= 0;
+                    // Time from adding the Labels to the live panel UNTIL the panel has
+                    // laid them out across a real frame (UITK generates text lazily during
+                    // panel layout/repaint, so a frame MUST elapse inside the window).
                     var sw = Stopwatch.StartNew();
                     CreateLabels(root, labels, text);
-                    // Force text generation: MeasureTextSize generates the glyph run.
-                    for (int i = 0; i < labels.Count; i++)
-                        labels[i].MeasureTextSize(text, 800, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost);
                     ForceUITKLayout(root);
+                    yield return null;                 // let the panel run its layout+generation
+                    for (int i = 0; i < labels.Count; i++) { var _ = labels[i].resolvedStyle.width; }
                     sw.Stop();
                     if (measure)
                     {
@@ -563,9 +565,10 @@ namespace OpenGlyph.Benchmarks
                         sampler.Tick();
                         for (int i = 0; i < labels.Count; i++)
                         {
-                            var sz = labels[i].MeasureTextSize(text, 800, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost);
-                            if (sz.x <= 0f || sz.y <= 0f) valid = false;
-                            if (sz.x < minW) minW = sz.x;
+                            float w = labels[i].resolvedStyle.width;
+                            float h = labels[i].resolvedStyle.height;
+                            if (w <= 0f || h <= 0f) valid = false;
+                            if (w < minW) minW = w;
                         }
                     }
                     ClearLabels(root, labels);
@@ -573,12 +576,11 @@ namespace OpenGlyph.Benchmarks
                 }
                 sampler.End(res);
                 res.objectCreation = PhaseStat.From(creation);
-                res.observedVerticesMin = (long)(minW == float.MaxValue ? 0 : minW); // measured width proxy
+                res.observedVerticesMin = (long)(minW == float.MaxValue ? 0 : minW); // resolved width proxy
                 res.creationValid = valid && minW > 0f;
-                if (!res.creationValid) res.validityNote = "UIToolkit: MeasureTextSize returned 0 — text not generated";
+                if (!res.creationValid) res.validityNote = "UIToolkit: resolvedStyle size 0 after a frame — Label not laid out / text not generated";
 
                 CreateLabels(root, labels, text);
-                for (int i = 0; i < labels.Count; i++) labels[i].MeasureTextSize(text, 800, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost);
                 ForceUITKLayout(root);
                 yield return null;
 

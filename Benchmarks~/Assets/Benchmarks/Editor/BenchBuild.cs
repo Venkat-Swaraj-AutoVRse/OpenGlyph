@@ -33,7 +33,6 @@ namespace OpenGlyph.Benchmarks.Editor
             // (<LocalLow>/OpenGlyph/OpenGlyphBench) in editor AND player.
             PlayerSettings.productName = "OpenGlyphBench";
             PlayerSettings.companyName = "OpenGlyph";
-            EnsureTmpEssentials();
 
             Directory.CreateDirectory(SceneDir);
             Directory.CreateDirectory(GenDir);
@@ -42,6 +41,7 @@ namespace OpenGlyph.Benchmarks.Editor
             var fontStack = BuildFontStack();
             var appearance = AssetDatabase.LoadAssetAtPath<UniTextAppearance>(AppearancePkg);
             EnsureFontResources();
+            var tmpFontAsset = EnsureTmp();   // creates TMP_Settings + font asset, asserts non-null
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -49,9 +49,8 @@ namespace OpenGlyph.Benchmarks.Editor
             var runner = runnerGo.AddComponent<BenchmarkRunner>();
             runner.openGlyphFonts = fontStack;
             runner.openGlyphAppearance = appearance;
-            var tmpFont = ResolveTmpFont();
-            runner.tmpSourceFont = tmpFont;
-            runner.tmpFontAsset = BuildTmpFontAsset(tmpFont);
+            runner.tmpSourceFont = ResolveTmpFont();
+            runner.tmpFontAsset = tmpFontAsset;
             runner.quitWhenDone = true;
 
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -60,46 +59,63 @@ namespace OpenGlyph.Benchmarks.Editor
             Debug.Log("[BenchBuild] scene built: " + ScenePath);
         }
 
-        // Build (once) a dynamic TMP font asset from the Noto Sans TTF so TMP has a
-        // real, build-included font asset at runtime (fixes player TMP_Settings/font NRE).
-        private static TMPro.TMP_FontAsset BuildTmpFontAsset(Font font)
+        // Create TMP_Settings + a dynamic TMP font asset PROGRAMMATICALLY (do not rely
+        // on the imported essentials asset's singleton being populated). Order matters:
+        // settings instance first (so TMP_FontAsset.CreateFontAsset's TMP_Settings deref
+        // succeeds), then the font asset, then wire font into settings. Returns the font
+        // asset, and HARD-FAILS the build if TMP cannot be made valid.
+        private static TMPro.TMP_FontAsset EnsureTmp()
         {
-            const string path = GenDir + "/BenchTMP_NotoSans.asset";
-            var existing = AssetDatabase.LoadAssetAtPath<TMPro.TMP_FontAsset>(path);
-            if (existing != null) return existing;
-            if (font == null) { Debug.LogWarning("[BenchBuild] no Font for TMP asset"); return null; }
+            const string resDir = "Assets/TextMesh Pro/Resources";
+            const string settingsPath = resDir + "/TMP Settings.asset";
+            const string faPath = GenDir + "/BenchTMP_NotoSans.asset";
+            Directory.CreateDirectory(resDir);
 
-            // TMP_FontAsset.CreateFontAsset dereferences TMP_Settings.instance; make sure
-            // it is loaded (the essentials import does not populate the singleton in a
-            // batchmode session). If it still cannot load, skip asset creation here and
-            // let the runner build one at runtime (CreateFontAsset(Font) resolves settings then).
-            var settings = Resources.Load<TMPro.TMP_Settings>("TMP Settings");
+            // 1) TMP_Settings instance, saved under Resources as "TMP Settings".
+            var settings = AssetDatabase.LoadAssetAtPath<TMPro.TMP_Settings>(settingsPath);
             if (settings == null)
             {
-                Debug.LogWarning("[BenchBuild] TMP_Settings not loadable at build time — skipping prebuilt TMP font asset; runner will build one at runtime.");
-                return null;
+                settings = ScriptableObject.CreateInstance<TMPro.TMP_Settings>();
+                AssetDatabase.CreateAsset(settings, settingsPath);
+                AssetDatabase.SaveAssets();
+                Debug.Log("[BenchBuild] created TMP_Settings asset");
             }
-            TMPro.TMP_Settings.LoadDefaultSettings();
+            TMPro.TMP_Settings.LoadDefaultSettings();   // populate the s_Instance singleton
 
-            TMPro.TMP_FontAsset fa;
-            try
+            // 2) Font asset from the Noto Sans TTF (now that settings is non-null).
+            var fa = AssetDatabase.LoadAssetAtPath<TMPro.TMP_FontAsset>(faPath);
+            if (fa == null)
             {
+                var font = ResolveTmpFont();
+                if (font == null) { Debug.LogError("[BenchBuild] no Font to build TMP font asset"); EditorApplication.Exit(5); }
                 fa = TMPro.TMP_FontAsset.CreateFontAsset(font, 90, 9,
                     UnityEngine.TextCore.LowLevel.GlyphRenderMode.SDFAA, 1024, 1024,
                     TMPro.AtlasPopulationMode.Dynamic, true);
+                fa.name = "BenchTMP_NotoSans";
+                AssetDatabase.CreateAsset(fa, faPath);
+                if (fa.atlasTexture != null) { fa.atlasTexture.name = "BenchTMP_Atlas"; AssetDatabase.AddObjectToAsset(fa.atlasTexture, fa); }
+                if (fa.material != null) { fa.material.name = "BenchTMP_Mat"; AssetDatabase.AddObjectToAsset(fa.material, fa); }
+                AssetDatabase.SaveAssets();
+                Debug.Log("[BenchBuild] built TMP font asset");
             }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning("[BenchBuild] CreateFontAsset threw (" + ex.Message + ") — runner builds TMP font at runtime.");
-                return null;
-            }
-            if (fa == null) { Debug.LogWarning("[BenchBuild] CreateFontAsset returned null"); return null; }
-            fa.name = "BenchTMP_NotoSans";
-            AssetDatabase.CreateAsset(fa, path);
-            if (fa.atlasTexture != null) { fa.atlasTexture.name = "BenchTMP_Atlas"; AssetDatabase.AddObjectToAsset(fa.atlasTexture, fa); }
-            if (fa.material != null) { fa.material.name = "BenchTMP_Mat"; AssetDatabase.AddObjectToAsset(fa.material, fa); }
+
+            // 3) Wire defaultFontAsset into TMP_Settings via SerializedObject.
+            var so = new SerializedObject(settings);
+            var p = so.FindProperty("m_defaultFontAsset");
+            if (p != null) { p.objectReferenceValue = fa; so.ApplyModifiedPropertiesWithoutUndo(); }
+            EditorUtility.SetDirty(settings);
             AssetDatabase.SaveAssets();
-            Debug.Log("[BenchBuild] built TMP font asset: " + path);
+
+            // 4) Assert TMP is actually valid before building; fail loudly if not.
+            TMPro.TMP_Settings.LoadDefaultSettings();
+            bool instOk = TMPro.TMP_Settings.instance != null;
+            bool fontOk = TMPro.TMP_Settings.defaultFontAsset != null;
+            Debug.Log($"[BenchBuild] TMP assert: instance={instOk} defaultFontAsset={fontOk}");
+            if (!instOk || !fontOk)
+            {
+                Debug.LogError("[BenchBuild] TMP_Settings could not be made valid — aborting build so no invalid TMP numbers are produced.");
+                EditorApplication.Exit(6);
+            }
             return fa;
         }
 
@@ -304,27 +320,6 @@ namespace OpenGlyph.Benchmarks.Editor
         }
 
         // Import TMP Essential Resources non-interactively so no modal window opens
-        // in batchmode. Idempotent: skips if the essentials settings asset exists.
-        private static void EnsureTmpEssentials()
-        {
-            try
-            {
-                if (File.Exists("Assets/TextMesh Pro/Resources/TMP Settings.asset"))
-                    return;
-                string pkg = Path.Combine(
-                    EditorApplication.applicationContentsPath,
-                    "Resources/PackageManager/BuiltInPackages/com.unity.ugui/Package Resources/TMP Essential Resources.unitypackage");
-                if (File.Exists(pkg))
-                {
-                    AssetDatabase.ImportPackage(pkg, false); // interactive=false
-                    AssetDatabase.Refresh();
-                    Debug.Log("[BenchBuild] imported TMP Essential Resources (non-interactive)");
-                }
-                else Debug.LogWarning("[BenchBuild] TMP essentials unitypackage not found: " + pkg);
-            }
-            catch (System.Exception ex) { Debug.LogWarning("[BenchBuild] TMP essentials import skipped: " + ex.Message); }
-        }
-
         // ---------------- guarded batchmode entry points (always Exit) ----------------
         public static void BuildWindowsCI() => Guard(BuildWindows);
         public static void BuildAndroidCI() => Guard(BuildAndroid);
