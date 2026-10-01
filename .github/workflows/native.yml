@@ -581,10 +581,14 @@ jobs:
           f="$RUNNER_TEMP/libunitext_native.a"
           echo "=== $f ==="
           file "$f"
-          # emar archives hold wasm objects; llvm-objdump -f reports the file format per member.
-          fmt="$(llvm-objdump -f "$f" 2>/dev/null | grep -iE 'file format|architecture' || true)"
-          echo "$fmt" | head -5
-          printf '%s' "$fmt" | grep -qi 'wasm' || { echo "ARCH FAIL: not wasm"; exit 1; }
+          # `llvm-objdump -f` on an `ar` archive prints no per-member format, so extract one
+          # member object and check ITS format is wasm.
+          mkdir -p "$RUNNER_TEMP/arxt" && (cd "$RUNNER_TEMP/arxt" && emar t "$f" | head -1 > member.name && emar x "$f" "$(cat member.name)")
+          member="$RUNNER_TEMP/arxt/$(cat "$RUNNER_TEMP/arxt/member.name")"
+          echo "probe member: $member"
+          fmt="$(llvm-objdump -f "$member" 2>/dev/null | grep -iE 'file format|architecture' || true)"
+          echo "$fmt"
+          printf '%s' "$fmt" | grep -qi 'wasm' || { echo "ARCH FAIL: member not wasm"; exit 1; }
           # Count defined (not undefined) ut_* symbols across the archive, deduped by name.
           n=$(llvm-nm --defined-only "$f" 2>/dev/null \
                | awk '{print $NF}' | sed 's/^_//' \
