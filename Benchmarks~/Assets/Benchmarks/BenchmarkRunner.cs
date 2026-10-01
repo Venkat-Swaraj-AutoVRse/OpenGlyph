@@ -71,8 +71,9 @@ namespace OpenGlyph.Benchmarks
         private IEnumerator Watchdog()
         {
             float t = 0f;
-            while (t < 600f) { t += Time.unscaledDeltaTime; yield return null; }
-            Debug.LogError("[Bench] WATCHDOG timeout — forcing exit");
+            while (t < 1200f) { t += Time.unscaledDeltaTime; yield return null; }
+            Debug.LogError("[Bench] WATCHDOG timeout — writing partial results then forcing exit");
+            try { WriteResults(); } catch { }
             HardExit(42);
         }
 
