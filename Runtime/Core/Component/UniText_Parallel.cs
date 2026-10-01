@@ -119,10 +119,16 @@ namespace LightSide
         /// carry the element's own (possibly fractional) placement on the pixel grid.
         /// </summary>
         /// <remarks>
-        /// The element origin is expressed in the root canvas's local (reference-pixel) space via
-        /// <c>rootCanvas.InverseTransformPoint</c>, then multiplied by <c>scaleFactor</c> to reach
-        /// device pixels — the same reference→device conversion used for the device scale. Returns
-        /// (0,0) when there is no canvas or in World Space (snapping is disabled there anyway).
+        /// The phase is the element origin's REAL screen-space pixel position, obtained with
+        /// <see cref="RectTransformUtility.WorldToScreenPoint"/> (null camera for Overlay, the
+        /// canvas <c>worldCamera</c> for Camera mode). This is deliberately NOT
+        /// <c>rootCanvas.InverseTransformPoint(position) × scaleFactor</c>: that expresses the origin
+        /// relative to the root-canvas PIVOT (the screen centre for Screen Space - Overlay), so when
+        /// the screen width or height is ODD the centre sits on a half pixel and every glyph would
+        /// snap half a pixel off the physical grid. The screen point already carries that half-pixel
+        /// centre offset, so <c>phase + local·deviceScale</c> equals the vertex's actual screen pixel
+        /// coordinate and rounding it lands on the true device grid. Returns (0,0) when there is no
+        /// canvas or in World Space (snapping is disabled there anyway).
         /// </remarks>
         private Vector2 ComputePixelSnapPhase()
         {
@@ -132,10 +138,10 @@ namespace LightSide
             if (root.renderMode == RenderMode.WorldSpace)
                 return Vector2.zero;
 
-            // Element origin in root-canvas local (reference-pixel) space, then to device pixels.
-            var local = root.transform.InverseTransformPoint(transform.position);
-            var sf = c.scaleFactor;
-            var phase = new Vector2(local.x * sf, local.y * sf);
+            // Overlay renders with no camera; Camera/other screen-space modes use the canvas camera.
+            var cam = root.renderMode == RenderMode.ScreenSpaceOverlay ? null : c.worldCamera;
+            // Real screen-pixel position of the element origin (mesh-local 0,0 == transform.position).
+            var phase = RectTransformUtility.WorldToScreenPoint(cam, transform.position);
             if (float.IsNaN(phase.x) || float.IsInfinity(phase.x) ||
                 float.IsNaN(phase.y) || float.IsInfinity(phase.y))
                 return Vector2.zero;
