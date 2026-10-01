@@ -12,6 +12,28 @@
 #   cmake --build build --config Release
 #
 cmake_minimum_required(VERSION 3.24)
+
+# ---- Static CRT on MSVC (no VC++ redistributable dependency) ------------------
+# The shipped Windows DLLs must NOT import VCRUNTIME140{,_1}.dll / MSVCP140.dll /
+# api-ms-win-crt-*: a Unity player on a machine without the VC++ redistributable then fails to
+# load unitext_native.dll with DllNotFoundException. Unity's own UnityPlayer.dll links the CRT
+# statically and imports neither; we match it. CMAKE_MSVC_RUNTIME_LIBRARY selects /MT (static,
+# MultiThreaded) in Release and /MTd (MultiThreadedDebug) in Debug instead of the default
+# /MD(/MDd) dynamic CRT. It is honoured ONLY under policy CMP0091=NEW (abstraction via the
+# MSVC_RUNTIME_LIBRARY target property rather than hardcoded /MD flags in CMAKE_*_FLAGS).
+#
+# This MUST be set BEFORE the first project()/enable_language and before any FetchContent
+# dependency defines a target, so every subproject (FreeType, HarfBuzz, zlib, libpng,
+# Blend2D/asmjit) inherits it and links the SAME static CRT — a mix of /MT and /MD across the
+# statically-linked deps would both reintroduce the dynamic-CRT import and risk CRT-heap
+# mismatches. A CACHE+FORCE write makes it win over any default a dependency's own CMakeLists
+# might set (see the Blend2D guard further down). Non-MSVC platforms are untouched: the policy
+# and variable have no effect off MSVC.
+cmake_policy(SET CMP0091 NEW)
+set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING
+    "Static MSVC CRT (/MT, /MTd) so the DLLs carry no VC++ runtime import" FORCE)
+
 project(openglyph_native LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -206,6 +228,17 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   set(ASMJIT_STATIC ON CACHE BOOL "" FORCE)
   set(ASMJIT_EMBED  ON CACHE BOOL "" FORCE)
   set(ASMJIT_DIR "${asmjit_SOURCE_DIR}" CACHE PATH "" FORCE)
+  # Static-CRT guard for the embedded asmjit + Blend2D. CMAKE_MSVC_RUNTIME_LIBRARY is already
+  # set FORCE at the top of this file and inherited here, but assert it again right before these
+  # deps are configured, and keep CMP0091 at NEW for them, so neither can quietly re-select the
+  # dynamic CRT. asmjit historically carried an ASMJIT_NO_CUSTOM_FLAGS escape and a static-runtime
+  # toggle; pin both to our choice. Blend2D exposes BLEND2D_STATIC_RUNTIME — turn it ON so, even
+  # on a Blend2D version that reads its own switch instead of CMAKE_MSVC_RUNTIME_LIBRARY, the
+  # static CRT is still selected. All MSVC-only; no effect on other toolchains.
+  set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+  set(ASMJIT_NO_CUSTOM_FLAGS   TRUE CACHE BOOL "" FORCE)
+  set(BLEND2D_STATIC_RUNTIME   ON   CACHE BOOL "" FORCE)
   FetchContent_Declare(blend2d
     GIT_REPOSITORY https://github.com/blend2d/blend2d.git
     GIT_TAG        ${OPENGLYPH_BLEND2D_TAG})
