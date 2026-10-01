@@ -1,0 +1,8 @@
+_get_font_codepoints
+_get_glyph_count
+_shape_text
+_subset_font
+_subset_font_remove_codepoints
+_subset_font_remove_glyphs
+_unitext_free_dialog_result
+_unitext_open_files_dialog

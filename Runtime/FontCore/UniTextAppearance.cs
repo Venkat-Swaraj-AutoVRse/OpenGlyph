@@ -79,7 +79,7 @@ namespace LightSide
             }
 
             materialsByFontId = newDict;
-            defaultMaterialsArr = defaultMaterials.ToArray();
+            defaultMaterialsArr = defaultMaterials != null ? defaultMaterials.ToArray() : Array.Empty<Material>();
         }
 
         /// <summary>

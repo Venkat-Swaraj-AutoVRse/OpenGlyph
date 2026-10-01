@@ -18,6 +18,7 @@ namespace LightSide
     internal sealed class LineBreakAlgorithm
     {
         private readonly UnicodeDataProvider dataProvider;
+        private DictionarySegmenter dictionarySegmenter;
 
         public LineBreakAlgorithm(UnicodeDataProvider dataProvider)
         {
@@ -28,6 +29,22 @@ namespace LightSide
         {
             dataProvider = UnicodeData.Provider ?? throw new InvalidOperationException(
                 "UnicodeData not initialized. Call UnicodeData.EnsureInitialized() first.");
+        }
+
+        /// <summary>
+        /// Computes break opportunities (UAX #14) and then, for South-East-Asian scripts
+        /// that write without spaces (line-break class SA — Thai, Lao, Khmer, Myanmar),
+        /// adds word-boundary break opportunities inside those runs using dictionary
+        /// segmentation. Behaviour for every other script is identical to
+        /// <see cref="GetBreakOpportunities(System.ReadOnlySpan{int},System.Span{LineBreakType})"/>.
+        /// </summary>
+        /// <param name="codePoints">Input codepoints to analyze.</param>
+        /// <param name="breaks">Output buffer (must be at least codePoints.Length + 1).</param>
+        public void GetBreakOpportunitiesWithSegmentation(ReadOnlySpan<int> codePoints, Span<LineBreakType> breaks)
+        {
+            GetBreakOpportunities(codePoints, breaks);
+            dictionarySegmenter ??= new DictionarySegmenter(dataProvider);
+            dictionarySegmenter.InjectBreaks(codePoints, breaks.Slice(0, codePoints.Length + 1));
         }
 
         /// <summary>Computes break opportunities for the given codepoints.</summary>

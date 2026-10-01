@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <!-- AnyCPU: the harness is pure managed interop (P/Invoke via NativeLibrary), arch-neutral.
+         Pinning x64 marked the PE as x64-required, so the arm64 .NET host on the macOS runner
+         refused to load it (System.IO.FileLoadException 'parity', exit 134). AnyCPU loads under
+         the arm64, x64-Linux and x64-Windows runtimes alike; the native DLL under test supplies
+         the architecture. Build with `dotnet build -c Release` then run `dotnet <path>/parity.dll`
+         so no x64 apphost is involved on any OS. -->
+    <AssemblyName>parity</AssemblyName>
+  </PropertyGroup>
+</Project>
