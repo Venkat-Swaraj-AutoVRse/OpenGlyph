@@ -24,6 +24,7 @@ Thumbs.db
 # Plugins/**/unitext_native* binaries (added explicitly) are tracked.
 NativeSource~/build/
 NativeSource~/build-bl/
+NativeSource~/build-clean/
 NativeSource~/tools/
 NativeSource~/tests/renders/
 NativeSource~/out/
