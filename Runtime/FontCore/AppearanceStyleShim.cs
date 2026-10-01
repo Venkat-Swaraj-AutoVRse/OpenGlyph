@@ -24,6 +24,11 @@ namespace LightSide
     /// </remarks>
     public static class AppearanceStyleShim
     {
+        // TEST-ONLY empirical-bisection hooks (default identity → no behavioural change in production).
+        public static float OutlineWidthScaleForTests = 1f;
+        public static float UnderlayOffsetScaleForTests = 1f;
+        public static float UnderlayDilateBiasForTests = 0f;
+
         private static readonly int FaceColor = Shader.PropertyToID("_FaceColor");
         private static readonly int FaceDilate = Shader.PropertyToID("_FaceDilate");
         private static readonly int OutlineSoftness = Shader.PropertyToID("_OutlineSoftness");
@@ -87,16 +92,16 @@ namespace LightSide
             if (outlineOn)
             {
                 s.outlineColor = GetColor(outline, OutlineColor, s.outlineColor);
-                s.outlineWidth = GetFloat(outline, OutlineWidth, s.outlineWidth);
+                s.outlineWidth = GetFloat(outline, OutlineWidth, s.outlineWidth) * OutlineWidthScaleForTests;
                 s.outlineDilate = GetFloat(outline, OutlineDilate, s.outlineDilate);
             }
 
             if (underlayOn)
             {
                 s.underlayColor = GetColor(face, UnderlayColor, s.underlayColor);
-                s.underlayOffsetX = GetFloat(face, UnderlayOffsetX, s.underlayOffsetX);
-                s.underlayOffsetY = GetFloat(face, UnderlayOffsetY, s.underlayOffsetY);
-                s.underlayDilate = GetFloat(face, UnderlayDilate, s.underlayDilate);
+                s.underlayOffsetX = GetFloat(face, UnderlayOffsetX, s.underlayOffsetX) * UnderlayOffsetScaleForTests;
+                s.underlayOffsetY = GetFloat(face, UnderlayOffsetY, s.underlayOffsetY) * UnderlayOffsetScaleForTests;
+                s.underlayDilate = GetFloat(face, UnderlayDilate, s.underlayDilate) + UnderlayDilateBiasForTests;
                 s.underlaySoftness = GetFloat(face, UnderlaySoftness, s.underlaySoftness);
             }
 
