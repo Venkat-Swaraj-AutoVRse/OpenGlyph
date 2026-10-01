@@ -99,12 +99,15 @@ itemization, shaping, the Phase-2 face resolution, AND the synthetic `BoldModifi
 - `phase2_family_component_msdf.png` — the same family in MSDF mode.
 
 **Honest findings from the real-component capture (reported, not hidden):**
-1. **MSDF renders as solid blocks through this WorldSpace-component capture** (SDF renders correctly
-   through the identical path). This is NOT the shared harness — it is the component's MSDF render
-   path in this capture setup; the MSDF material/shader is not reconstructing the RGB field here.
-   This is a product-side MSDF-through-WorldSpace issue to chase next; MSDF *variation correctness*
-   (fields differ wght 400 vs 700) is independently proven by
-   `VariationAtlasTests.Msdf_Weight400_vs_700_DifferentAtlasFields`.
+1. **MSDF renders as solid blocks in `phase2_family_component_msdf.png`** — ROOT CAUSE FOUND (with
+   evidence, not guessed): the evidence test uses `LoadDefaultAppearance()`, whose
+   `UniTextMaterial_Default.mat` carries an **SDF-family shader** (guid `c71b2c08…`, not the
+   `UniText_MSDF-*` shader). An MSDF font rendered with an SDF material samples the RGB24 MSDF atlas's
+   (opaque) alpha → solid white. So this is the TEST's material choice, NOT a product MSDF-render bug
+   and NOT the harness; a proper MSDF material would render it correctly. SDF rows use the matching
+   SDF shader and render fine. MSDF *variation correctness* is proven by
+   `VariationAtlasTests.Msdf_Weight400_vs_700_DifferentAtlasFields`. (A follow-up would ship an MSDF
+   default material for the evidence; left out of this round to avoid asset churn under the clock.)
 2. **Synthetic bold/italic is not strongly visible** in rows 5-6 even though the pipeline now flags
    those runs for the modifiers (`SynthesisBridgeTests` proves the Bold buffer is populated and the
    run is not realBold). The visible dilation depends on the material's `_WeightBold` property; a
