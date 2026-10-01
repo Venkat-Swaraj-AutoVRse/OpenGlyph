@@ -602,6 +602,17 @@ namespace LightSide
                 fontSize = shapingFontSize,
                 baseDirection = baseDirection
             };
+
+            // Phase 2: feed the component's weight/style property to the style source so a FontFamily
+            // selects the matching real face (and variable fonts drive their axes). Active only when a
+            // non-default style is requested; markup <b>/<i> continues through the attribute parser and
+            // the synthetic modifiers, and the two inputs OR together in the Bold/Italic buffers.
+            if (fontWeight != FontStyleSpec.NormalWeight || fontStyleAxis != StyleAxis.Normal)
+                textProcessor.SetStyleSource(true,
+                    new FontStyleSpec(fontWeight, FontStyleSpec.NormalWidth, fontStyleAxis), null, null);
+            else
+                textProcessor.SetStyleSource(false, FontStyleSpec.Normal, null, null);
+
             textProcessor.EnsureFirstPass(textSpan, settings);
         }
 
