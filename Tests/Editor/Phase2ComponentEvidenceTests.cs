@@ -170,6 +170,37 @@ namespace LightSide.Tests
         [Test] public void FamilySheet_Component_MSDF() => FamilySheet(UniTextRenderMode.Msdf, "phase2_family_component_msdf.png");
 
         [Test]
+        public void PlainRegular_NoPhase2_FirstGlyphCheck()
+        {
+            // Isolation: a plain Regular UniText component with NO family, NO FontWeight/Style, NO
+            // variation — pure 1.0 path. If the first glyph is still broken here, the artifact is
+            // pre-existing (not caused by Phase 2). Three rows of "Reading".
+            if (!FT.IsInitialized) FT.Initialize();
+            if (!FT.IsInitialized) Assert.Ignore("FreeType native unavailable.");
+            string noto = MsdfTestUtil.FindNotoSansPath();
+            if (noto == null) Assert.Ignore("NotoSans not found.");
+            var font = Face(noto, UniTextRenderMode.SDF);
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>();
+            stack.fonts.Add(font); _assets.Add(stack);   // plain stack, NO family
+
+            const int rows = 3;
+            var r = RenderCanvasSetup(rows, out var tf);
+            for (int i = 0; i < rows; i++)
+                AddRow(tf, stack, FontStyleSpec.NormalWeight, StyleAxis.Normal, i, rows); // no style props
+
+            var tex = FinishRender(r, out int px);
+            try
+            {
+                Assert.Greater(px, 500, "Plain component render produced almost nothing.");
+                string path = Path.Combine(OutDir(), "phase2_plain_component_sdf.png");
+                File.WriteAllBytes(path, tex.EncodeToPNG());
+                Debug.Log($"[Phase2Component] plain -> {path} ({px} px)");
+                Assert.IsTrue(File.Exists(path));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(tex); }
+        }
+
+        [Test]
         public void RobotoFlexSheet_Component_SDF()
         {
             if (!FT.IsInitialized) FT.Initialize();
