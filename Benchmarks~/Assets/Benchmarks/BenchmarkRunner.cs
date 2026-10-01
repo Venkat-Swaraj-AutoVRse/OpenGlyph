@@ -159,7 +159,7 @@ namespace OpenGlyph.Benchmarks
                 for (int it = -warmups; it < iterations; it++)
                 {
                     bool measure = it >= 0;
-                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = GC.GetTotalAllocatedBytes(); }
+                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
                     CreateUniTextSet(objs, rects, text);
                     Canvas.ForceUpdateCanvases(); // first mesh ready for all
@@ -170,7 +170,7 @@ namespace OpenGlyph.Benchmarks
                         if (it == 0)
                         {
                             res.gcCollectionsDuringCreation = GC.CollectionCount(0) - gcBefore;
-                            res.allocatedMBDuringCreation = (GC.GetTotalAllocatedBytes() - bytesBefore) / (1024.0 * 1024.0);
+                            res.allocatedMBDuringCreation = Math.Max(0, Profiler.GetMonoUsedSizeLong() - bytesBefore) / (1024.0 * 1024.0);
                         }
                     }
                     DestroySet(objs, rects);
@@ -191,7 +191,7 @@ namespace OpenGlyph.Benchmarks
                 {
                     bool measure = it >= 0;
                     string t = (it % 2 == 0) ? altText : text;
-                    if (measure && !fullBytesTaken) { GC.Collect(); fullBytes = GC.GetTotalAllocatedBytes(); }
+                    if (measure && !fullBytesTaken) { GC.Collect(); fullBytes = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
                     for (int i = 0; i < objs.Count; i++) objs[i].Text = t;
                     Canvas.ForceUpdateCanvases();
@@ -201,7 +201,7 @@ namespace OpenGlyph.Benchmarks
                         full.Add(sw.Elapsed.TotalMilliseconds);
                         if (!fullBytesTaken)
                         {
-                            double kb = (GC.GetTotalAllocatedBytes() - fullBytes) / 1024.0 / objs.Count;
+                            double kb = Math.Max(0, Profiler.GetMonoUsedSizeLong() - fullBytes) / 1024.0 / objs.Count;
                             res.kbPerFullRebuildOp = kb; fullBytesTaken = true;
                         }
                     }
@@ -302,7 +302,7 @@ namespace OpenGlyph.Benchmarks
                 for (int it = -warmups; it < iterations; it++)
                 {
                     bool measure = it >= 0;
-                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = GC.GetTotalAllocatedBytes(); }
+                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
                     CreateTMPSet(objs, rects, text);
                     Canvas.ForceUpdateCanvases();
@@ -314,7 +314,7 @@ namespace OpenGlyph.Benchmarks
                         if (it == 0)
                         {
                             res.gcCollectionsDuringCreation = GC.CollectionCount(0) - gcBefore;
-                            res.allocatedMBDuringCreation = (GC.GetTotalAllocatedBytes() - bytesBefore) / (1024.0 * 1024.0);
+                            res.allocatedMBDuringCreation = Math.Max(0, Profiler.GetMonoUsedSizeLong() - bytesBefore) / (1024.0 * 1024.0);
                         }
                     }
                     DestroyTMPSet(objs, rects);
@@ -333,14 +333,14 @@ namespace OpenGlyph.Benchmarks
                 {
                     bool measure = it >= 0;
                     string t = (it % 2 == 0) ? altText : text;
-                    if (measure && !taken) { GC.Collect(); fullBytes = GC.GetTotalAllocatedBytes(); }
+                    if (measure && !taken) { GC.Collect(); fullBytes = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
                     for (int i = 0; i < objs.Count; i++) { objs[i].text = t; objs[i].ForceMeshUpdate(); }
                     sw.Stop();
                     if (measure)
                     {
                         full.Add(sw.Elapsed.TotalMilliseconds);
-                        if (!taken) { res.kbPerFullRebuildOp = (GC.GetTotalAllocatedBytes() - fullBytes) / 1024.0 / objs.Count; taken = true; }
+                        if (!taken) { res.kbPerFullRebuildOp = Math.Max(0, Profiler.GetMonoUsedSizeLong() - fullBytes) / 1024.0 / objs.Count; taken = true; }
                     }
                     yield return null;
                 }
@@ -434,7 +434,7 @@ namespace OpenGlyph.Benchmarks
                 for (int it = -warmups; it < iterations; it++)
                 {
                     bool measure = it >= 0;
-                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = GC.GetTotalAllocatedBytes(); }
+                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
                     CreateLabels(root, labels, text);
                     ForceUITKLayout(root);
@@ -445,7 +445,7 @@ namespace OpenGlyph.Benchmarks
                         if (it == 0)
                         {
                             res.gcCollectionsDuringCreation = GC.CollectionCount(0) - gcBefore;
-                            res.allocatedMBDuringCreation = (GC.GetTotalAllocatedBytes() - bytesBefore) / (1024.0 * 1024.0);
+                            res.allocatedMBDuringCreation = Math.Max(0, Profiler.GetMonoUsedSizeLong() - bytesBefore) / (1024.0 * 1024.0);
                         }
                     }
                     ClearLabels(root, labels);
@@ -464,7 +464,7 @@ namespace OpenGlyph.Benchmarks
                 {
                     bool measure = it >= 0;
                     string t = (it % 2 == 0) ? altText : text;
-                    if (measure && !taken) { GC.Collect(); fullBytes = GC.GetTotalAllocatedBytes(); }
+                    if (measure && !taken) { GC.Collect(); fullBytes = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
                     for (int i = 0; i < labels.Count; i++) labels[i].text = t;
                     ForceUITKLayout(root);
@@ -472,7 +472,7 @@ namespace OpenGlyph.Benchmarks
                     if (measure)
                     {
                         full.Add(sw.Elapsed.TotalMilliseconds);
-                        if (!taken) { res.kbPerFullRebuildOp = (GC.GetTotalAllocatedBytes() - fullBytes) / 1024.0 / labels.Count; taken = true; }
+                        if (!taken) { res.kbPerFullRebuildOp = Math.Max(0, Profiler.GetMonoUsedSizeLong() - fullBytes) / 1024.0 / labels.Count; taken = true; }
                     }
                     yield return null;
                 }
@@ -557,31 +557,41 @@ namespace OpenGlyph.Benchmarks
         // ---------------------------------------------------------------- Glyph raster
         private void RunGlyphRaster()
         {
-            // FreeType path (OpenGlyph): load Noto Sans bytes, render N distinct glyphs.
+            // OpenGlyph FreeType-backed path: build a font from Noto Sans bytes and
+            // time adding N distinct glyphs to the atlas (FreeType raster + SDF pack).
+            // Uses the public UniTextFont API; FreeType itself is internal to the package.
             try
             {
                 string fontPath = ResolveFontPath("NotoSans-Regular.ttf");
-                if (fontPath != null && FreeType.Initialize() && FreeType.LoadFontFromPath(fontPath))
+                if (fontPath != null)
                 {
-                    int rendered = 0;
-                    var sw = Stopwatch.StartNew();
-                    for (uint gi = 1; gi <= (uint)glyphRasterCount; gi++)
+                    var bytes = File.ReadAllBytes(fontPath);
+                    var font = LightSide.UniTextFont.CreateFontAsset(bytes, glyphRasterSize, 0.25f,
+                        LightSide.UniTextRenderMode.SDF, 1024);
+                    font.LoadFontFace();
+                    // Collect N distinct glyph indices from Latin + a few Arabic/Hebrew.
+                    var indices = new List<uint>(glyphRasterCount);
+                    for (uint cp = 0x20; indices.Count < glyphRasterCount && cp < 0x5FF; cp++)
                     {
-                        if (FreeType.TryRenderGlyph(gi, glyphRasterSize, out var g) && g.isValid) rendered++;
+                        uint gi = font.GetGlyphIndexForUnicode(cp);
+                        if (gi != 0 && !indices.Contains(gi)) indices.Add(gi);
                     }
+                    var sw = Stopwatch.StartNew();
+                    int added = font.TryAddGlyphsBatch(indices);
                     sw.Stop();
                     report.glyphRaster.Add(new GlyphRasterResult
                     {
                         engine = "FreeType (OpenGlyph)", font = "NotoSans-Regular",
-                        glyphSize = glyphRasterSize, glyphCount = rendered,
+                        glyphSize = glyphRasterSize, glyphCount = added,
                         totalMs = sw.Elapsed.TotalMilliseconds,
-                        msPerGlyph = rendered > 0 ? sw.Elapsed.TotalMilliseconds / rendered : 0
+                        msPerGlyph = added > 0 ? sw.Elapsed.TotalMilliseconds / added : 0,
+                        note = "UniTextFont.TryAddGlyphsBatch (FreeType raster + SDF pack into atlas)"
                     });
-                    Debug.Log($"[Bench] FreeType raster {rendered} glyphs in {sw.Elapsed.TotalMilliseconds:F2}ms");
+                    Debug.Log($"[Bench] OpenGlyph raster {added} glyphs in {sw.Elapsed.TotalMilliseconds:F2}ms");
                 }
                 else
                 {
-                    report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "font load failed: " + (fontPath ?? "path not found") });
+                    report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "font path not found" });
                 }
             }
             catch (Exception ex)
