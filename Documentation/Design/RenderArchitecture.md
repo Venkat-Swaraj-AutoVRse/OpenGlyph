@@ -662,3 +662,62 @@ the legacy path computes — then the ported ramp matches. That propagation is t
 concrete, bounded next task; it was out of this session's remaining budget after the
 MSDF root-cause fix. The current shipped uber (fwidth) renders all cases correctly
 with 99.4–99.8 % within 2/255.
+
+
+### 8.6 Outline/underlay — CPU reference + runtime capture (R3)
+
+Per the "build a CPU reference, don't re-derive by reading" approach, the two
+fragment programs were transcribed to CPU and the actual GPU inputs/outputs were
+captured through the player harness (`BenchmarkBoot`, world-space 1280×720).
+
+**CPU model — the per-pixel math is IDENTICAL.** `UniText/SDF SSD` PixShader and
+`UniText/Uber` frag were modelled in isolation and fed the SAME `(dist, scale)` over
+`dist∈[0,1]` at scales {6,8,10,12,16}. For the harness style (white face, red
+outline width 0.25, softness 0, dilate 0, `_ScaleRatioA=1`, normFactor 0.4) the two
+models are **bit-identical (maxΔ 0.00000)** at every dist and scale — composited
+premultiplied RGBA included. So the divergence is NOT in the fragment arithmetic as
+written.
+
+**Runtime input dump — every input is IDENTICAL.** For the outline glyph, both paths
+feed the fragment the same data: UV0 `(u,v,gradientScale=8,xScaleVal=1)`, UV1.x
+`spreadRatio=0.25` (→ normFactor 0.4), `styleIdx=0`; the StyleTable row carries
+`outline=(1,0,0,1)`, `scal0=(faceDilate 0, softness 0, outlineWidth 0.25, 0)`;
+`_AtlasSize=1024` = the legacy atlas page width; `_ScaleRatioA/B/C=1`,
+`_ScaleX/Y=1`, `_WeightNormal/_Bold=0/1`, `_Sharpness=0` (no code sets the ratios at
+render time — the serialized `=1` holds). First-quad `uv0` bounds and local vertex
+positions are **identical** between the legacy per-glyph mesh and the unified merged
+mesh (`[(0,0)..(0.05,0.06)]`, pos `[-649,296.69]..[-593,355.69]`).
+
+**GPU capture (`_UberDebug`, a temporary batching-safe diagnostic uniform, since
+reverted) — `outAlpha` under-saturates.** On an ALIGNED scanline (same glyph, same
+stage), legacy renders a **wide saturated red plateau** (`(255,0,0)` across the ring)
+while unified's outline alpha is a **narrow triangular hump peaking at ≈0.43** and
+never reaching 1.0 — the composite then shows only a thin, faint ring (the measured
+nonBg 3690 vs 5555). The composited unified pixels equal the debug `outAlpha`
+exactly, so the premultiplied `BlendOver` composite is faithful; the deficit is in
+`outAlpha` itself.
+
+**Differing term.** With identical inputs AND identical arithmetic, the only quantity
+that can make `outAlpha = saturate(dist·scale − outlineBias)` peak at ≈0.43 instead
+of saturating — while the FACE (`alpha`, a near-step at dist 0.5) stays bit-exact —
+is the in-fragment **`scale`** at the glyph FRINGE, where the outline band lives
+(dist≈0.45, out on the flat part of the SDF ramp). `scale` is derived in-frag from
+`(|ddx(uv0.y)|+|ddy(uv0.y)|)·_AtlasSize·0.75`. `_AtlasSize`, the atlas page size, and
+the quad's uv0.y span are all identical, yet the empirical outline sweep needs the
+width ×2.73–2.85 to match legacy's lit/red — i.e. the unified ring behaves ~2.8×
+narrower, consistent with the merged single-draw mesh yielding a different
+screen-space `uv0.y` derivative at glyph-boundary fragments than legacy's
+per-glyph draws do. The face edge, being a near-step at dist 0.5, is insensitive to
+this; the outline extent, living out on the ramp, is not — which is exactly why four
+cases are bit-exact and only outline/underlay diverge.
+
+**Status / bounded next step.** Characterised to the term (`scale` at the fringe via
+the merged-mesh screen-space derivative), not closed. A magic width constant was NOT
+applied (no single k fits both lit and red; the brief forbids it). The derivation
+fix is to make the outline/underlay extent independent of the fragile merged-mesh
+`ddx/ddy(uv0.y)` — e.g. carry a per-vertex `scale` (clean per glyph in the vertex
+stage) for the OUTLINE/UNDERLAY layers only, leaving the face's in-frag derivative
+untouched so SDF/MSDF/`<color>` stay bit-exact (those cases have no visible
+outline/underlay, so an outline-only change cannot regress them). CPU model + capture
+harness live in the host `BenchmarkBoot` (`DumpInputs`, scanline capture); the
+`_UberDebug` uniform was reverted out of the production shader.
