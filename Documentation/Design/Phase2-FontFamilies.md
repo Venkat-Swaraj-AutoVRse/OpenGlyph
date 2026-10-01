@@ -194,11 +194,33 @@ Test fixtures:
 
 ---
 
-## 4. Open decisions for the user
-- **Optical size (`opsz`) policy**: auto-drive from render point size (proposed) vs
-  explicit-only. Auto changes glyph shape with size, which some users will not expect.
-- **Synthetic-when-real-exists**: proposed to *suppress* synthetic bold/italic once a real face
-  is chosen. Alternative: allow stacking (faux-bold a real italic) behind an opt-in flag.
-- **Variation cache memory**: each distinct variation key is a distinct atlas region. A naive
-  animation sweeping `wght` would explode the atlas. Proposed: quantize keys (coarse by default)
-  and document the cost; optionally cap/evict. Needs a default quantization step decision.
+## 4. Decisions (recorded round 2)
+These were decided by the project owner and are now binding; the implementation follows them.
+- **Optical size (`opsz`)**: auto-drive from the rendered font size (CSS `font-optical-sizing: auto`),
+  with a per-component override and an off switch. Never auto-drive when the user set `opsz`
+  explicitly (an explicit per-run/axis value wins over the size-derived value).
+- **Font-synthesis semantics**: NEVER stack synthetic on a real face. Synthesize bold/italic ONLY
+  when the family has no matching face. A real Bold face selected under `<b>` must not also be
+  dilated by `BoldModifier`; a real Italic under `<i>` must not also be sheared by `ItalicModifier`.
+- **VariationKey quantization**: named instances map EXACTLY (no quantization). Free coordinates
+  quantize to **1% of each axis's (max−min) range** by default, configurable per font asset, so
+  animating an axis cannot create unbounded atlas entries. If the atlas needs a hard bound, add an
+  LRU/eviction cap on variation entries (noted; implement if the atlas pressure shows up).
+- **Weight/width/style auto-fill**: do NOT add a native export. Parse `OS/2` (`usWeightClass`,
+  `usWidthClass`, `fsSelection`) and `head.macStyle` in MANAGED code from the font bytes the asset
+  already holds. Keep `FaceStyle.FromStyleName` only as a fallback when `OS/2` is absent. Explicit
+  inspector values still override.
+
+## 5. Live-pipeline wiring (round 2)
+How the family/variation layer threads through the existing render path:
+- A per-run **requested `FontStyleSpec` + explicit axis overrides** is produced by `TextProcessor`
+  from the component's style settings and `<b>`/`<i>`/axis markup, and attached to each shaped run.
+- When the resolved font member is a `FontFamily`, `FontFamily.Resolve` picks the real face; the run
+  then carries that face's `fontId` AND a `VariationKey` (None for a static face). The synthetic
+  `BoldModifier`/`ItalicModifier` are suppressed on runs that got a real face (CSS `font-synthesis`).
+- The `Shaper` keeps one HarfBuzz font per `(faceInstanceId, VariationKey)`, applying
+  `FTVar.SetHbVariations` so shaping advances match; the FreeType face has `SetDesignCoordinates`
+  applied for that key before rasterization.
+- `UniTextFont`'s glyph/atlas cache key becomes `(glyphIndex, VariationKey)` so SDF, MSDF, Smooth,
+  Mono, pixel and COLR never share a cell between instances. The fallback chain is unchanged in
+  structure; the variation request travels with the run and is a no-op on non-variable faces.
