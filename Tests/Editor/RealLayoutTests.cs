@@ -255,6 +255,40 @@ namespace LightSide.Tests
         }
 
         /// <summary>
+        /// With no dictionaries assigned, laying out text that contains NO Thai/Lao/Khmer/Myanmar
+        /// must log nothing, and Thai text must warn only once (for Thai only), however many
+        /// times it is laid out.
+        /// </summary>
+        [Test]
+        public void NoDictionaryAssigned_WarnsOnlyForScriptsActuallyLaidOut_AndOnlyOnce()
+        {
+            var settingsAsset = ScriptableObject.CreateInstance<UniTextSettings>();
+            UniTextSettings.SetInstance(settingsAsset);
+            SegHelper.ResetDictionaryAssignment();
+            try
+            {
+                var latin = SegHelper.ToCodepoints("The quick brown fox jumps over the lazy dog, again and again.");
+                var latinBreaks = new LineBreakType[latin.Length + 1];
+                SharedPipelineComponents.LineBreakAlgorithm.GetBreakOpportunitiesWithSegmentation(latin, latinBreaks);
+                LogAssert.NoUnexpectedReceived();
+
+                var thai = SegHelper.ToCodepoints(SegmentationFixtures.Thai[2].Text);
+                var thaiBreaks = new LineBreakType[thai.Length + 1];
+                LogAssert.Expect(LogType.Warning,
+                    new Regex(@"\[DictionarySegmenter\] No segmentation dictionary assigned for Thai"));
+                SharedPipelineComponents.LineBreakAlgorithm.GetBreakOpportunitiesWithSegmentation(thai, thaiBreaks);
+                SharedPipelineComponents.LineBreakAlgorithm.GetBreakOpportunitiesWithSegmentation(thai, thaiBreaks);
+                LogAssert.NoUnexpectedReceived();
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settingsAsset);
+                SegHelper.ResetDictionaryAssignment();
+                SegHelper.AssignDictionaries();
+            }
+        }
+
+        /// <summary>
         /// Khmer and Myanmar real-layout coverage, using the bundled OFL Noto Sans fixtures
         /// (see Fixtures/SOURCES.md). Each script must wrap only at dictionary word boundaries
         /// and never inside a grapheme cluster.
