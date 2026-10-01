@@ -62,6 +62,22 @@ namespace LightSide
             }
         }
 
+        [Header("Shared Glyph Atlas (Render Architecture R2)")]
+        [SerializeField]
+        [Tooltip("Max pages (Texture2DArray slices) PER shared glyph-atlas array before LRU eviction " +
+                 "begins reusing pages. 0 (default) = unbounded: the array grows and never evicts, so " +
+                 "behaviour is identical to the legacy per-font atlas until a budget is configured. " +
+                 "Set a positive cap to bound glyph memory under variable fonts; least-recently-used, " +
+                 "unreferenced glyphs are then evicted and re-rasterized on demand.")]
+        [Min(0)]
+        private int sharedAtlasPageBudget = 0;
+
+        /// <summary>
+        /// Max pages per shared glyph-atlas array before eviction. 0 = unbounded (no eviction;
+        /// unchanged legacy behaviour). See <see cref="GlyphAtlasArray.PageBudget"/>.
+        /// </summary>
+        public static int SharedAtlasPageBudget => Instance != null ? Instance.sharedAtlasPageBudget : 0;
+
         public static event Action Changed;
 
     #if UNITY_EDITOR

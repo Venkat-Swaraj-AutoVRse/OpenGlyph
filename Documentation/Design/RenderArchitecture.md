@@ -361,24 +361,33 @@ Mechanism:
 
 ---
 
-## 5. Open decisions for the user
+## 5. Decisions (RESOLVED by the conductor, Round 2) — these are now binding
 
-1. **Literal 1 draw call vs 2 for text+emoji.** Default keeps emoji as a second
-   RGBA array (text+emoji = 2 calls, SDF stays Alpha8/1 B/px). A literal single
-   call requires promoting all glyph slices to RGBA32 (4× the distance-atlas
-   memory). Default to 2, with the unified mode as an opt-in setting? 
-2. **StructuredBuffer vs float-texture style table as the shipped default.**
-   Buffer is faster but excludes WebGL2/GLES3.0; float-texture is universal.
-   Ship float-texture everywhere, or auto-select buffer where supported (two code
-   paths to maintain)?
-3. **Compression library.** zstd (best ratio, new native dep in the font
-   pipeline) vs reuse of an existing Brotli/WOFF2 path. Any constraint on adding
-   a native compression dependency to the build?
-4. **Variable-font atlas budget defaults** (MB / page cap per mode) — set
-   conservative defaults now and expose on `UniTextSettings`?
-5. **Minimum platform floor** — is GLES3.0/WebGL2 a hard target (forces the
-   float-texture + Texture2DArray-only path, no compute buffers), or can we
-   require GLES3.1+/Vulkan on Quest and treat WebGL2 as the fallback tier?
+The Round-1 open questions were decided by the conductor for the Round-2
+implementation. They supersede the "options" framing above; the alternatives are
+retained only as rejected-path rationale.
+
+1. **Two draw groups max per canvas batch (text + emoji).** A canvas batch uses at
+   most **two** array bindings: an **Alpha8 `Texture2DArray`** for SDF / coverage
+   bitmap / pixel (1 B/px), and an **RGBA32 `Texture2DArray`** for **MSDF + COLR
+   emoji**. We do **not** promote everything to one RGBA32 array (that would be 4×
+   memory for SDF on Quest). So text-only = 1 draw call; text+emoji (or text+MSDF)
+   = 2. The "unified single RGBA array" idea is dropped.
+   - Consequence: MSDF, previously RGB24, now lives in the shared **RGBA32** emoji
+     array (median-of-three reads .rgb; .a unused for MSDF). This keeps array
+     slice formats to exactly two.
+2. **Style table = a float `Texture2D` style table.** Works on GLES3.0 / WebGL2
+   with no compute-buffer requirement. `StructuredBuffer` is **not** used — one
+   portable path, not two. Each glyph vertex carries a `styleIdx`; the fragment
+   shader samples the style record from the float texture.
+3. **Platform floor = GLES3.0 / WebGL2.** Quest runs via Vulkan / GLES3. This is
+   what forces decision 2 (float-texture, no SRV buffers in the UI shader) and
+   permits `sampler2DArray` (core in GLES3 / WebGL2).
+4. **Font compression = zstd**, implemented in a **later step** (not this round).
+5. **Atlas budget defaults = decided later from the Round-2 benchmark numbers.**
+   This round ships the budget *mechanism* (refcount + LRU + page reuse) with the
+   default of **no eviction** (budget unset ⇒ behaviour unchanged), and the
+   benchmark in step 4 produces the numbers the defaults will be set from.
 
 ---
 
