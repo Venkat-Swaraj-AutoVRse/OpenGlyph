@@ -46,6 +46,10 @@ namespace LightSide
         {
             if (SharedMaterials.TryGetValue(format, out var m) && m != null) return m;
             var sh = UberShader;
+            if (sh == null)
+                Cat.MeowWarnFormat("[UniText] UniText/Uber shader not found at runtime (stripped from the build?). " +
+                    "The unified renderer is falling back to UI/Default and will NOT render text correctly. " +
+                    "Ensure it is in Always-Included Shaders (the build processor adds it).");
             m = new Material(sh != null ? sh : Shader.Find("UI/Default"))
             {
                 name = $"UniText Uber Shared [{format}]",
