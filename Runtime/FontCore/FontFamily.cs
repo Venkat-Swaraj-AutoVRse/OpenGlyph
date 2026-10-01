@@ -73,7 +73,10 @@ namespace LightSide
         public void AddFace(UniTextFont font)
         {
             if (font == null) return;
-            faces.Add(new FamilyFace(font, FaceStyle.FromStyleName(font.FaceInfo.styleName)));
+            // Authoritative: OS/2 + head.macStyle parsed from the font bytes; name heuristic only
+            // when OS/2 is absent. Explicit inspector edits to the FaceStyle still override.
+            var style = OpenTypeStyleReader.Derive(font.FontData, font.FaceInfo.styleName);
+            faces.Add(new FamilyFace(font, style));
         }
 
         // Tracks (family instance, missing-style signature) pairs already warned about, so the
