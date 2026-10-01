@@ -1,0 +1,13 @@
+<!--
+  Preserve TextMeshPro + TextCore text types against IL2CPP managed code stripping.
+  Without this, nothing statically references TMP_Settings, so the linker strips it
+  and Resources.Load<TMP_Settings>("TMP Settings") returns null in the player,
+  which NREs TMP_FontAsset.CreateFontAsset / TextMeshProUGUI defaults.
+-->
+<linker>
+  <assembly fullname="Unity.TextMeshPro" preserve="all"/>
+  <assembly fullname="UnityEngine.TextCoreTextEngineModule" preserve="all"/>
+  <assembly fullname="UnityEngine.TextCoreFontEngineModule" preserve="all"/>
+  <assembly fullname="UnityEngine.TextRenderingModule" preserve="all"/>
+  <assembly fullname="UnityEngine.UIElementsModule" preserve="all"/>
+</linker>
