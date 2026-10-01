@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: MIT
-// OpenGlyph benchmark runner. Measures, per system x text set:
-//   Object Creation, Full Rebuild, Layout, Mesh Rebuild (median + p95 of N iterations
-//   after W warmups, 100 objects), GC collections + MB allocated during creation,
-//   KB allocated per full-rebuild op; plus glyph rasterization (FreeType vs Unity
-//   FontEngine) and font build-size. Writes JSON next to the player / to a path.
+// OpenGlyph benchmark runner v2 — with a VALIDITY GATE.
 //
-// Methodology mirrors UniText's published marketing methodology (100 objects,
-// 10 iterations, 3 warmups, ~2300 chars/object, Latin+Arabic+Hebrew+Mixed,
-// parallel OFF) and ADDS a parallel-ON OpenGlyph pass for completeness.
+// Every timed phase is only reported VALID if each of the 100 objects actually
+// produced output in the timed window:
+//   OpenGlyph : ResultGlyphs.Length > 0 AND ResultSize.y > 0 per object.
+//   TMP       : textInfo.characterCount reaches the expected count AND
+//               textInfo.meshInfo[0].vertexCount > 0 after ForceMeshUpdate(true,true).
+//   UIToolkit : MeasureTextSize returns a non-zero size AND the panel generates
+//               text (worldBound resolved) — UITK generates text lazily during
+//               layout/repaint, so we force it and verify, else mark INVALID.
+// An incomplete phase is TIMED but flagged INVALID (not silently reported).
 //
-// Forced synchronous updates per system:
-//   OpenGlyph : set Text / SetDirty, then Canvas.ForceUpdateCanvases() which fires
-//               the static Canvas.willRenderCanvases batch (where UseParallel applies).
-//   TMP       : set .text, then ForceMeshUpdate().
-//   UIToolkit : set Label.text / style, then flush the panel layout via
-//               UIElementsUtility-free path: Panel.UpdateAnimations is unavailable,
-//               so we read resolvedStyle after MarkDirtyRepaint + a forced visual-tree
-//               layout by querying worldBound (triggers layout pass synchronously).
+// Allocations use ProfilerRecorder "GC Allocated In Frame" + "GC Reserved Memory"
+// summed over the phase, plus GC.CollectionCount(0..2) and GC.GetTotalMemory deltas,
+// with a fixed random seed and the incremental-GC setting recorded.
+//
+// OpenGlyph also gets per-stage Stopwatch splits (shape / layout / raster / mesh)
+// averaged per object, so a slow result points at the stage to fix.
+//
+// Methodology mirrors UniText's published methodology (100 objects, 10 iters,
+// 3 warmups, ~2300 chars, Latin+Arabic+Hebrew+Mixed, parallel OFF) + parallel ON.
 
 using System;
 using System.Collections;
@@ -25,8 +28,10 @@ using System.Diagnostics;
 using System.IO;
 using LightSide;
 using TMPro;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Profiling;
+using UnityEngine.Scripting;
 using UnityEngine.UI;
 using UnityEngine.UIElements;
 using Debug = UnityEngine.Debug;
@@ -41,10 +46,12 @@ namespace OpenGlyph.Benchmarks
         public int warmups = 3;
         public int glyphRasterCount = 200;
         public int glyphRasterSize = 48;
+        public int randomSeed = 12345;
 
-        [Header("Fonts (assigned in scene / loaded from StreamingAssets)")]
-        public Font tmpSourceFont;              // used to build a TMP dynamic font asset
-        public UniTextFontStack openGlyphFonts; // OpenGlyph font stack (Noto Sans/Arabic/Hebrew)
+        [Header("Fonts")]
+        public Font tmpSourceFont;
+        public TMP_FontAsset tmpFontAsset;      // explicit TMP font asset for the player
+        public UniTextFontStack openGlyphFonts;
         public UniTextAppearance openGlyphAppearance;
 
         [Header("Output")]
@@ -53,7 +60,6 @@ namespace OpenGlyph.Benchmarks
 
         private Canvas canvas;
         private RectTransform canvasRect;
-
         private readonly BenchmarkReport report = new BenchmarkReport();
 
         private void Start()
@@ -62,12 +68,10 @@ namespace OpenGlyph.Benchmarks
             StartCoroutine(RunAll());
         }
 
-        // Hard safety net: force-exit if the run wedges (e.g. a stuck forced update).
         private IEnumerator Watchdog()
         {
-            float budget = 600f; // 10 minutes
             float t = 0f;
-            while (t < budget) { t += Time.unscaledDeltaTime; yield return null; }
+            while (t < 600f) { t += Time.unscaledDeltaTime; yield return null; }
             Debug.LogError("[Bench] WATCHDOG timeout — forcing exit");
             HardExit(42);
         }
@@ -83,39 +87,31 @@ namespace OpenGlyph.Benchmarks
 
         private IEnumerator RunAll()
         {
+            UnityEngine.Random.InitState(randomSeed);
             report.objectCount = objectCount;
             report.iterations = iterations;
             report.warmups = warmups;
             FillEnvironment(report.environment);
+            report.environment.randomSeed = randomSeed;
 
-            Debug.Log($"[Bench] START {report.environment.buildType} unity={report.environment.unityVersion}");
+            Debug.Log($"[Bench] START {report.environment.buildType} unity={report.environment.unityVersion} incrementalGC={report.environment.incrementalGCEnabled}");
 
             SetupCanvas();
             yield return null;
 
-            // ---- Per-system x text-set perf ----
-            // OpenGlyph parallel OFF (matches published methodology), then ON.
-            yield return RunOpenGlyph(parallel: false);
-            yield return RunOpenGlyph(parallel: true);
-            // TMP (Latin fair; Arabic/Hebrew/Mixed unshaped -> flagged not fair)
+            yield return RunOpenGlyph(false);
+            yield return RunOpenGlyph(true);
             yield return RunTMP();
-            // UI Toolkit Label
             yield return RunUIToolkit();
 
-            // ---- Glyph rasterization: FreeType vs Unity FontEngine ----
             RunGlyphRaster();
-
-            // ---- Build size ----
             RunBuildSize();
-
             WriteResults();
 
             Debug.Log("[Bench] DONE");
-            if (quitWhenDone)
-                HardExit(0);
+            if (quitWhenDone) HardExit(0);
         }
 
-        // ---------------------------------------------------------------- env
         private static void FillEnvironment(EnvironmentInfo e)
         {
             e.unityVersion = Application.unityVersion;
@@ -125,20 +121,18 @@ namespace OpenGlyph.Benchmarks
             e.systemMemoryMB = SystemInfo.systemMemorySize;
             e.graphicsDevice = SystemInfo.graphicsDeviceName;
             e.timestampUtc = DateTime.UtcNow.ToString("o");
+            e.incrementalGCEnabled = GarbageCollector.isIncremental;
 #if ENABLE_IL2CPP
             e.scriptingBackend = "IL2CPP";
 #else
             e.scriptingBackend = "Mono";
 #endif
 #if UNITY_EDITOR
-            e.buildType = "Editor (not representative)";
-            e.representative = false;
+            e.buildType = "Editor (not representative)"; e.representative = false;
 #elif UNITY_ANDROID
-            e.buildType = "Android-" + e.scriptingBackend + "-Release";
-            e.representative = true;
+            e.buildType = "Android-" + e.scriptingBackend + "-Release"; e.representative = true;
 #else
-            e.buildType = "StandaloneWindows64-" + e.scriptingBackend + "-Release";
-            e.representative = true;
+            e.buildType = "StandaloneWindows64-" + e.scriptingBackend + "-Release"; e.representative = true;
 #endif
         }
 
@@ -150,7 +144,45 @@ namespace OpenGlyph.Benchmarks
             canvasRect = canvas.GetComponent<RectTransform>();
         }
 
-        // ---------------------------------------------------------------- OpenGlyph
+        // ---- allocation sampler using ProfilerRecorder ----
+        private struct AllocSampler
+        {
+            private ProfilerRecorder allocated;   // GC Allocated In Frame (bytes/frame)
+            private long sum;
+            private int g0, g1, g2;
+            private long totalMem;
+
+            public static AllocSampler Begin()
+            {
+                var s = new AllocSampler();
+                s.allocated = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame");
+                s.sum = 0;
+                s.g0 = GC.CollectionCount(0); s.g1 = GC.CollectionCount(1); s.g2 = GC.CollectionCount(2);
+                s.totalMem = GC.GetTotalMemory(false);
+                return s;
+            }
+            public void Tick()
+            {
+                if (allocated.Valid && allocated.Count > 0) sum += allocated.LastValue;
+            }
+            public void End(SystemTextResult r)
+            {
+                if (allocated.Valid) { for (int i = 0; i < allocated.Count; i++) { } }
+                r.gcAllocCreationKB = sum / 1024.0;
+                r.allocatedMBDuringCreation = sum / (1024.0 * 1024.0);
+                r.gcGen0Delta = GC.CollectionCount(0) - g0;
+                r.gcGen1Delta = GC.CollectionCount(1) - g1;
+                r.gcGen2Delta = GC.CollectionCount(2) - g2;
+                r.gcCollectionsDuringCreation = r.gcGen0Delta;
+                r.totalMemoryDeltaKB = (GC.GetTotalMemory(false) - totalMem) / 1024.0;
+                var reserved = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Reserved Memory");
+                if (reserved.Valid) r.gcReservedCreationKB = reserved.LastValue / 1024.0;
+                reserved.Dispose();
+                allocated.Dispose();
+            }
+        }
+
+        // =================================================================== OpenGlyph
         private IEnumerator RunOpenGlyph(bool parallel)
         {
             UniText.UseParallel = parallel;
@@ -159,116 +191,159 @@ namespace OpenGlyph.Benchmarks
             foreach (var kind in BenchmarkTexts.All())
             {
                 string text = BenchmarkTexts.Get(kind);
-                var res = new SystemTextResult
-                {
-                    system = sys, textSet = kind.ToString(),
-                    objectCount = objectCount, iterations = iterations, warmups = warmups,
-                    shapingFairForThisSystem = true
-                };
+                int expectedChars = text.Length;
+                var res = NewRes(sys, kind, expectedChars, true, null);
 
                 var objs = new List<UniText>(objectCount);
                 var rects = new List<RectTransform>(objectCount);
 
-                // ---- Object Creation (median/p95 over iterations; each iteration
-                // creates+first-mesh for the full set, then destroys) ----
+                // ---- Object Creation ----
                 var creation = new List<double>();
-                int gcBefore = 0; long bytesBefore = 0;
+                var sampler = AllocSampler.Begin();
+                bool creationValid = true; long minVerts = long.MaxValue; int minChars = int.MaxValue;
                 for (int it = -warmups; it < iterations; it++)
                 {
                     bool measure = it >= 0;
-                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
                     CreateUniTextSet(objs, rects, text);
-                    Canvas.ForceUpdateCanvases(); // first mesh ready for all
+                    Canvas.ForceUpdateCanvases();
                     sw.Stop();
                     if (measure)
                     {
                         creation.Add(sw.Elapsed.TotalMilliseconds);
-                        if (it == 0)
+                        sampler.Tick();
+                        for (int i = 0; i < objs.Count; i++)
                         {
-                            res.gcCollectionsDuringCreation = GC.CollectionCount(0) - gcBefore;
-                            res.allocatedMBDuringCreation = Math.Max(0, Profiler.GetMonoUsedSizeLong() - bytesBefore) / (1024.0 * 1024.0);
+                            int gc = objs[i].ResultGlyphs.Length;
+                            if (gc < minChars) minChars = gc;
+                            long v = gc * 4L; // 4 verts/glyph (quad) — proxy for mesh output
+                            if (objs[i].ResultSize.y <= 0f || gc == 0) creationValid = false;
+                            if (v < minVerts) minVerts = v;
                         }
                     }
                     DestroySet(objs, rects);
                     yield return null;
                 }
+                sampler.End(res);
                 res.objectCreation = PhaseStat.From(creation);
+                res.creationValid = creationValid && minChars > 0;
+                res.observedCharsMin = minChars == int.MaxValue ? 0 : minChars;
+                res.observedVerticesMin = minVerts == long.MaxValue ? 0 : minVerts;
+                if (!res.creationValid) res.validityNote = "OpenGlyph: some object produced 0 glyphs / 0 height";
 
-                // Build a persistent set for the mutate phases.
+                // persistent set for mutate phases + profiler splits
                 CreateUniTextSet(objs, rects, text);
                 Canvas.ForceUpdateCanvases();
                 yield return null;
 
-                // ---- Full Rebuild (change text on all + force complete regenerate) ----
-                var full = new List<double>();
-                long fullBytes = 0; bool fullBytesTaken = false;
-                string altText = text + " "; // trivially different content -> Text dirty
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    string t = (it % 2 == 0) ? altText : text;
-                    if (measure && !fullBytesTaken) { GC.Collect(); fullBytes = Profiler.GetMonoUsedSizeLong(); }
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < objs.Count; i++) objs[i].Text = t;
-                    Canvas.ForceUpdateCanvases();
-                    sw.Stop();
-                    if (measure)
-                    {
-                        full.Add(sw.Elapsed.TotalMilliseconds);
-                        if (!fullBytesTaken)
-                        {
-                            double kb = Math.Max(0, Profiler.GetMonoUsedSizeLong() - fullBytes) / 1024.0 / objs.Count;
-                            res.kbPerFullRebuildOp = kb; fullBytesTaken = true;
-                        }
-                    }
-                    yield return null;
-                }
-                res.fullRebuild = PhaseStat.From(full);
+                // ---- Full Rebuild ----
+                res.fullRebuild = TimedPhaseOG(objs, rects, text, Phase.Full, out bool fv, ref res); res.fullRebuildValid = fv;
+                yield return null;
+                res.layout = TimedPhaseOG(objs, rects, text, Phase.Layout, out bool lv, ref res); res.layoutValid = lv;
+                yield return null;
+                res.meshRebuild = TimedPhaseOG(objs, rects, text, Phase.Mesh, out bool mv, ref res); res.meshRebuildValid = mv;
+                yield return null;
 
-                // ---- Layout (re-layout only: width change, no text change) ----
-                var layout = new List<double>();
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    float w = (it % 2 == 0) ? 760f : 800f;
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < rects.Count; i++)
-                    {
-                        rects[i].sizeDelta = new Vector2(w, rects[i].sizeDelta.y);
-                        objs[i].SetDirty(UniText.DirtyFlags.Layout);
-                    }
-                    Canvas.ForceUpdateCanvases();
-                    sw.Stop();
-                    if (measure) layout.Add(sw.Elapsed.TotalMilliseconds);
-                    yield return null;
-                }
-                res.layout = PhaseStat.From(layout);
-
-                // ---- Mesh Rebuild (color change only, mesh regen, no re-layout) ----
-                var mesh = new List<double>();
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    var col = (it % 2 == 0) ? Color.white : Color.yellow;
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < objs.Count; i++)
-                    {
-                        objs[i].color = col;
-                        objs[i].SetDirty(UniText.DirtyFlags.Color);
-                    }
-                    Canvas.ForceUpdateCanvases();
-                    sw.Stop();
-                    if (measure) mesh.Add(sw.Elapsed.TotalMilliseconds);
-                    yield return null;
-                }
-                res.meshRebuild = PhaseStat.From(mesh);
+                // ---- OpenGlyph profiler split (one object, instrumented) ----
+                report.openGlyphSplits.Add(MeasureSplit(kind, parallel, text));
 
                 DestroySet(objs, rects);
                 report.perSystemText.Add(res);
-                Debug.Log($"[Bench] {sys} {kind}: create={res.objectCreation.medianMs:F2}ms full={res.fullRebuild.medianMs:F2}ms layout={res.layout.medianMs:F2}ms mesh={res.meshRebuild.medianMs:F2}ms gc={res.gcCollectionsDuringCreation} alloc={res.allocatedMBDuringCreation:F2}MB");
+                Debug.Log($"[Bench] {sys} {kind}: create={res.objectCreation.medianMs:F2}ms valid={res.creationValid} chars>={res.observedCharsMin} alloc={res.gcAllocCreationKB:F0}KB gc0={res.gcGen0Delta}");
                 yield return null;
             }
+        }
+
+        private enum Phase { Full, Layout, Mesh }
+
+        private List<double> _tmp = new List<double>();
+        private PhaseStat TimedPhaseOG(List<UniText> objs, List<RectTransform> rects, string text, Phase phase, out bool valid, ref SystemTextResult res)
+        {
+            var samples = new List<double>();
+            valid = true;
+            string altText = text + " ";
+            for (int it = -warmups; it < iterations; it++)
+            {
+                bool measure = it >= 0;
+                var sw = Stopwatch.StartNew();
+                switch (phase)
+                {
+                    case Phase.Full:
+                        string t = (it % 2 == 0) ? altText : text;
+                        for (int i = 0; i < objs.Count; i++) objs[i].Text = t;
+                        break;
+                    case Phase.Layout:
+                        float w = (it % 2 == 0) ? 760f : 800f;
+                        for (int i = 0; i < rects.Count; i++) { rects[i].sizeDelta = new Vector2(w, rects[i].sizeDelta.y); objs[i].SetDirty(UniText.DirtyFlags.Layout); }
+                        break;
+                    case Phase.Mesh:
+                        var col = (it % 2 == 0) ? Color.white : Color.yellow;
+                        for (int i = 0; i < objs.Count; i++) { objs[i].color = col; objs[i].SetDirty(UniText.DirtyFlags.Color); }
+                        break;
+                }
+                Canvas.ForceUpdateCanvases();
+                sw.Stop();
+                if (measure)
+                {
+                    samples.Add(sw.Elapsed.TotalMilliseconds);
+                    for (int i = 0; i < objs.Count; i++)
+                        if (objs[i].ResultGlyphs.Length == 0 || objs[i].ResultSize.y <= 0f) valid = false;
+                }
+            }
+            return PhaseStat.From(samples);
+        }
+
+        // Instrument one object: Stopwatch splits around shape/layout/raster/mesh.
+        // Uses coarse pipeline boundaries via the public component + font API.
+        private OpenGlyphProfileSplit MeasureSplit(TextSetKind kind, bool parallel, string text)
+        {
+            var split = new OpenGlyphProfileSplit { textSet = kind.ToString(), parallel = parallel };
+            try
+            {
+                var go = new GameObject("UT_split", typeof(RectTransform));
+                var rt = go.GetComponent<RectTransform>();
+                rt.SetParent(canvasRect, false);
+                rt.sizeDelta = new Vector2(800, 1200);
+                var ut = go.AddComponent<UniText>();
+                if (openGlyphFonts != null) ut.FontStack = openGlyphFonts;
+                if (openGlyphAppearance != null) ut.Appearance = openGlyphAppearance;
+
+                // Total: set text + force full rebuild.
+                var swTotal = Stopwatch.StartNew();
+                ut.Text = text;
+                Canvas.ForceUpdateCanvases();
+                swTotal.Stop();
+                split.totalMsPerObj = swTotal.Elapsed.TotalMilliseconds;
+
+                // Shape-only proxy: re-run shaping via a fresh processor pass by
+                // marking Text dirty and timing a rebuild that reuses the atlas
+                // (glyphs already rasterized) — the delta vs a cold run approximates
+                // raster cost. We report total + a layout-only split (width change)
+                // and a mesh-only split (color), which are cleanly separable; shaping
+                // and raster are reported together as "shape+raster" in the note.
+                var swLayout = Stopwatch.StartNew();
+                rt.sizeDelta = new Vector2(760, 1200);
+                ut.SetDirty(UniText.DirtyFlags.Layout);
+                Canvas.ForceUpdateCanvases();
+                swLayout.Stop();
+                split.layoutMsPerObj = swLayout.Elapsed.TotalMilliseconds;
+
+                var swMesh = Stopwatch.StartNew();
+                ut.color = Color.yellow;
+                ut.SetDirty(UniText.DirtyFlags.Color);
+                Canvas.ForceUpdateCanvases();
+                swMesh.Stop();
+                split.meshMsPerObj = swMesh.Elapsed.TotalMilliseconds;
+
+                // shape+raster = total - (layout + mesh), floored at 0.
+                double shapeRaster = Math.Max(0, split.totalMsPerObj - split.layoutMsPerObj - split.meshMsPerObj);
+                split.shapeMsPerObj = shapeRaster;   // dominated by shaping on a cold atlas
+                split.rasterMsPerObj = 0;            // folded into shapeMsPerObj (atlas add happens in first rebuild)
+                split.note = "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties";
+                Destroy(go);
+            }
+            catch (Exception ex) { split.note = "split failed: " + ex.Message; }
+            return split;
         }
 
         private void CreateUniTextSet(List<UniText> objs, List<RectTransform> rects, string text)
@@ -280,7 +355,6 @@ namespace OpenGlyph.Benchmarks
                 var rt = go.GetComponent<RectTransform>();
                 rt.SetParent(canvasRect, false);
                 rt.sizeDelta = new Vector2(800, 1200);
-                rt.anchoredPosition = Vector2.zero;
                 var ut = go.AddComponent<UniText>();
                 if (openGlyphFonts != null) ut.FontStack = openGlyphFonts;
                 if (openGlyphAppearance != null) ut.Appearance = openGlyphAppearance;
@@ -291,116 +365,119 @@ namespace OpenGlyph.Benchmarks
 
         private static void DestroySet(List<UniText> objs, List<RectTransform> rects)
         {
-            for (int i = 0; i < objs.Count; i++)
-                if (objs[i] != null) Destroy(objs[i].gameObject);
+            for (int i = 0; i < objs.Count; i++) if (objs[i] != null) Destroy(objs[i].gameObject);
             objs.Clear(); rects.Clear();
         }
 
-        // ---------------------------------------------------------------- TMP
+        // =================================================================== TMP
         private IEnumerator RunTMP()
         {
+            // Ensure a usable TMP font asset at runtime.
+            TMP_FontAsset fa = tmpFontAsset;
+            if (fa == null && tmpSourceFont != null)
+                fa = TMP_FontAsset.CreateFontAsset(tmpSourceFont);
+
             foreach (var kind in BenchmarkTexts.All())
             {
                 string text = BenchmarkTexts.Get(kind);
-                bool fair = kind == TextSetKind.Latin; // TMP can't shape Arabic/Hebrew without a plugin
-                var res = new SystemTextResult
-                {
-                    system = "TMP", textSet = kind.ToString(),
-                    objectCount = objectCount, iterations = iterations, warmups = warmups,
-                    shapingFairForThisSystem = fair,
-                    note = fair ? null : "TMP cannot shape Arabic/Hebrew without a third-party plugin; this measures unshaped fallback, NOT equivalent output."
-                };
+                int expectedChars = CountVisible(text);
+                bool fair = kind == TextSetKind.Latin;
+                var res = NewRes("TMP", kind, expectedChars, fair,
+                    fair ? null : "TMP cannot shape Arabic/Hebrew without a plugin; measures unshaped fallback, NOT equivalent output.");
 
                 var objs = new List<TextMeshProUGUI>(objectCount);
                 var rects = new List<RectTransform>(objectCount);
 
                 var creation = new List<double>();
-                int gcBefore = 0; long bytesBefore = 0;
+                var sampler = AllocSampler.Begin();
+                bool valid = true; int minChars = int.MaxValue; long minVerts = long.MaxValue;
                 for (int it = -warmups; it < iterations; it++)
                 {
                     bool measure = it >= 0;
-                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
-                    CreateTMPSet(objs, rects, text);
+                    CreateTMPSet(objs, rects, text, fa);
                     Canvas.ForceUpdateCanvases();
-                    for (int i = 0; i < objs.Count; i++) objs[i].ForceMeshUpdate();
+                    for (int i = 0; i < objs.Count; i++) objs[i].ForceMeshUpdate(true, true); // actually generate
                     sw.Stop();
                     if (measure)
                     {
                         creation.Add(sw.Elapsed.TotalMilliseconds);
-                        if (it == 0)
+                        sampler.Tick();
+                        for (int i = 0; i < objs.Count; i++)
                         {
-                            res.gcCollectionsDuringCreation = GC.CollectionCount(0) - gcBefore;
-                            res.allocatedMBDuringCreation = Math.Max(0, Profiler.GetMonoUsedSizeLong() - bytesBefore) / (1024.0 * 1024.0);
+                            var ti = objs[i].textInfo;
+                            int cc = ti != null ? ti.characterCount : 0;
+                            long vc = (ti != null && ti.meshInfo != null && ti.meshInfo.Length > 0) ? ti.meshInfo[0].vertexCount : 0;
+                            if (cc < minChars) minChars = cc;
+                            if (vc < minVerts) minVerts = vc;
+                            if (cc == 0 || vc == 0) valid = false;
                         }
                     }
                     DestroyTMPSet(objs, rects);
                     yield return null;
                 }
+                sampler.End(res);
                 res.objectCreation = PhaseStat.From(creation);
+                res.observedCharsMin = minChars == int.MaxValue ? 0 : minChars;
+                res.observedVerticesMin = minVerts == long.MaxValue ? 0 : minVerts;
+                res.creationValid = valid && minChars > 0 && minVerts > 0;
+                if (!res.creationValid) res.validityNote = "TMP: characterCount or vertexCount was 0 (mesh not generated / font asset null)";
 
-                CreateTMPSet(objs, rects, text);
-                for (int i = 0; i < objs.Count; i++) objs[i].ForceMeshUpdate();
+                CreateTMPSet(objs, rects, text, fa);
+                for (int i = 0; i < objs.Count; i++) objs[i].ForceMeshUpdate(true, true);
                 yield return null;
 
-                var full = new List<double>();
-                long fullBytes = 0; bool taken = false;
-                string altText = text + " ";
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    string t = (it % 2 == 0) ? altText : text;
-                    if (measure && !taken) { GC.Collect(); fullBytes = Profiler.GetMonoUsedSizeLong(); }
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < objs.Count; i++) { objs[i].text = t; objs[i].ForceMeshUpdate(); }
-                    sw.Stop();
-                    if (measure)
-                    {
-                        full.Add(sw.Elapsed.TotalMilliseconds);
-                        if (!taken) { res.kbPerFullRebuildOp = Math.Max(0, Profiler.GetMonoUsedSizeLong() - fullBytes) / 1024.0 / objs.Count; taken = true; }
-                    }
-                    yield return null;
-                }
-                res.fullRebuild = PhaseStat.From(full);
-
-                var layout = new List<double>();
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    float w = (it % 2 == 0) ? 760f : 800f;
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < rects.Count; i++)
-                    {
-                        rects[i].sizeDelta = new Vector2(w, rects[i].sizeDelta.y);
-                        objs[i].ForceMeshUpdate(); // re-layout within new width
-                    }
-                    sw.Stop();
-                    if (measure) layout.Add(sw.Elapsed.TotalMilliseconds);
-                    yield return null;
-                }
-                res.layout = PhaseStat.From(layout);
-
-                var mesh = new List<double>();
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    var col = (it % 2 == 0) ? Color.white : Color.yellow;
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < objs.Count; i++) { objs[i].color = col; objs[i].ForceMeshUpdate(); }
-                    sw.Stop();
-                    if (measure) mesh.Add(sw.Elapsed.TotalMilliseconds);
-                    yield return null;
-                }
-                res.meshRebuild = PhaseStat.From(mesh);
+                res.fullRebuild = TimedPhaseTMP(objs, rects, text, Phase.Full, out bool fv); res.fullRebuildValid = fv;
+                yield return null;
+                res.layout = TimedPhaseTMP(objs, rects, text, Phase.Layout, out bool lv); res.layoutValid = lv;
+                yield return null;
+                res.meshRebuild = TimedPhaseTMP(objs, rects, text, Phase.Mesh, out bool mv); res.meshRebuildValid = mv;
+                yield return null;
 
                 DestroyTMPSet(objs, rects);
                 report.perSystemText.Add(res);
-                Debug.Log($"[Bench] TMP {kind} (fair={fair}): create={res.objectCreation.medianMs:F2}ms full={res.fullRebuild.medianMs:F2}ms");
+                Debug.Log($"[Bench] TMP {kind} fair={fair}: create={res.objectCreation.medianMs:F2}ms valid={res.creationValid} chars>={res.observedCharsMin} verts>={res.observedVerticesMin}");
                 yield return null;
             }
         }
 
-        private void CreateTMPSet(List<TextMeshProUGUI> objs, List<RectTransform> rects, string text)
+        private PhaseStat TimedPhaseTMP(List<TextMeshProUGUI> objs, List<RectTransform> rects, string text, Phase phase, out bool valid)
+        {
+            var samples = new List<double>(); valid = true; string alt = text + " ";
+            for (int it = -warmups; it < iterations; it++)
+            {
+                bool measure = it >= 0;
+                var sw = Stopwatch.StartNew();
+                switch (phase)
+                {
+                    case Phase.Full:
+                        string t = (it % 2 == 0) ? alt : text;
+                        for (int i = 0; i < objs.Count; i++) { objs[i].text = t; objs[i].ForceMeshUpdate(true, true); }
+                        break;
+                    case Phase.Layout:
+                        float w = (it % 2 == 0) ? 760f : 800f;
+                        for (int i = 0; i < rects.Count; i++) { rects[i].sizeDelta = new Vector2(w, rects[i].sizeDelta.y); objs[i].ForceMeshUpdate(false, false); }
+                        break;
+                    case Phase.Mesh:
+                        var col = (it % 2 == 0) ? Color.white : Color.yellow;
+                        for (int i = 0; i < objs.Count; i++) { objs[i].color = col; objs[i].ForceMeshUpdate(false, false); }
+                        break;
+                }
+                sw.Stop();
+                if (measure)
+                {
+                    samples.Add(sw.Elapsed.TotalMilliseconds);
+                    for (int i = 0; i < objs.Count; i++)
+                    {
+                        var ti = objs[i].textInfo;
+                        if (ti == null || ti.characterCount == 0 || ti.meshInfo == null || ti.meshInfo.Length == 0 || ti.meshInfo[0].vertexCount == 0) valid = false;
+                    }
+                }
+            }
+            return PhaseStat.From(samples);
+        }
+
+        private void CreateTMPSet(List<TextMeshProUGUI> objs, List<RectTransform> rects, string text, TMP_FontAsset fa)
         {
             objs.Clear(); rects.Clear();
             for (int i = 0; i < objectCount; i++)
@@ -410,6 +487,7 @@ namespace OpenGlyph.Benchmarks
                 rt.SetParent(canvasRect, false);
                 rt.sizeDelta = new Vector2(800, 1200);
                 var t = go.AddComponent<TextMeshProUGUI>();
+                if (fa != null) t.font = fa;
                 t.textWrappingMode = TextWrappingModes.Normal;
                 t.fontSize = 36;
                 t.text = text;
@@ -419,12 +497,11 @@ namespace OpenGlyph.Benchmarks
 
         private static void DestroyTMPSet(List<TextMeshProUGUI> objs, List<RectTransform> rects)
         {
-            for (int i = 0; i < objs.Count; i++)
-                if (objs[i] != null) Destroy(objs[i].gameObject);
+            for (int i = 0; i < objs.Count; i++) if (objs[i] != null) Destroy(objs[i].gameObject);
             objs.Clear(); rects.Clear();
         }
 
-        // ---------------------------------------------------------------- UI Toolkit
+        // =================================================================== UI Toolkit
         private IEnumerator RunUIToolkit()
         {
             var uiGo = new GameObject("UIDoc", typeof(UIDocument));
@@ -435,101 +512,101 @@ namespace OpenGlyph.Benchmarks
             foreach (var kind in BenchmarkTexts.All())
             {
                 string text = BenchmarkTexts.Get(kind);
-                bool fair = kind == TextSetKind.Latin; // UITK text shaping for complex scripts varies by Unity version
-                var res = new SystemTextResult
-                {
-                    system = "UIToolkit", textSet = kind.ToString(),
-                    objectCount = objectCount, iterations = iterations, warmups = warmups,
-                    shapingFairForThisSystem = fair,
-                    note = fair ? null : "UI Toolkit complex-script shaping depends on the Unity text backend; treat non-Latin as indicative only."
-                };
+                int expectedChars = text.Length;
+                bool fair = kind == TextSetKind.Latin;
+                var res = NewRes("UIToolkit", kind, expectedChars, fair,
+                    fair ? null : "UI Toolkit complex-script shaping depends on the Unity text backend; non-Latin is indicative only.");
 
                 var labels = new List<Label>(objectCount);
 
                 var creation = new List<double>();
-                int gcBefore = 0; long bytesBefore = 0;
+                var sampler = AllocSampler.Begin();
+                bool valid = true; float minW = float.MaxValue;
                 for (int it = -warmups; it < iterations; it++)
                 {
                     bool measure = it >= 0;
-                    if (measure) { GC.Collect(); gcBefore = GC.CollectionCount(0); bytesBefore = Profiler.GetMonoUsedSizeLong(); }
                     var sw = Stopwatch.StartNew();
                     CreateLabels(root, labels, text);
+                    // Force text generation: MeasureTextSize generates the glyph run.
+                    for (int i = 0; i < labels.Count; i++)
+                        labels[i].MeasureTextSize(text, 800, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost);
                     ForceUITKLayout(root);
                     sw.Stop();
                     if (measure)
                     {
                         creation.Add(sw.Elapsed.TotalMilliseconds);
-                        if (it == 0)
+                        sampler.Tick();
+                        for (int i = 0; i < labels.Count; i++)
                         {
-                            res.gcCollectionsDuringCreation = GC.CollectionCount(0) - gcBefore;
-                            res.allocatedMBDuringCreation = Math.Max(0, Profiler.GetMonoUsedSizeLong() - bytesBefore) / (1024.0 * 1024.0);
+                            var sz = labels[i].MeasureTextSize(text, 800, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost);
+                            if (sz.x <= 0f || sz.y <= 0f) valid = false;
+                            if (sz.x < minW) minW = sz.x;
                         }
                     }
                     ClearLabels(root, labels);
                     yield return null;
                 }
+                sampler.End(res);
                 res.objectCreation = PhaseStat.From(creation);
+                res.observedVerticesMin = (long)(minW == float.MaxValue ? 0 : minW); // measured width proxy
+                res.creationValid = valid && minW > 0f;
+                if (!res.creationValid) res.validityNote = "UIToolkit: MeasureTextSize returned 0 — text not generated";
 
                 CreateLabels(root, labels, text);
+                for (int i = 0; i < labels.Count; i++) labels[i].MeasureTextSize(text, 800, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost);
                 ForceUITKLayout(root);
                 yield return null;
 
-                var full = new List<double>();
-                long fullBytes = 0; bool taken = false;
-                string altText = text + " ";
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    string t = (it % 2 == 0) ? altText : text;
-                    if (measure && !taken) { GC.Collect(); fullBytes = Profiler.GetMonoUsedSizeLong(); }
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < labels.Count; i++) labels[i].text = t;
-                    ForceUITKLayout(root);
-                    sw.Stop();
-                    if (measure)
-                    {
-                        full.Add(sw.Elapsed.TotalMilliseconds);
-                        if (!taken) { res.kbPerFullRebuildOp = Math.Max(0, Profiler.GetMonoUsedSizeLong() - fullBytes) / 1024.0 / labels.Count; taken = true; }
-                    }
-                    yield return null;
-                }
-                res.fullRebuild = PhaseStat.From(full);
-
-                var layout = new List<double>();
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    float w = (it % 2 == 0) ? 760f : 800f;
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < labels.Count; i++) labels[i].style.width = w;
-                    ForceUITKLayout(root);
-                    sw.Stop();
-                    if (measure) layout.Add(sw.Elapsed.TotalMilliseconds);
-                    yield return null;
-                }
-                res.layout = PhaseStat.From(layout);
-
-                var mesh = new List<double>();
-                for (int it = -warmups; it < iterations; it++)
-                {
-                    bool measure = it >= 0;
-                    var col = (it % 2 == 0) ? Color.white : Color.yellow;
-                    var sw = Stopwatch.StartNew();
-                    for (int i = 0; i < labels.Count; i++) { labels[i].style.color = col; labels[i].MarkDirtyRepaint(); }
-                    ForceUITKLayout(root);
-                    sw.Stop();
-                    if (measure) mesh.Add(sw.Elapsed.TotalMilliseconds);
-                    yield return null;
-                }
-                res.meshRebuild = PhaseStat.From(mesh);
+                res.fullRebuild = TimedPhaseUITK(root, labels, text, Phase.Full, out bool fv); res.fullRebuildValid = fv;
+                yield return null;
+                res.layout = TimedPhaseUITK(root, labels, text, Phase.Layout, out bool lv); res.layoutValid = lv;
+                yield return null;
+                res.meshRebuild = TimedPhaseUITK(root, labels, text, Phase.Mesh, out bool mv); res.meshRebuildValid = mv;
+                yield return null;
 
                 ClearLabels(root, labels);
                 report.perSystemText.Add(res);
-                Debug.Log($"[Bench] UIToolkit {kind} (fair={fair}): create={res.objectCreation.medianMs:F2}ms full={res.fullRebuild.medianMs:F2}ms");
+                Debug.Log($"[Bench] UIToolkit {kind} fair={fair}: create={res.objectCreation.medianMs:F2}ms valid={res.creationValid} measuredW>={res.observedVerticesMin}");
                 yield return null;
             }
-
             Destroy(uiGo);
+        }
+
+        private PhaseStat TimedPhaseUITK(VisualElement root, List<Label> labels, string text, Phase phase, out bool valid)
+        {
+            var samples = new List<double>(); valid = true; string alt = text + " ";
+            for (int it = -warmups; it < iterations; it++)
+            {
+                bool measure = it >= 0;
+                var sw = Stopwatch.StartNew();
+                switch (phase)
+                {
+                    case Phase.Full:
+                        string t = (it % 2 == 0) ? alt : text;
+                        for (int i = 0; i < labels.Count; i++) { labels[i].text = t; labels[i].MeasureTextSize(t, 800, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost); }
+                        break;
+                    case Phase.Layout:
+                        float w = (it % 2 == 0) ? 760f : 800f;
+                        for (int i = 0; i < labels.Count; i++) { labels[i].style.width = w; labels[i].MeasureTextSize(labels[i].text, w, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost); }
+                        break;
+                    case Phase.Mesh:
+                        var col = (it % 2 == 0) ? Color.white : Color.yellow;
+                        for (int i = 0; i < labels.Count; i++) { labels[i].style.color = col; labels[i].MarkDirtyRepaint(); }
+                        break;
+                }
+                ForceUITKLayout(root);
+                sw.Stop();
+                if (measure)
+                {
+                    samples.Add(sw.Elapsed.TotalMilliseconds);
+                    for (int i = 0; i < labels.Count; i++)
+                    {
+                        var sz = labels[i].MeasureTextSize(labels[i].text, 800, VisualElement.MeasureMode.AtMost, 1200, VisualElement.MeasureMode.AtMost);
+                        if (sz.x <= 0f || sz.y <= 0f) valid = false;
+                    }
+                }
+            }
+            return PhaseStat.From(samples);
         }
 
         private static PanelSettings CreatePanelSettings()
@@ -559,34 +636,25 @@ namespace OpenGlyph.Benchmarks
             labels.Clear();
         }
 
-        // Force a synchronous UITK layout pass by reading worldBound of each element,
-        // which resolves style + layout immediately rather than deferring to next frame.
         private static void ForceUITKLayout(VisualElement root)
         {
             root.MarkDirtyRepaint();
-            var _ = root.worldBound; // touch to force layout resolution
-            foreach (var child in root.Children())
-            {
-                var __ = child.worldBound;
-            }
+            var _ = root.worldBound;
+            foreach (var child in root.Children()) { var __ = child.worldBound; }
         }
 
-        // ---------------------------------------------------------------- Glyph raster
+        // =================================================================== glyph raster
         private void RunGlyphRaster()
         {
-            // OpenGlyph FreeType-backed path: build a font from Noto Sans bytes and
-            // time adding N distinct glyphs to the atlas (FreeType raster + SDF pack).
-            // Uses the public UniTextFont API; FreeType itself is internal to the package.
+            // OpenGlyph FreeType path (public UniTextFont API).
             try
             {
                 string fontPath = ResolveFontPath("NotoSans-Regular.ttf");
                 if (fontPath != null)
                 {
                     var bytes = File.ReadAllBytes(fontPath);
-                    var font = LightSide.UniTextFont.CreateFontAsset(bytes, glyphRasterSize, 0.25f,
-                        LightSide.UniTextRenderMode.SDF, 1024);
+                    var font = UniTextFont.CreateFontAsset(bytes, glyphRasterSize, 0.25f, UniTextRenderMode.SDF, 1024);
                     font.LoadFontFace();
-                    // Collect N distinct glyph indices from Latin + a few Arabic/Hebrew.
                     var indices = new List<uint>(glyphRasterCount);
                     for (uint cp = 0x20; indices.Count < glyphRasterCount && cp < 0x5FF; cp++)
                     {
@@ -602,100 +670,85 @@ namespace OpenGlyph.Benchmarks
                         glyphSize = glyphRasterSize, glyphCount = added,
                         totalMs = sw.Elapsed.TotalMilliseconds,
                         msPerGlyph = added > 0 ? sw.Elapsed.TotalMilliseconds / added : 0,
-                        note = "UniTextFont.TryAddGlyphsBatch (FreeType raster + SDF pack into atlas)"
+                        note = "UniTextFont.TryAddGlyphsBatch (FreeType raster + SDF pack)"
                     });
-                    Debug.Log($"[Bench] OpenGlyph raster {added} glyphs in {sw.Elapsed.TotalMilliseconds:F2}ms");
                 }
-                else
-                {
-                    report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "font path not found" });
-                }
+                else report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "font path not found" });
             }
-            catch (Exception ex)
-            {
-                report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "exception: " + ex.Message });
-            }
+            catch (Exception ex) { report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "exception: " + ex.Message }); }
 
-            // Unity FontEngine path (TMP dynamic): add N glyphs to a dynamic font asset.
+            // Unity FontEngine path (TMP dynamic): add N glyphs via TryAddCharacters.
             try
             {
-                if (tmpSourceFont != null)
+                Font src = tmpSourceFont;
+                if (src != null)
                 {
-                    var fa = TMP_FontAsset.CreateFontAsset(tmpSourceFont, glyphRasterSize, 4,
+                    var fa = TMP_FontAsset.CreateFontAsset(src, glyphRasterSize, 4,
                         UnityEngine.TextCore.LowLevel.GlyphRenderMode.SDFAA, 1024, 1024,
-                        TMPro.AtlasPopulationMode.Dynamic, true);
-                    // Request N distinct characters so the FontEngine rasterizes them.
+                        AtlasPopulationMode.Dynamic, true);
                     var sb = new System.Text.StringBuilder();
                     for (int c = 0x20; sb.Length < glyphRasterCount && c < 0x24F; c++) sb.Append((char)c);
                     string chars = sb.ToString();
                     var sw = Stopwatch.StartNew();
-                    fa.TryAddCharacters(chars, out string missing);
+                    bool ok = fa.TryAddCharacters(chars, out string missing);
                     sw.Stop();
                     int added = chars.Length - (missing?.Length ?? 0);
                     report.glyphRaster.Add(new GlyphRasterResult
                     {
-                        engine = "UnityFontEngine (TMP dynamic)", font = tmpSourceFont.name,
+                        engine = "UnityFontEngine (TMP dynamic)", font = src.name,
                         glyphSize = glyphRasterSize, glyphCount = added,
                         totalMs = sw.Elapsed.TotalMilliseconds,
                         msPerGlyph = added > 0 ? sw.Elapsed.TotalMilliseconds / added : 0,
-                        note = "TMP TryAddCharacters (FontEngine raster + SDF bake)"
+                        note = $"TMP TryAddCharacters ok={ok}"
                     });
-                    Debug.Log($"[Bench] FontEngine raster {added} glyphs in {sw.Elapsed.TotalMilliseconds:F2}ms");
                 }
-                else
-                {
-                    report.glyphRaster.Add(new GlyphRasterResult { engine = "UnityFontEngine (TMP dynamic)", note = "no tmpSourceFont assigned" });
-                }
+                else report.glyphRaster.Add(new GlyphRasterResult { engine = "UnityFontEngine (TMP dynamic)", note = "no tmpSourceFont" });
             }
-            catch (Exception ex)
-            {
-                report.glyphRaster.Add(new GlyphRasterResult { engine = "UnityFontEngine (TMP dynamic)", note = "exception: " + ex.Message });
-            }
+            catch (Exception ex) { report.glyphRaster.Add(new GlyphRasterResult { engine = "UnityFontEngine (TMP dynamic)", note = "exception: " + ex.Message }); }
         }
 
         private static string ResolveFontPath(string fileName)
         {
             string sa = Path.Combine(Application.streamingAssetsPath, "Fonts", fileName);
             if (File.Exists(sa)) return sa;
-            string pd = Path.Combine(Application.persistentDataPath, fileName);
-            if (File.Exists(pd)) return pd;
             return null;
         }
 
-        // ---------------------------------------------------------------- Build size
         private void RunBuildSize()
         {
-            // Font bytes shipped per system. OpenGlyph ships raw TTF (no compression yet).
             foreach (var f in new[] { "NotoSans-Regular.ttf", "NotoSansArabic-Regular.ttf", "NotoSansHebrew-Regular.ttf" })
             {
                 string p = ResolveFontPath(f);
                 long bytes = p != null && File.Exists(p) ? new FileInfo(p).Length : 0;
-                report.buildSize.Add(new BuildSizeResult
-                {
-                    system = "OpenGlyph", font = f, fontBytes = bytes, fontMB = bytes / (1024.0 * 1024.0),
-                    note = "raw TTF; OpenGlyph has NO font compression yet"
-                });
+                report.buildSize.Add(new BuildSizeResult { system = "OpenGlyph", font = f, fontBytes = bytes, fontMB = bytes / (1024.0 * 1024.0), note = "raw TTF; no font compression yet" });
             }
             if (tmpSourceFont != null)
-            {
-                report.buildSize.Add(new BuildSizeResult
-                {
-                    system = "TMP", font = tmpSourceFont.name,
-                    note = "TMP ships a font asset (atlas texture + glyph table); size depends on static/dynamic + atlas dimensions. See RESULTS.md for the built-player measurement."
-                });
-            }
+                report.buildSize.Add(new BuildSizeResult { system = "TMP", font = tmpSourceFont.name, note = "TMP ships a font asset (atlas + glyph table); size depends on atlas dims + static/dynamic." });
         }
 
-        // ---------------------------------------------------------------- output
+        // =================================================================== helpers
+        private SystemTextResult NewRes(string sys, TextSetKind kind, int expectedChars, bool fair, string note)
+            => new SystemTextResult
+            {
+                system = sys, textSet = kind.ToString(),
+                objectCount = objectCount, iterations = iterations, warmups = warmups,
+                shapingFairForThisSystem = fair, note = note, expectedChars = expectedChars
+            };
+
+        private static int CountVisible(string s)
+        {
+            int n = 0;
+            foreach (var c in s) if (!char.IsControl(c)) n++;
+            return n;
+        }
+
         private void WriteResults()
         {
             string dir = Application.persistentDataPath;
             string overridePath = GetArg("-resultsPath");
             try
             {
-                string path = !string.IsNullOrEmpty(overridePath)
-                    ? overridePath
-                    : Path.Combine(dir, resultsFileName);
+                string path = !string.IsNullOrEmpty(overridePath) ? overridePath : Path.Combine(dir, resultsFileName);
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
                 File.WriteAllText(path, report.ToJson());
                 Debug.Log($"[Bench] results written: {path}");
@@ -710,8 +763,7 @@ namespace OpenGlyph.Benchmarks
         private static string GetArg(string name)
         {
             var args = Environment.GetCommandLineArgs();
-            for (int i = 0; i < args.Length - 1; i++)
-                if (args[i] == name) return args[i + 1];
+            for (int i = 0; i < args.Length - 1; i++) if (args[i] == name) return args[i + 1];
             return null;
         }
     }

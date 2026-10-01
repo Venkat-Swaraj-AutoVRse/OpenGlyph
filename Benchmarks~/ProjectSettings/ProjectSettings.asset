@@ -678,6 +678,7 @@ PlayerSettings:
   webWasm2023: 0
   webEnableSubmoduleStrippingCompatibility: 0
   scriptingDefineSymbols:
+    Android: UNITEXT
     Standalone: UNITEXT
   additionalCompilerArguments: {}
   platformArchitecture: {}

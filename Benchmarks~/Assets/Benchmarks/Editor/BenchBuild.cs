@@ -48,13 +48,58 @@ namespace OpenGlyph.Benchmarks.Editor
             var runner = runnerGo.AddComponent<BenchmarkRunner>();
             runner.openGlyphFonts = fontStack;
             runner.openGlyphAppearance = appearance;
-            runner.tmpSourceFont = ResolveTmpFont();
+            var tmpFont = ResolveTmpFont();
+            runner.tmpSourceFont = tmpFont;
+            runner.tmpFontAsset = BuildTmpFontAsset(tmpFont);
             runner.quitWhenDone = true;
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             AssetDatabase.SaveAssets();
             Debug.Log("[BenchBuild] scene built: " + ScenePath);
+        }
+
+        // Build (once) a dynamic TMP font asset from the Noto Sans TTF so TMP has a
+        // real, build-included font asset at runtime (fixes player TMP_Settings/font NRE).
+        private static TMPro.TMP_FontAsset BuildTmpFontAsset(Font font)
+        {
+            const string path = GenDir + "/BenchTMP_NotoSans.asset";
+            var existing = AssetDatabase.LoadAssetAtPath<TMPro.TMP_FontAsset>(path);
+            if (existing != null) return existing;
+            if (font == null) { Debug.LogWarning("[BenchBuild] no Font for TMP asset"); return null; }
+
+            // TMP_FontAsset.CreateFontAsset dereferences TMP_Settings.instance; make sure
+            // it is loaded (the essentials import does not populate the singleton in a
+            // batchmode session). If it still cannot load, skip asset creation here and
+            // let the runner build one at runtime (CreateFontAsset(Font) resolves settings then).
+            var settings = Resources.Load<TMPro.TMP_Settings>("TMP Settings");
+            if (settings == null)
+            {
+                Debug.LogWarning("[BenchBuild] TMP_Settings not loadable at build time — skipping prebuilt TMP font asset; runner will build one at runtime.");
+                return null;
+            }
+            TMPro.TMP_Settings.LoadDefaultSettings();
+
+            TMPro.TMP_FontAsset fa;
+            try
+            {
+                fa = TMPro.TMP_FontAsset.CreateFontAsset(font, 90, 9,
+                    UnityEngine.TextCore.LowLevel.GlyphRenderMode.SDFAA, 1024, 1024,
+                    TMPro.AtlasPopulationMode.Dynamic, true);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[BenchBuild] CreateFontAsset threw (" + ex.Message + ") — runner builds TMP font at runtime.");
+                return null;
+            }
+            if (fa == null) { Debug.LogWarning("[BenchBuild] CreateFontAsset returned null"); return null; }
+            fa.name = "BenchTMP_NotoSans";
+            AssetDatabase.CreateAsset(fa, path);
+            if (fa.atlasTexture != null) { fa.atlasTexture.name = "BenchTMP_Atlas"; AssetDatabase.AddObjectToAsset(fa.atlasTexture, fa); }
+            if (fa.material != null) { fa.material.name = "BenchTMP_Mat"; AssetDatabase.AddObjectToAsset(fa.material, fa); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[BenchBuild] built TMP font asset: " + path);
+            return fa;
         }
 
         private static UniTextFontStack BuildFontStack()
@@ -86,8 +131,21 @@ namespace OpenGlyph.Benchmarks.Editor
 
         private static Font ResolveTmpFont()
         {
-            string path = "Assets/StreamingAssets/Fonts/NotoSans-Regular.ttf";
-            var font = AssetDatabase.LoadAssetAtPath<Font>(path);
+            // StreamingAssets TTFs are copied verbatim (NOT imported as Font assets),
+            // so copy the Noto Sans TTF into Assets so Unity imports it as a Font.
+            const string dst = GenDir + "/Fonts/NotoSans-Regular.ttf";
+            var font = AssetDatabase.LoadAssetAtPath<Font>(dst);
+            if (font == null)
+            {
+                string src = Path.Combine(Application.streamingAssetsPath, "Fonts", "NotoSans-Regular.ttf");
+                if (File.Exists(src))
+                {
+                    Directory.CreateDirectory(FontDir + "/Fonts");
+                    File.Copy(src, dst, true);
+                    AssetDatabase.ImportAsset(dst, ImportAssetOptions.ForceSynchronousImport);
+                    font = AssetDatabase.LoadAssetAtPath<Font>(dst);
+                }
+            }
             if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             return font;
         }
