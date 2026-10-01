@@ -531,13 +531,41 @@ per-vertex colour are exact.
 
 | case | legacy nonBg | unified nonBg | maxΔ | %px > 2/255 |
 |------|-------------:|--------------:|-----:|------------:|
-| SDF        | 4065 | 3623 | 36  | 0.23 % |
-| MSDF       | 4368 | 3942 | 36  | 0.30 % |
-| color span | 8636 | 7850 | 36  | 0.52 % |
-| outline    | 5555 | 2262 | 255 | 0.50 % |
-| underlay   | 2737 | 2475 | 36  | 0.16 % |
+| SDF        | 4065 | **4065** | **0**  | **0.00 %** |
+| MSDF       | 4368 | **4368** | **0**  | **0.00 %** |
+| color span | 8636 | **8636** | **0**  | **0.00 %** |
+| outline    | 5555 | 3690 | 255 | 0.42 % |
+| underlay   | 2737 | 2397 | 64  | 0.19 % |
 
 PNGs: `Documentation/Design/evidence/prod_unified_vs_legacy_{sdf,msdf,color_span,outline,underlay}.png`.
+
+**SDF, MSDF and `<color>` are now BIT-IDENTICAL to legacy** (maxΔ 0, 0.00 % of pixels
+differ, nonBg exactly equal) through the production uber shader. Three fixes got
+there, each with a found root cause:
+1. **In-fragment SSD scale.** The combined legacy shader `UniText/SDF-SSD` derives
+   `baseScale` IN THE FRAGMENT from the atlas-UV screen-space derivative
+   (`1/((|ddx(uv.y)|+|ddy(uv.y)|)·texelW·0.75)·(_Sharpness+1)`), not the
+   `vPosition.w/_ScreenParams` form of SDF-Face. Porting the SSD formula in-frag
+   (with a shared `_AtlasSize` for the texel term) made the face edge exact.
+2. **Shim keyword-gating.** The SSD material defaults `_UnderlayColor` to
+   `(0,0,0,0.5)`; legacy only renders underlay/glow when the `UNDERLAY_ON`/`GLOW_ON`
+   shader_feature is enabled. The shim was synthesizing those disabled defaults → a
+   black drop-shadow darkened every glyph (the systematic ~10 % deficit). Now the
+   shim gates underlay/glow on the material keyword.
+3. **Real spreadRatio in UV1.x.** The merge packed `gradientScale` (~10) where the
+   shader expects `spreadRatio` (~0.1); `normFactor = 0.1/spreadRatio` was ~100× off,
+   collapsing the outline/underlay offset. Now carries the source mesh's TEXCOORD1.x.
+
+Plus the double-premultiply removal and the premultiplied `BlendOver` composite.
+
+**Remaining residual — outline + underlay (effect layers only; face is exact).**
+Outline: nonBg 3690 vs 5555 (red ring now draws — up from 46 red px to 242 — but
+~⅓ too thin); maxΔ 255 is the red colour at that thin ring. Underlay: 2397 vs 2737,
+maxΔ 64 (shadow extent/offset). Both are the single-pass approximations of the
+offset-sampled outline/underlay layers vs SSD's exact `scaleSoftness`/offset-factor
+terms (SSD derives the underlay offset from `ComputeUnderlayOffsetFactor` × texel
+size, which the merged path approximates). The core SDF/MSDF/colour path is a
+bit-exact drop-in; the outline/underlay offset terms are the last sub-pixel items.
 
 **Legacy coverage ported (batching-safe).** `UniText/SDF-Face` + `SDF-Base` coverage
 is now ported into `UniText/Uber` WITHOUT per-component material state (so the 5/5
