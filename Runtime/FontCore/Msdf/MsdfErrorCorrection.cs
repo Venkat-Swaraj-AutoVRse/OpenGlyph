@@ -3,402 +3,408 @@ using System;
 namespace LightSide.Msdf
 {
     /// <summary>
-    /// Faithful port of msdfgen's standalone error-correction stage (msdfgen &gt;= 1.9):
-    /// <c>core/MSDFErrorCorrection.cpp</c> + <c>core/MSDFErrorCorrection.h</c> and the artifact
-    /// classifiers in <c>core/edge-selectors</c> that it reuses (Viktor Chlumsky, MIT). See
-    /// Third-Party Notices.txt. No original source is bundled — the algorithm is re-expressed
-    /// against OpenGlyph's bottom-up float field (channel values = dist/range + 0.5, so the shape
-    /// contour sits at the 0.5 iso-level) and <see cref="Shape"/> model.
+    /// Faithful port of msdfgen v1.12 (commit 85e8b3d, MIT, Viktor Chlumsky) standalone
+    /// error-correction stage: <c>core/MSDFErrorCorrection.cpp</c> + <c>core/MSDFErrorCorrection.h</c>.
+    /// See Third-Party Notices.txt. No upstream source is bundled — the algorithm is re-expressed in
+    /// C# against OpenGlyph's bottom-up float field (channel value = dist/range + 0.5, 0.5 == contour,
+    /// which is byte-for-byte msdfgen's <c>DistanceMapping(Range)(d) = d/range + 0.5</c>) and
+    /// <see cref="Shape"/> model.
     ///
-    /// WHY THIS REPLACES THE EARLIER CUSTOM PASSES. The '@' vertical-streak artifact is a
-    /// multi-channel INTERPOLATION artifact: between two texels the per-channel linear interpolation
-    /// makes the reconstructed median cross 0.5 at a point where the true shape has no edge, drawing
-    /// a phantom contour (the streak) when the shader bilinear-samples and thresholds the median.
-    /// msdfgen's documented fix (not a heuristic) is: PROTECT the texels that carry genuine edges
-    /// (corners, and texels whose median already lies on a real distance edge), then scan every
-    /// texel against its 4 primary neighbours (right, up, and the two diagonals) with the
-    /// INTERPOLATED-MEDIAN artifact test; a texel flagged as an artifact and not protected is set to
-    /// its own median across all three channels — a value that, being a single scalar, can no longer
-    /// produce a channel clash. EDGE_PRIORITY config with the default minimum deviation ratio 1.11111
-    /// and minimum improvement ratio 1.11111 (msdfgen <c>ErrorCorrectionConfig</c> defaults).
+    /// SCOPE. This ports msdfgen's SDF-only classifier path — <c>protectCorners(shape)</c> +
+    /// <c>protectEdges(sdf)</c> + <c>findErrors(sdf)</c> + <c>apply(sdf)</c> — orchestrated for the
+    /// EDGE_PRIORITY mode with distance-check mode <c>DO_NOT_CHECK_DISTANCE</c>. The optional
+    /// <c>CHECK_DISTANCE_AT_EDGE</c> refinement (msdfgen's <c>ShapeDistanceChecker</c>, which
+    /// re-evaluates suspected artifacts against the exact shape distance via a full
+    /// <c>ShapeDistanceFinder</c>) is deliberately NOT ported here; it is a performance/quality
+    /// refinement layered on top of this base classifier and requires the whole perpendicular
+    /// distance-selector machinery. The corrected-field parity test therefore compares against
+    /// msdfgen's own <c>DO_NOT_CHECK_DISTANCE</c> output (see NativeSource~/tests/msdfref).
+    ///
+    /// Everything the previous OpenGlyph version invented and msdfgen does not have —
+    /// <c>InterpolatedMedianExtremum</c> (with the <c>onEdge</c>/<c>firm</c> constants),
+    /// <c>IsClashCrossing</c>, the "consistent per-channel move" edge test, 8-neighbour same-side
+    /// dip scanning — is DELETED. What remains is a direct translation of upstream's functions, each
+    /// annotated with the upstream function it mirrors.
     /// </summary>
     internal static class MsdfErrorCorrection
     {
-        // msdfgen ErrorCorrectionConfig defaults (config.h): defaultMinDeviationRatio = 1.11111111111111111,
-        // defaultMinImproveRatio = 1.11111111111111111. EDGE_PRIORITY mode (the recommended default).
+        // msdfgen ErrorCorrectionConfig defaults (core/MSDFErrorCorrection.cpp):
+        //   defaultMinDeviationRatio = 1.11111111111111111
+        //   defaultMinImproveRatio   = 1.11111111111111111
         private const double DefaultMinDeviationRatio = 1.11111111111111111;
-        private const double DefaultMinImproveRatio = 1.11111111111111111;
+        // minImproveRatio only affects the distance-check path (not ported); kept for fidelity/doc.
+
+        // msdfgen #defines (core/MSDFErrorCorrection.cpp).
+        private const double ArtifactTEpsilon = 0.01;              // ARTIFACT_T_EPSILON
+        private const double ProtectionRadiusTolerance = 1.001;    // PROTECTION_RADIUS_TOLERANCE
+        private const int ClassifierFlagCandidate = 0x01;          // CLASSIFIER_FLAG_CANDIDATE
+        private const int ClassifierFlagArtifact = 0x02;           // CLASSIFIER_FLAG_ARTIFACT
 
         [Flags]
         private enum Stencil : byte
         {
             None = 0,
-            Error = 1,     // msdfgen ERROR
-            Protected = 2, // msdfgen PROTECTED
+            Error = 1,     // msdfgen MSDFErrorCorrection::ERROR
+            Protected = 2, // msdfgen MSDFErrorCorrection::PROTECTED
         }
+
+        // --- msdfgen median / mix (arithmetics.hpp) -----------------------------------------------
+        private static float Median(float a, float b, float c) =>
+            Math.Max(Math.Min(a, b), Math.Min(Math.Max(a, b), c));
+        private static float Mix(float a, float b, double t) => (float)(a * (1 - t) + b * t);
 
         /// <summary>
         /// Runs the full error-correction stage over a bottom-up MSDF float field in place.
-        /// Mirrors <c>MSDFErrorCorrection::protectCorners</c> + <c>protectEdges</c> +
-        /// <c>findErrors(const BitmapConstRef)</c> + <c>apply</c> as orchestrated by
-        /// <c>msdfErrorCorrection()</c> for EDGE_PRIORITY mode.
+        /// Mirrors <c>msdfErrorCorrection()</c> (core/msdf-error-correction.cpp) for EDGE_PRIORITY
+        /// with DO_NOT_CHECK_DISTANCE: protectCorners(shape) → protectEdges(sdf) → findErrors(sdf) →
+        /// apply(sdf).
         /// </summary>
         public static void Correct(float[] field, int w, int h, Shape shape, in MsdfConfig cfg)
         {
             if (w <= 0 || h <= 0) return;
             var stencil = new Stencil[w * h];
 
-            // The classifier works in the field's normalized [0..1] units where 0.5 is the contour,
-            // matching msdfgen's internal normalized distance. The deviation/improve ratios are
-            // applied directly in those units (see RangeTest), so the pxRange cancels and no explicit
-            // per-texel range term is needed here.
+            // msdfgen's SDFTransformation: our projection is scale=(ScaleX,ScaleY),
+            // translate=(TranslateX,TranslateY); the distance mapping is value = d/range + 0.5, i.e.
+            // DistanceMapping(Range(range)) with scale_dm = 1/range. unprojectVector(v) = v/scale.
+            double range = cfg.Range <= 0 ? 1 : cfg.Range;
+            double invRange = 1.0 / range;              // distanceMapping(Delta(1))
+            double sx = cfg.ScaleX == 0 ? 1 : cfg.ScaleX;
+            double sy = cfg.ScaleY == 0 ? 1 : cfg.ScaleY;
 
-            // 1) Protect corners and genuine distance edges (EDGE_PRIORITY): texels that legitimately
-            //    carry an edge must never be flattened, or we would round corners and erase strokes.
-            ProtectCorners(field, w, h, shape, in cfg, stencil);
-            ProtectEdges(field, w, h, stencil);
+            ProtectCorners(field, w, h, shape, sx, sy, cfg.TranslateX, cfg.TranslateY, stencil);
+            ProtectEdges(field, w, h, invRange, sx, sy, stencil);
+            FindErrors(field, w, h, invRange, sx, sy, stencil);
 
-            // 2) Find interpolation artifacts among the unprotected texels.
-            FindErrors(field, w, h, stencil);
-
-            // 3) Apply: msdfgen MSDFErrorCorrection::apply sets each flagged texel to its own median
-            //    across all three channels — a single scalar cannot clash, so the phantom edge is
-            //    removed. With the round-6 generator root-cause fix (nonZeroSign in EdgeSegment), the
-            //    field no longer pins a whole column to the contour, so the earlier custom
-            //    "degenerate-median" resolution (neighbourhood averaging) is unnecessary and has been
-            //    removed; this is now exactly msdfgen's apply().
+            // apply(): every ERROR texel collapses to its own median (a single scalar cannot clash).
             for (int i = 0; i < w * h; i++)
             {
                 if ((stencil[i] & Stencil.Error) == 0) continue;
                 int o = i * 3;
-                float m = MsdfGenerator.Median(field[o], field[o + 1], field[o + 2]);
+                float m = Median(field[o], field[o + 1], field[o + 2]);
                 field[o] = m; field[o + 1] = m; field[o + 2] = m;
             }
         }
 
-        // ---------------------------------------------------------------------------------------
-        // protectCorners — msdfgen MSDFErrorCorrection::protectCorners(const Shape&, const Projection&)
-        // For every contour corner (an edge endpoint where the two incident edges are a true corner,
-        // i.e. not smooth), protect the up-to-4 texels straddling that corner's position, because
-        // the median there is SUPPOSED to encode two differently-coloured edges and must not be
-        // flattened to a scalar.
-        // ---------------------------------------------------------------------------------------
-        private static void ProtectCorners(float[] field, int w, int h, Shape shape, in MsdfConfig cfg, Stencil[] stencil)
+        // ==========================================================================================
+        // protectCorners — msdfgen MSDFErrorCorrection::protectCorners(const Shape&)
+        // A corner is where the COLOUR changes between consecutive edges: commonColor =
+        // prevEdge.color & edge.color; it is a corner iff commonColor is not a single bit
+        // (!(c & (c-1)) is TRUE for 0 or a single set bit → NOT a corner; so a corner is when that is
+        // FALSE, i.e. commonColor has 0 or ≥2 bits). msdfgen marks the 4 texels enveloping the
+        // corner point (floor(p-.5) .. +1) as PROTECTED. Our field is bottom-up with no inverseYAxis,
+        // so we project directly (no height-flip).
+        // ==========================================================================================
+        private static void ProtectCorners(float[] field, int w, int h, Shape shape,
+            double sx, double sy, double tx, double ty, Stencil[] stencil)
         {
-            // msdfgen uses the geometric corner test (the same angle threshold edgeColoringSimple
-            // uses to split colours), NOT a colour-difference test: on a smooth contour the teardrop
-            // colouring introduces colour-change SEAMS that are not real corners, and protecting
-            // those would shield exactly the smooth-wall texels where the '@' streak lives.
-            double crossThreshold = Math.Sin(EdgeColoring.DefaultAngleThreshold);
             foreach (var contour in shape.Contours)
             {
                 int n = contour.Edges.Count;
                 if (n == 0) continue;
-                Vector2D prevDir = contour.Edges[n - 1].Direction(1).Normalize();
+                EdgeSegment prevEdge = contour.Edges[n - 1];
                 for (int e = 0; e < n; e++)
                 {
-                    EdgeSegment cur = contour.Edges[e];
-                    Vector2D curDir = cur.Direction(0).Normalize();
-                    bool corner = Vector2D.Dot(prevDir, curDir) <= 0 ||
-                                  Math.Abs(Vector2D.Cross(prevDir, curDir)) > crossThreshold;
-                    if (corner)
+                    EdgeSegment edge = contour.Edges[e];
+                    int commonColor = (int)prevEdge.Color & (int)edge.Color;
+                    // Corner iff commonColor is NOT a single bit (msdfgen: !(commonColor&(commonColor-1))
+                    // identifies 0-or-single-bit; the branch body runs when THAT is true, protecting
+                    // the corner). i.e. protect when commonColor has 0 or exactly 1 bit set.
+                    if ((commonColor & (commonColor - 1)) == 0)
                     {
-                        // Corner point in field space (inverse of the generator's shape->pixel map).
-                        Vector2D cp = cur.Point(0);
-                        double fx = (cp.X + cfg.TranslateX) * cfg.ScaleX - 0.5;
-                        double fy = (cp.Y + cfg.TranslateY) * cfg.ScaleY - 0.5;
-                        int x0 = (int)Math.Floor(fx);
-                        int y0 = (int)Math.Floor(fy);
-                        for (int dy = 0; dy <= 1; dy++)
-                            for (int dx = 0; dx <= 1; dx++)
-                            {
-                                int px = x0 + dx, py = y0 + dy;
-                                if (px >= 0 && px < w && py >= 0 && py < h)
-                                    stencil[py * w + px] |= Stencil.Protected;
-                            }
+                        // project((*edge).point(0)) = scale*(p + translate).
+                        Vector2D p0 = edge.Point(0);
+                        double px = sx * (p0.X + tx);
+                        double py = sy * (p0.Y + ty);
+                        int l = (int)Math.Floor(px - 0.5);
+                        int b = (int)Math.Floor(py - 0.5);
+                        int r = l + 1;
+                        int t = b + 1;
+                        if (l < w && b < h && r >= 0 && t >= 0)
+                        {
+                            if (l >= 0 && b >= 0) stencil[b * w + l] |= Stencil.Protected;
+                            if (r < w && b >= 0) stencil[b * w + r] |= Stencil.Protected;
+                            if (l >= 0 && t < h) stencil[t * w + l] |= Stencil.Protected;
+                            if (r < w && t < h) stencil[t * w + r] |= Stencil.Protected;
+                        }
                     }
-                    prevDir = cur.Direction(1).Normalize();
+                    prevEdge = edge;
                 }
             }
         }
 
-        // ---------------------------------------------------------------------------------------
-        // protectEdges — msdfgen MSDFErrorCorrection::protectEdges(const BitmapConstRef)
-        // Protect texels on either side of a GENUINE median edge: where the reconstructed median
-        // crosses 0.5 between two adjacent texels AND that crossing is backed by all channels moving
-        // consistently (a real shape contour, not a single-channel interpolation glitch). This keeps
-        // true strokes and bowls from being flagged as artifacts. Horizontal, vertical and both
-        // diagonal neighbours, per msdfgen.
-        // ---------------------------------------------------------------------------------------
-        private static void ProtectEdges(float[] field, int w, int h, Stencil[] stencil)
+        // ==========================================================================================
+        // protectEdges — msdfgen MSDFErrorCorrection::protectEdges(const BitmapConstRef<float,N>)
+        // For every H / V / diagonal texel pair whose medians are both near the 0.5 contour
+        // (|lm-.5|+|rm-.5| < radius), find which channels carry a real edge between them
+        // (edgeBetweenTexels) and PROTECT each texel's non-median channel that participates
+        // (protectExtremeChannels). radius = PROTECTION_RADIUS_TOLERANCE * |unprojectVector(Delta(1)·axis)|.
+        // ==========================================================================================
+        private static void ProtectEdges(float[] field, int w, int h, double invRange, double sx, double sy, Stencil[] stencil)
         {
+            // Horizontal pairs. unprojectVector(Vector2(invRange,0)) = (invRange/sx, 0); length = invRange/sx.
+            float radiusH = (float)(ProtectionRadiusTolerance * (invRange / sx));
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w - 1; x++)
+                {
+                    int ia = y * w + x, ib = y * w + (x + 1);
+                    int oa = ia * 3, ob = ib * 3;
+                    float lm = Median(field[oa], field[oa + 1], field[oa + 2]);
+                    float rm = Median(field[ob], field[ob + 1], field[ob + 2]);
+                    if (Math.Abs(lm - 0.5f) + Math.Abs(rm - 0.5f) < radiusH)
+                    {
+                        int mask = EdgeBetweenTexels(field, oa, ob);
+                        ProtectExtremeChannels(stencil, ia, field, oa, lm, mask);
+                        ProtectExtremeChannels(stencil, ib, field, ob, rm, mask);
+                    }
+                }
+
+            // Vertical pairs. length = invRange/sy.
+            float radiusV = (float)(ProtectionRadiusTolerance * (invRange / sy));
+            for (int y = 0; y < h - 1; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int ia = y * w + x, ib = (y + 1) * w + x;
+                    int oa = ia * 3, ob = ib * 3;
+                    float bm = Median(field[oa], field[oa + 1], field[oa + 2]);
+                    float tm = Median(field[ob], field[ob + 1], field[ob + 2]);
+                    if (Math.Abs(bm - 0.5f) + Math.Abs(tm - 0.5f) < radiusV)
+                    {
+                        int mask = EdgeBetweenTexels(field, oa, ob);
+                        ProtectExtremeChannels(stencil, ia, field, oa, bm, mask);
+                        ProtectExtremeChannels(stencil, ib, field, ob, tm, mask);
+                    }
+                }
+
+            // Diagonal pairs. unprojectVector(Vector2(invRange,invRange)) = (invRange/sx, invRange/sy);
+            // length = invRange*sqrt(1/sx^2 + 1/sy^2).
+            float radiusD = (float)(ProtectionRadiusTolerance * invRange * Math.Sqrt(1.0 / (sx * sx) + 1.0 / (sy * sy)));
+            for (int y = 0; y < h - 1; y++)
+                for (int x = 0; x < w - 1; x++)
+                {
+                    int iLB = y * w + x, iRB = y * w + (x + 1), iLT = (y + 1) * w + x, iRT = (y + 1) * w + (x + 1);
+                    int oLB = iLB * 3, oRB = iRB * 3, oLT = iLT * 3, oRT = iRT * 3;
+                    float mlb = Median(field[oLB], field[oLB + 1], field[oLB + 2]);
+                    float mrb = Median(field[oRB], field[oRB + 1], field[oRB + 2]);
+                    float mlt = Median(field[oLT], field[oLT + 1], field[oLT + 2]);
+                    float mrt = Median(field[oRT], field[oRT + 1], field[oRT + 2]);
+                    if (Math.Abs(mlb - 0.5f) + Math.Abs(mrt - 0.5f) < radiusD)
+                    {
+                        int mask = EdgeBetweenTexels(field, oLB, oRT);
+                        ProtectExtremeChannels(stencil, iLB, field, oLB, mlb, mask);
+                        ProtectExtremeChannels(stencil, iRT, field, oRT, mrt, mask);
+                    }
+                    if (Math.Abs(mrb - 0.5f) + Math.Abs(mlt - 0.5f) < radiusD)
+                    {
+                        int mask = EdgeBetweenTexels(field, oRB, oLT);
+                        ProtectExtremeChannels(stencil, iRB, field, oRB, mrb, mask);
+                        ProtectExtremeChannels(stencil, iLT, field, oLT, mlt, mask);
+                    }
+                }
+        }
+
+        /// <summary>msdfgen edgeBetweenTexelsChannel: is there an edge in this channel between a and b?</summary>
+        private static bool EdgeBetweenTexelsChannel(float[] f, int oa, int ob, int channel)
+        {
+            float a0 = f[oa + channel], b0 = f[ob + channel];
+            double denom = a0 - b0;
+            if (denom == 0) return false;
+            double t = (a0 - 0.5) / denom;
+            if (t > 0 && t < 1)
+            {
+                float cR = Mix(f[oa], f[ob], t);
+                float cG = Mix(f[oa + 1], f[ob + 1], t);
+                float cB = Mix(f[oa + 2], f[ob + 2], t);
+                float m = Median(cR, cG, cB);
+                float cc = channel == 0 ? cR : (channel == 1 ? cG : cB);
+                return m == cc;
+            }
+            return false;
+        }
+
+        /// <summary>msdfgen edgeBetweenTexels: bit mask (RED=1|GREEN=2|BLUE=4) of edge-carrying channels.</summary>
+        private static int EdgeBetweenTexels(float[] f, int oa, int ob)
+        {
+            return (EdgeBetweenTexelsChannel(f, oa, ob, 0) ? 1 : 0)
+                 + (EdgeBetweenTexelsChannel(f, oa, ob, 1) ? 2 : 0)
+                 + (EdgeBetweenTexelsChannel(f, oa, ob, 2) ? 4 : 0);
+        }
+
+        /// <summary>msdfgen protectExtremeChannels: protect the texel if a non-median channel is in the mask.</summary>
+        private static void ProtectExtremeChannels(Stencil[] stencil, int texelIndex, float[] f, int o, float m, int mask)
+        {
+            if (((mask & 1) != 0 && f[o] != m) ||
+                ((mask & 2) != 0 && f[o + 1] != m) ||
+                ((mask & 4) != 0 && f[o + 2] != m))
+                stencil[texelIndex] |= Stencil.Protected;
+        }
+
+        // ==========================================================================================
+        // findErrors — msdfgen MSDFErrorCorrection::findErrors(const BitmapConstRef<float,N>)
+        // For each texel, flag ERROR if an artifact occurs when interpolated with ANY of its 8
+        // neighbours: 4 orthogonal via hasLinearArtifact, 4 diagonal via hasDiagonalArtifact, each
+        // with a BaseArtifactClassifier(span, protectedFlag).
+        // ==========================================================================================
+        private static void FindErrors(float[] field, int w, int h, double invRange, double sx, double sy, Stencil[] stencil)
+        {
+            double hSpan = DefaultMinDeviationRatio * (invRange / sx);
+            double vSpan = DefaultMinDeviationRatio * (invRange / sy);
+            double dSpan = DefaultMinDeviationRatio * invRange * Math.Sqrt(1.0 / (sx * sx) + 1.0 / (sy * sy));
+
             for (int y = 0; y < h; y++)
                 for (int x = 0; x < w; x++)
                 {
-                    int a = (y * w + x) * 3;
-                    if (x + 1 < w) ProtectEdgePair(field, a, (y * w + (x + 1)) * 3, (y * w + x), (y * w + (x + 1)), stencil);
-                    if (y + 1 < h) ProtectEdgePair(field, a, ((y + 1) * w + x) * 3, (y * w + x), ((y + 1) * w + x), stencil);
-                    if (x + 1 < w && y + 1 < h) ProtectEdgePair(field, a, ((y + 1) * w + (x + 1)) * 3, (y * w + x), ((y + 1) * w + (x + 1)), stencil);
-                    if (x > 0 && y + 1 < h) ProtectEdgePair(field, a, ((y + 1) * w + (x - 1)) * 3, (y * w + x), ((y + 1) * w + (x - 1)), stencil);
+                    int i = y * w + x, o = i * 3;
+                    float cm = Median(field[o], field[o + 1], field[o + 2]);
+                    bool prot = (stencil[i] & Stencil.Protected) != 0;
+
+                    int oL = x > 0 ? (y * w + (x - 1)) * 3 : -1;
+                    int oB = y > 0 ? ((y - 1) * w + x) * 3 : -1;
+                    int oR = x < w - 1 ? (y * w + (x + 1)) * 3 : -1;
+                    int oT = y < h - 1 ? ((y + 1) * w + x) * 3 : -1;
+
+                    bool err =
+                        (oL >= 0 && HasLinearArtifact(hSpan, prot, cm, field, o, oL)) ||
+                        (oB >= 0 && HasLinearArtifact(vSpan, prot, cm, field, o, oB)) ||
+                        (oR >= 0 && HasLinearArtifact(hSpan, prot, cm, field, o, oR)) ||
+                        (oT >= 0 && HasLinearArtifact(vSpan, prot, cm, field, o, oT)) ||
+                        (x > 0 && y > 0 && HasDiagonalArtifact(dSpan, prot, cm, field, o, oL, oB, ((y - 1) * w + (x - 1)) * 3)) ||
+                        (x < w - 1 && y > 0 && HasDiagonalArtifact(dSpan, prot, cm, field, o, oR, oB, ((y - 1) * w + (x + 1)) * 3)) ||
+                        (x > 0 && y < h - 1 && HasDiagonalArtifact(dSpan, prot, cm, field, o, oL, oT, ((y + 1) * w + (x - 1)) * 3)) ||
+                        (x < w - 1 && y < h - 1 && HasDiagonalArtifact(dSpan, prot, cm, field, o, oR, oT, ((y + 1) * w + (x + 1)) * 3));
+
+                    if (err) stencil[i] |= Stencil.Error;
                 }
         }
 
-        private static void ProtectEdgePair(float[] field, int oa, int ob, int ia, int ib, Stencil[] stencil)
+        // --- BaseArtifactClassifier (msdfgen) -----------------------------------------------------
+        // rangeTest returns CLASSIFIER_FLAG_CANDIDATE[|ARTIFACT]. For the SDF-only path, evaluate()
+        // is (flags & ARTIFACT) != 0, so an artifact is simply: isArtifact(...) in the inlined form.
+        private static int RangeTest(double span, bool prot, double at, double bt, double xt, float am, float bm, float xm)
         {
-            float ar = field[oa], ag = field[oa + 1], ab = field[oa + 2];
-            float br = field[ob], bg = field[ob + 1], bb = field[ob + 2];
-            float ma = MsdfGenerator.Median(ar, ag, ab);
-            float mb = MsdfGenerator.Median(br, bg, bb);
-            // A real median edge: the median crosses 0.5 between the two texels.
-            if ((ma - 0.5f) * (mb - 0.5f) >= 0f) return;
-
-            // Backed by a consistent per-channel move in the SAME direction as the median — the
-            // signature of a true distance edge rather than a channel clash. (msdfgen's protectEdges
-            // uses the edge selector; this is the equivalent condition on the reconstructed field:
-            // all channels that cross 0.5 cross the same way the median does.)
-            int medDir = Math.Sign(mb - ma);
-            for (int c = 0; c < 3; c++)
+            // For protected texels, only inversion artifacts count; else it suffices that the
+            // interpolated median is outside its boundaries.
+            if ((am > 0.5f && bm > 0.5f && xm <= 0.5f) ||
+                (am < 0.5f && bm < 0.5f && xm >= 0.5f) ||
+                (!prot && Median(am, bm, xm) != xm))
             {
-                float ca = field[oa + c], cb = field[ob + c];
-                if ((ca - 0.5f) * (cb - 0.5f) < 0f && Math.Sign(cb - ca) != medDir)
-                    return; // a channel crosses AGAINST the median -> this is a clash, not an edge
+                double axSpan = (xt - at) * span, bxSpan = (bt - xt) * span;
+                if (!(xm >= am - axSpan && xm <= am + axSpan && xm >= bm - bxSpan && xm <= bm + bxSpan))
+                    return ClassifierFlagCandidate | ClassifierFlagArtifact;
+                return ClassifierFlagCandidate;
             }
-            stencil[ia] |= Stencil.Protected;
-            stencil[ib] |= Stencil.Protected;
+            return 0;
         }
 
-        // ---------------------------------------------------------------------------------------
-        // findErrors — msdfgen MSDFErrorCorrection::findErrors(const BitmapConstRef)
-        // For each unprotected texel, test it against its 8 neighbours. Two artifact kinds are
-        // flagged, matching msdfgen's classifier once the protect stencil has removed the genuine
-        // edges:
-        //   (a) INTERIOR-DIP artifact (interpolatedMedianArtifact): both texels on the SAME side of
-        //       0.5 but the interpolated median dips across to the other side between them — an
-        //       isolated speck.
-        //   (b) UNPROTECTED CROSSING: the median crosses 0.5 between the two texels but
-        //       protectEdges did NOT protect it, which (by construction of protectEdges) means the
-        //       per-channel moves are inconsistent — a channel clash painting a false edge, i.e. the
-        //       sustained streak. protectEdges has already shielded every genuine edge, so a
-        //       surviving unprotected crossing is an error.
-        // Testing all 8 neighbours (not just the forward half) is needed so a wrong texel is caught
-        // from whichever side its CORRECT neighbour sits on.
-        // ---------------------------------------------------------------------------------------
-        private static void FindErrors(float[] field, int w, int h, Stencil[] stencil)
-        {
-            int[] dxs = { 1, -1, 0, 0, 1, 1, -1, -1 };
-            int[] dys = { 0, 0, 1, -1, 1, -1, 1, -1 };
+        /// <summary>msdfgen interpolatedMedian (linear): median of mix(a,b,t) across channels.</summary>
+        private static float InterpolatedMedianLinear(float[] f, int oa, int ob, double t) =>
+            Median(Mix(f[oa], f[ob], t), Mix(f[oa + 1], f[ob + 1], t), Mix(f[oa + 2], f[ob + 2], t));
 
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
+        /// <summary>msdfgen interpolatedMedian (bilinear quadratic form): median of t*(t*q+l)+a.</summary>
+        private static float InterpolatedMedianQuad(float[] a, float[] l, float[] q, double t) =>
+            Median(
+                (float)(t * (t * q[0] + l[0]) + a[0]),
+                (float)(t * (t * q[1] + l[1]) + a[1]),
+                (float)(t * (t * q[2] + l[2]) + a[2]));
+
+        /// <summary>msdfgen hasLinearArtifactInner.</summary>
+        private static bool HasLinearArtifactInner(double span, bool prot, float am, float bm, float[] f, int oa, int ob, float dA, float dB)
+        {
+            double t = (double)dA / (dA - dB);
+            if (t > ArtifactTEpsilon && t < 1 - ArtifactTEpsilon)
+            {
+                float xm = InterpolatedMedianLinear(f, oa, ob, t);
+                int flags = RangeTest(span, prot, 0, 1, t, am, bm, xm);
+                return (flags & ClassifierFlagArtifact) != 0;
+            }
+            return false;
+        }
+
+        /// <summary>msdfgen hasLinearArtifact (orthogonal pair a,b; a is the current texel 'o').</summary>
+        private static bool HasLinearArtifact(double span, bool prot, float am, float[] f, int oa, int ob)
+        {
+            float bm = Median(f[ob], f[ob + 1], f[ob + 2]);
+            // Only report for the texel further from the edge (minimises side effects).
+            if (Math.Abs(am - 0.5f) >= Math.Abs(bm - 0.5f))
+            {
+                return
+                    HasLinearArtifactInner(span, prot, am, bm, f, oa, ob, f[oa + 1] - f[oa], f[ob + 1] - f[ob]) || // R==G
+                    HasLinearArtifactInner(span, prot, am, bm, f, oa, ob, f[oa + 2] - f[oa + 1], f[ob + 2] - f[ob + 1]) || // G==B
+                    HasLinearArtifactInner(span, prot, am, bm, f, oa, ob, f[oa] - f[oa + 2], f[ob] - f[ob + 2]); // B==R
+            }
+            return false;
+        }
+
+        /// <summary>msdfgen hasDiagonalArtifactInner.</summary>
+        private static bool HasDiagonalArtifactInner(double span, bool prot, float am, float dm,
+            float[] a, float[] l, float[] q, float dA, float dBC, float dD, double tEx0, double tEx1,
+            float[] f, int oa) // oa unused beyond a[]; a/l/q are precomputed arrays
+        {
+            double[] roots = new double[2];
+            int solutions = EquationSolver.SolveQuadratic(roots, dD - dBC + dA, dBC - dA - dA, dA);
+            for (int si = 0; si < solutions; si++)
+            {
+                double t = roots[si];
+                if (t > ArtifactTEpsilon && t < 1 - ArtifactTEpsilon)
                 {
-                    int i = y * w + x;
-                    if ((stencil[i] & Stencil.Protected) != 0) continue;
-
-                    int o = i * 3;
-                    float cr = field[o], cg = field[o + 1], cb = field[o + 2];
-                    float cm = MsdfGenerator.Median(cr, cg, cb);
-
-                    bool artifact = false;
-                    for (int k = 0; k < 8 && !artifact; k++)
-                    {
-                        int nx = x + dxs[k], ny = y + dys[k];
-                        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-                        int ob = (ny * w + nx) * 3;
-                        float br = field[ob], bg = field[ob + 1], bb = field[ob + 2];
-                        float bm = MsdfGenerator.Median(br, bg, bb);
-
-                        if ((cm - 0.5f) * (bm - 0.5f) < 0f)
-                        {
-                            // The median crosses 0.5 across this neighbour pair. If protectEdges did
-                            // not protect this texel for a real edge, the crossing must be a clash —
-                            // flag it when the channels move inconsistently with the median.
-                            if (IsClashCrossing(cr, cg, cb, br, bg, bb, cm, bm))
-                                artifact = true;
-                        }
-                        else
-                        {
-                            // Same side: look for an interior dip (speck).
-                            artifact = InterpolatedMedianArtifact(cr, cg, cb, cm, br, bg, bb, bm);
-                        }
-                    }
-
-                    // msdfgen interpolatedMedianMinimum / interpolatedMedianMaximum
-                    // (core/MSDFErrorCorrection.cpp): the interpolated median along an axis through a
-                    // texel attains an interior EXTREMUM that lands on the opposite side of 0.5 from
-                    // both axis endpoints. msdfgen evaluates this per axis (H, V, and both diagonals);
-                    // it is the test that catches a median pulled toward the contour at a junction
-                    // (e.g. the 'W' middle vertex) where the pairwise crossing/same-side dip tests
-                    // alone do not flag it. A genuine thin stroke is NOT flagged: its opposite
-                    // neighbours straddle 0.5 (one in, one out), so the firm same-side condition fails.
-                    if (!artifact)
-                    {
-                        int[,] axes = { { 1, 0 }, { 0, 1 }, { 1, 1 }, { 1, -1 } };
-                        for (int a = 0; a < 4 && !artifact; a++)
-                        {
-                            int ax = axes[a, 0], ay = axes[a, 1];
-                            int px1 = x + ax, py1 = y + ay, px2 = x - ax, py2 = y - ay;
-                            if (px1 < 0 || px1 >= w || py1 < 0 || py1 >= h) continue;
-                            if (px2 < 0 || px2 >= w || py2 < 0 || py2 >= h) continue;
-                            float m1 = MedAt(field, (py1 * w + px1) * 3);
-                            float m2 = MedAt(field, (py2 * w + px2) * 3);
-                            artifact = InterpolatedMedianExtremum(cm, m1, m2);
-                        }
-                    }
-
-                    if (artifact)
-                        stencil[i] |= Stencil.Error;
+                    float xm = InterpolatedMedianQuad(a, l, q, t);
+                    int rangeFlags = RangeTest(span, prot, 0, 1, t, am, dm, xm);
+                    // Additional checks against interpolated medians at the local extremes tEx0,tEx1.
+                    rangeFlags |= ExtremeCheck(span, prot, a, l, q, am, dm, xm, t, tEx0);
+                    rangeFlags |= ExtremeCheck(span, prot, a, l, q, am, dm, xm, t, tEx1);
+                    if ((rangeFlags & ClassifierFlagArtifact) != 0) return true;
                 }
+            }
+            return false;
         }
 
-        private static float MedAt(float[] field, int o) => MsdfGenerator.Median(field[o], field[o + 1], field[o + 2]);
-
-        /// <summary>
-        /// msdfgen interpolatedMedianMinimum / interpolatedMedianMaximum: the centre median sits on
-        /// the contour (within a small band of 0.5) while BOTH opposite neighbour medians lie firmly
-        /// on the SAME side — the interpolated median has an interior extremum crossing 0.5 where no
-        /// real contour passes. Firm margins keep genuine thin strokes (opposite neighbours straddle
-        /// 0.5) and real edges (centre already off 0.5) from being flagged.
-        /// </summary>
-        private static bool InterpolatedMedianExtremum(float cm, float m1, float m2)
+        private static int ExtremeCheck(double span, bool prot, float[] a, float[] l, float[] q,
+            float am, float dm, float xm, double t, double tEx)
         {
-            const float onEdge = 0.06f;  // |cm-0.5| this small == median pulled toward the contour
-            const float firm = 0.04f;    // a neighbour this far past 0.5 is a firm vote
-            if (Math.Abs(cm - 0.5f) > onEdge) return false;
-            bool bothInside = (m1 - 0.5f) > firm && (m2 - 0.5f) > firm;
-            bool bothOutside = (0.5f - m1) > firm && (0.5f - m2) > firm;
-            return bothInside || bothOutside;
-        }
-
-        /// <summary>
-        /// True when the median crosses 0.5 between two texels but at least one channel crosses 0.5
-        /// in the OPPOSITE direction to the median (or a channel crosses while the median's crossing
-        /// is driven by a different channel) — the signature of a multi-channel clash painting a
-        /// false edge. Genuine edges (all crossing channels agree with the median direction) were
-        /// already PROTECTED, so reaching here on a crossing means it is spurious.
-        /// </summary>
-        private static bool IsClashCrossing(float ar, float ag, float ab, float br, float bg, float bb, float am, float bm)
-        {
-            const float t = 0.5f;
-            int medDir = Math.Sign(bm - am);
-            int crossing = 0, agreeing = 0;
-            void Chk(float a, float b)
+            if (tEx > 0 && tEx < 1)
             {
-                if ((a - t) * (b - t) < 0f)
+                double t0 = 0, t1 = 1;
+                float e0 = am, e1 = dm;
+                // tEnd[tEx>t] = tEx; em[tEx>t] = interpolatedMedian(a,l,q,tEx)
+                if (tEx > t) { t1 = tEx; e1 = InterpolatedMedianQuad(a, l, q, tEx); }
+                else { t0 = tEx; e0 = InterpolatedMedianQuad(a, l, q, tEx); }
+                return RangeTest(span, prot, t0, t1, t, e0, e1, xm);
+            }
+            return 0;
+        }
+
+        /// <summary>msdfgen hasDiagonalArtifact (texels a,d diagonal; b,c the other diagonal).</summary>
+        private static bool HasDiagonalArtifact(double span, bool prot, float am, float[] f, int oa, int ob, int oc, int od)
+        {
+            float dm = Median(f[od], f[od + 1], f[od + 2]);
+            if (Math.Abs(am - 0.5f) >= Math.Abs(dm - 0.5f))
+            {
+                // abc = a - b - c (per channel).
+                float[] a = { f[oa], f[oa + 1], f[oa + 2] };
+                float[] abc =
                 {
-                    crossing++;
-                    if (Math.Sign(b - a) == medDir) agreeing++;
-                }
+                    f[oa]     - f[ob]     - f[oc],
+                    f[oa + 1] - f[ob + 1] - f[oc + 1],
+                    f[oa + 2] - f[ob + 2] - f[oc + 2],
+                };
+                float[] l = { -a[0] - abc[0], -a[1] - abc[1], -a[2] - abc[2] };
+                float[] q = { f[od] + abc[0], f[od + 1] + abc[1], f[od + 2] + abc[2] };
+                double[] tEx =
+                {
+                    -0.5 * l[0] / q[0],
+                    -0.5 * l[1] / q[1],
+                    -0.5 * l[2] / q[2],
+                };
+                // dBC terms: (b[ch1]-b[ch0]) + (c[ch1]-c[ch0]).
+                float bR = f[ob], bG = f[ob + 1], bB = f[ob + 2];
+                float cR = f[oc], cG = f[oc + 1], cB = f[oc + 2];
+                float dR = f[od], dG = f[od + 1], dB = f[od + 2];
+                return
+                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[1] - a[0], (bG - bR) + (cG - cR), dG - dR, tEx[0], tEx[1], f, oa) ||
+                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[2] - a[1], (bB - bG) + (cB - cG), dB - dG, tEx[1], tEx[2], f, oa) ||
+                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[0] - a[2], (bR - bB) + (cR - cB), dR - dB, tEx[2], tEx[0], f, oa);
             }
-            Chk(ar, br); Chk(ag, bg); Chk(ab, bb);
-            // A clean edge has every crossing channel moving with the median. A clash has a channel
-            // crossing against the median, OR the median crossing with NO channel actually crossing
-            // (the "middle" channel swapped without reaching 0.5).
-            return crossing == 0 || agreeing < crossing;
-        }
-
-        // ---------------------------------------------------------------------------------------
-        // Interpolated-median artifact test (msdfgen core/MSDFErrorCorrection.cpp,
-        // interpolatedMedianArtifact + BaseArtifactClassifier). Catches the SAME-SIDE interior dip:
-        // both texels sit on one side of 0.5 but the per-channel linear interpolation makes the
-        // reconstructed median cross to the other side between them — an isolated speck. The
-        // deviation/improve ratios reject dips too shallow to render.
-        // ---------------------------------------------------------------------------------------
-
-        /// <summary>
-        /// Core interpolated-median artifact classifier for a straight span A->B, faithful to
-        /// msdfgen's <c>interpolatedMedianArtifact</c> + <c>BaseArtifactClassifier::evaluate</c>.
-        /// The reconstructed median along the span is piecewise linear with breakpoints where two
-        /// channels swap order; at each breakpoint parameter the median has a potential dip. An
-        /// artifact exists when the median at an interior breakpoint lands on the OPPOSITE side of
-        /// 0.5 from BOTH endpoint medians — the median paints an edge (and its mirror) inside a span
-        /// the shape does not actually cross. The deviation/improve ratios gate shallow dips.
-        /// </summary>
-        private static bool InterpolatedMedianArtifact(
-            float ar, float ag, float ab, float am,
-            float br, float bg, float bb, float bm)
-        {
-            const float thr = 0.5f;
-
-            // Both endpoints on the same side (otherwise the single median crossing is a real edge,
-            // which protectEdges will have handled / which is legitimate).
-            bool bothInside = am > thr && bm > thr;
-            bool bothOutside = am < thr && bm < thr;
-            if (!bothInside && !bothOutside) return false;
-
-            // Breakpoints of the piecewise-linear median = parameters where each channel PAIR is
-            // equal (there the "middle" channel can change). Evaluate the median at each and keep the
-            // most extreme interior value.
-            float worst = bothInside ? 1f : 0f;
-            float worstT = -1f;
-            void Consider(float t)
-            {
-                if (t <= 0f || t >= 1f) return;
-                float R = ar + (br - ar) * t;
-                float G = ag + (bg - ag) * t;
-                float B = ab + (bb - ab) * t;
-                float med = MsdfGenerator.Median(R, G, B);
-                if (bothInside && med < worst) { worst = med; worstT = t; }
-                if (bothOutside && med > worst) { worst = med; worstT = t; }
-            }
-            Consider(PairEqualParam(ar, br, ag, bg)); // R == G
-            Consider(PairEqualParam(ag, bg, ab, bb)); // G == B
-            Consider(PairEqualParam(ar, br, ab, bb)); // R == B
-            if (worstT < 0f) return false;
-
-            // The interior median must cross to the other side of 0.5 to be a phantom edge.
-            bool crosses = bothInside ? worst < thr : worst > thr;
-            if (!crosses) return false;
-
-            return RangeTest(am, bm, worst, worstT);
-        }
-
-        /// <summary>
-        /// msdfgen <c>BaseArtifactClassifier::rangeTest</c> gate. The caller has established that the
-        /// reconstructed median at interior parameter <paramref name="xt"/> (value <paramref
-        /// name="xm"/>) crosses to the opposite side of 0.5 from both endpoint medians (<paramref
-        /// name="am"/>, <paramref name="bm"/>) — a candidate phantom edge. This gate rejects it when
-        /// it is too shallow to render (minimum DEVIATION ratio) or when flattening would not
-        /// materially improve the field (minimum IMPROVE ratio), exactly as msdfgen's defaults
-        /// (minDeviationRatio = minImproveRatio = 1.11111...) do.
-        /// </summary>
-        private static bool RangeTest(float am, float bm, float xm, float xt)
-        {
-            const float thr = 0.5f;
-
-            // "Expected" median at xt is the straight-line interpolation of the endpoint medians; the
-            // real reconstructed median departs from it by `deviation`. A genuine artifact departs far
-            // (it reverses across 0.5); interpolation noise departs little.
-            float expected = am + (bm - am) * xt;
-            float deviation = Math.Abs(xm - expected);
-            if (deviation <= 0f) return false;
-
-            // DEVIATION gate: the reversal must carry the median at least (minDeviationRatio-1) of its
-            // distance-to-expected onto the far side of 0.5. |xm-thr| is how far it actually reversed.
-            float reversal = Math.Abs(xm - thr);
-            if (reversal * (float)DefaultMinDeviationRatio < deviation * ((float)DefaultMinDeviationRatio - 1f))
-                return false;
-
-            // IMPROVE gate: flattening the texel to its median replaces the reversed value with the
-            // endpoint-consistent median. That is an improvement only if the reversed median is far
-            // enough past 0.5 relative to the nearer endpoint's own margin; otherwise the field was
-            // already essentially correct and a flatten changes nothing worth doing.
-            float endpointMargin = Math.Min(Math.Abs(am - thr), Math.Abs(bm - thr));
-            if (reversal * (float)DefaultMinImproveRatio < endpointMargin)
-                return false;
-
-            return true;
-        }
-
-        /// <summary>
-        /// Parameter t in (0,1) where linear interpolations (a0..a1) and (b0..b1) are equal, or -1
-        /// when they are parallel or meet outside the span. This is a median breakpoint.
-        /// </summary>
-        private static float PairEqualParam(float a0, float a1, float b0, float b1)
-        {
-            float denom = (a1 - a0) - (b1 - b0);
-            if (denom == 0f) return -1f;
-            float t = (b0 - a0) / denom;
-            return (t > 0f && t < 1f) ? t : -1f;
+            return false;
         }
     }
 }
