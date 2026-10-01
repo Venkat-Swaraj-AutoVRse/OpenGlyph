@@ -49,3 +49,31 @@ Shows, through the real raster path: real vs synthetic bold/italic quality diffe
 weight axis of a variable font producing genuinely different glyphs. Does **not** show full
 in-component layout (varied advances across a line, atlas sharing by `VariationKey` at runtime) —
 that is the live-pipeline wiring left as the next step in `Phase2-FontFamilies.md`.
+
+## Round 3 — real-engine sheets (`*_realengine_*.png`)
+
+Produced by `Tests/Editor/Phase2RealEngineEvidenceTests.cs`. These render from **OpenGlyph's own
+`UniTextFont` SDF/MSDF atlas** — the engine's actual atlas output, filled by the real SDF/MSDF glyph
+renderers; variable instances go through the Phase-2 variation atlas (`EnsureGlyphsForVariation`,
+design coords applied before raster). Each glyph is composited at its **real shaped advance**. Sample
+word "Reading" at 64 ppem.
+
+- `phase2_family_realengine_sdf.png` — six rows: real Regular / **Bold** / *Italic* / ***BoldItalic***
+  from the real Noto family, then two synthetic rows (Regular + the engine's own `BoldModifier` 1px
+  dilation / `ItalicModifier` shear) on a family lacking those faces. The real Bold is distinctly
+  heavier than the synthetic bold; the real Italic has redesigned letterforms where the synthetic
+  italic is just a slant.
+- `phase2_family_realengine_msdf.png` — the four real faces through the real **MSDF** atlas (RGB
+  median-reconstructed), crisp at this size.
+- `phase2_robotoflex_realengine_sdf.png` — RobotoFlex as real variable instances: **wght
+  100/400/700/1000** thickens smoothly and convincingly; **wdth 25/100/151** laid out with real
+  advances. **Honest limitation:** the width rows still look similar — RobotoFlex's `wdth` effect at
+  64 ppem is subtle and the per-glyph shape dominates, so the width axis is under-sold next to weight
+  (the coords ARE applied and quantized; `VariationAtlasTests` proves distinct instances).
+
+**Honest note on method:** these sheets reconstruct coverage from the engine's SDF/MSDF atlas CELLS
+and composite them on the CPU at real advances; they are the engine's atlas pixels, not PIL/Skia. A
+full camera render of a live `UniText` component through the SDF/MSDF shader (reusing the
+`MsdfVisualEvidenceTests` camera harness) is the one remaining evidence refinement — the shader
+coverage ramp would differ slightly from this field-sharpened reconstruction, but the shapes,
+weights, slants and advances shown here are the engine's own.
