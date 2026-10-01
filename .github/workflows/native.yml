@@ -113,6 +113,12 @@ jobs:
           path: out/
 
   # ---------------------------------------------------------------- macOS universal
+  # Built as TWO single-arch passes then lipo'd. Blend2D's JIT + embedded asmjit arch
+  # detection is unambiguous per single arch (as on Windows x64 / Linux x64+ARM64), but a
+  # single universal (arm64;x86_64) pass leaves BLEND2D_ARCH_* undetected and the embedded
+  # asmjit backend is not compiled into every slice -> undefined asmjit::CodeHolder symbols
+  # at link / "pipecompiler_a64.cpp.o has no symbols" for x86_64. Separate passes + lipo
+  # keeps Blend2D ON on both slices and produces the same universal dylib.
   macos:
     runs-on: macos-14
     steps:
@@ -121,24 +127,35 @@ jobs:
         uses: lukka/get-cmake@v3.31.6
         with:
           cmakeVersion: "${{ env.CMAKE_VERSION }}"
-      - name: Configure (universal arm64 + x86_64)
-        run: >
-          cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON
-          "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
-      - name: Build
-        run: cmake --build build
-      - name: Parity (arm64 runner executes arm64 slice)
+      - name: Build arm64 slice
+        run: |
+          cmake -S "NativeSource~" -B build-arm64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON \
+            "-DCMAKE_OSX_ARCHITECTURES=arm64"
+          cmake --build build-arm64
+      - name: Build x86_64 slice
+        run: |
+          cmake -S "NativeSource~" -B build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGLYPH_ENABLE_BLEND2D=ON -DOPENGLYPH_BUILD_EDITOR_DLL=ON \
+            "-DCMAKE_OSX_ARCHITECTURES=x86_64"
+          cmake --build build-x64
+      - name: Parity (arm64 runner executes the arm64 slice)
         run: |
           cp Plugins/macOS/libunitext_native.dylib "$RUNNER_TEMP/orig.dylib"
           dotnet run -c Release --project "NativeSource~/tests/parity" -- \
-            "$RUNNER_TEMP/orig.dylib" "build/libunitext_native.dylib" \
+            "$RUNNER_TEMP/orig.dylib" "build-arm64/libunitext_native.dylib" \
             "Defaults" "Defaults/NotoSans-Regular.ttf" || true
-      - name: Stage outputs
+      - name: Lipo universal + stage outputs
         run: |
           mkdir -p out/macOS
-          cp build/libunitext_native.dylib out/macOS/
-          cp build/libunitext_native_editor.dylib out/macOS/
+          lipo -create \
+            build-arm64/libunitext_native.dylib \
+            build-x64/libunitext_native.dylib \
+            -output out/macOS/libunitext_native.dylib
+          lipo -create \
+            build-arm64/libunitext_native_editor.dylib \
+            build-x64/libunitext_native_editor.dylib \
+            -output out/macOS/libunitext_native_editor.dylib
           lipo -info out/macOS/libunitext_native.dylib
       - uses: actions/upload-artifact@v4
         with:
