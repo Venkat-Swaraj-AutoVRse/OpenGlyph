@@ -8,7 +8,7 @@
         "cpuCount": 12,
         "systemMemoryMB": 32471,
         "graphicsDevice": "NVIDIA GeForce RTX 4050 Laptop GPU",
-        "timestampUtc": "2026-10-01T19:13:48.4100777Z",
+        "timestampUtc": "2026-10-01T20:14:10.0455556Z",
         "representative": true,
         "incrementalGCEnabled": true,
         "randomSeed": 12345
@@ -24,58 +24,58 @@
             "iterations": 5,
             "warmups": 2,
             "objectCreation": {
-                "medianMs": 93.1601,
-                "p95Ms": 95.71264,
-                "minMs": 91.0943,
-                "maxMs": 96.3013,
+                "medianMs": 93.60730000000001,
+                "p95Ms": 94.85340000000001,
+                "minMs": 92.235,
+                "maxMs": 94.90140000000001,
                 "samplesMs": [
-                    91.0943,
-                    93.0171,
-                    93.1601,
-                    93.358,
-                    96.3013
+                    92.235,
+                    92.4002,
+                    93.60730000000001,
+                    94.6614,
+                    94.90140000000001
                 ]
             },
             "fullRebuild": {
-                "medianMs": 81.6713,
-                "p95Ms": 86.0359,
-                "minMs": 80.5214,
-                "maxMs": 86.1896,
+                "medianMs": 82.2701,
+                "p95Ms": 83.49956,
+                "minMs": 81.3712,
+                "maxMs": 83.5908,
                 "samplesMs": [
-                    80.5214,
-                    81.3797,
-                    81.6713,
-                    85.42110000000001,
-                    86.1896
+                    81.3712,
+                    82.07560000000001,
+                    82.2701,
+                    83.1346,
+                    83.5908
                 ]
             },
             "layout": {
-                "medianMs": 31.6474,
-                "p95Ms": 33.34058,
-                "minMs": 29.139100000000004,
-                "maxMs": 33.743500000000008,
+                "medianMs": 28.4528,
+                "p95Ms": 29.0041,
+                "minMs": 27.663500000000004,
+                "maxMs": 29.0711,
                 "samplesMs": [
-                    29.139100000000004,
-                    29.405700000000004,
-                    31.6474,
-                    31.728900000000004,
-                    33.743500000000008
+                    27.663500000000004,
+                    28.4234,
+                    28.4528,
+                    28.7361,
+                    29.0711
                 ]
             },
             "meshRebuild": {
-                "medianMs": 18.3509,
-                "p95Ms": 19.752560000000004,
-                "minMs": 16.5137,
-                "maxMs": 19.988200000000004,
+                "medianMs": 17.115000000000003,
+                "p95Ms": 18.175220000000004,
+                "minMs": 16.7045,
+                "maxMs": 18.4292,
                 "samplesMs": [
-                    16.5137,
-                    16.7325,
-                    18.3509,
-                    18.810000000000004,
-                    19.988200000000004
+                    16.7045,
+                    16.9875,
+                    17.115000000000003,
+                    17.1593,
+                    18.4292
                 ]
             },
-            "gcCollectionsDuringCreation": 23,
+            "gcCollectionsDuringCreation": 46,
             "allocatedMBDuringCreation": 0.0,
             "kbPerFullRebuildOp": 0.0,
             "shapingFairForThisSystem": true,
@@ -90,10 +90,10 @@
             "validityNote": "",
             "gcAllocCreationKB": 0.0,
             "gcReservedCreationKB": 0.0,
-            "gcGen0Delta": 23,
-            "gcGen1Delta": 23,
-            "gcGen2Delta": 23,
-            "totalMemoryDeltaKB": 173584.0
+            "gcGen0Delta": 46,
+            "gcGen1Delta": 46,
+            "gcGen2Delta": 46,
+            "totalMemoryDeltaKB": 161536.0
         },
         {
             "system": "OpenGlyph-ParallelOff",
@@ -102,58 +102,58 @@
             "iterations": 5,
             "warmups": 2,
             "objectCreation": {
-                "medianMs": 149.03990000000003,
-                "p95Ms": 150.27916,
-                "minMs": 145.89960000000003,
-                "maxMs": 150.4906,
+                "medianMs": 158.8557,
+                "p95Ms": 171.80831999999999,
+                "minMs": 155.7666,
+                "maxMs": 174.6883,
                 "samplesMs": [
-                    145.89960000000003,
-                    146.7619,
-                    149.03990000000003,
-                    149.4334,
-                    150.4906
+                    155.7666,
+                    156.26600000000003,
+                    158.8557,
+                    160.2884,
+                    174.6883
                 ]
             },
             "fullRebuild": {
-                "medianMs": 142.3084,
-                "p95Ms": 144.30364,
-                "minMs": 139.9547,
-                "maxMs": 144.79840000000002,
+                "medianMs": 148.43030000000003,
+                "p95Ms": 149.6956,
+                "minMs": 146.2646,
+                "maxMs": 149.8086,
                 "samplesMs": [
-                    139.9547,
-                    141.501,
-                    142.3084,
-                    142.3246,
-                    144.79840000000002
+                    146.2646,
+                    146.5806,
+                    148.43030000000003,
+                    149.24360000000002,
+                    149.8086
                 ]
             },
             "layout": {
-                "medianMs": 34.601600000000008,
-                "p95Ms": 35.41536,
-                "minMs": 30.9846,
-                "maxMs": 35.5951,
+                "medianMs": 29.5122,
+                "p95Ms": 30.974500000000004,
+                "minMs": 28.4742,
+                "maxMs": 31.042,
                 "samplesMs": [
-                    30.9846,
-                    31.6932,
-                    34.601600000000008,
-                    34.696400000000007,
-                    35.5951
+                    28.4742,
+                    29.2451,
+                    29.5122,
+                    30.704500000000004,
+                    31.042
                 ]
             },
             "meshRebuild": {
-                "medianMs": 25.5107,
-                "p95Ms": 27.197660000000004,
-                "minMs": 24.5423,
-                "maxMs": 27.391000000000003,
+                "medianMs": 23.2996,
+                "p95Ms": 23.91512,
+                "minMs": 22.8492,
+                "maxMs": 23.9159,
                 "samplesMs": [
-                    24.5423,
-                    24.9356,
-                    25.5107,
-                    26.424300000000004,
-                    27.391000000000003
+                    22.8492,
+                    23.298000000000003,
+                    23.2996,
+                    23.912000000000004,
+                    23.9159
                 ]
             },
-            "gcCollectionsDuringCreation": 2,
+            "gcCollectionsDuringCreation": 6,
             "allocatedMBDuringCreation": 0.0,
             "kbPerFullRebuildOp": 0.0,
             "shapingFairForThisSystem": true,
@@ -168,10 +168,10 @@
             "validityNote": "",
             "gcAllocCreationKB": 0.0,
             "gcReservedCreationKB": 0.0,
-            "gcGen0Delta": 2,
-            "gcGen1Delta": 2,
-            "gcGen2Delta": 2,
-            "totalMemoryDeltaKB": 47188.0
+            "gcGen0Delta": 6,
+            "gcGen1Delta": 6,
+            "gcGen2Delta": 6,
+            "totalMemoryDeltaKB": 36456.0
         },
         {
             "system": "OpenGlyph-ParallelOff",
@@ -180,58 +180,58 @@
             "iterations": 5,
             "warmups": 2,
             "objectCreation": {
-                "medianMs": 106.60350000000001,
-                "p95Ms": 109.75556,
-                "minMs": 102.7294,
-                "maxMs": 110.1179,
+                "medianMs": 109.16460000000001,
+                "p95Ms": 110.2942,
+                "minMs": 107.5066,
+                "maxMs": 110.5571,
                 "samplesMs": [
-                    102.7294,
-                    103.6029,
-                    106.60350000000001,
-                    108.3062,
-                    110.1179
+                    107.5066,
+                    108.6358,
+                    109.16460000000001,
+                    109.24260000000001,
+                    110.5571
                 ]
             },
             "fullRebuild": {
-                "medianMs": 95.13380000000001,
-                "p95Ms": 95.96404000000001,
-                "minMs": 95.0027,
-                "maxMs": 96.15400000000001,
+                "medianMs": 101.27690000000001,
+                "p95Ms": 103.53322,
+                "minMs": 99.55510000000001,
+                "maxMs": 103.80630000000001,
                 "samplesMs": [
-                    95.0027,
-                    95.06110000000001,
-                    95.13380000000001,
-                    95.2042,
-                    96.15400000000001
+                    99.55510000000001,
+                    100.84110000000001,
+                    101.27690000000001,
+                    102.4409,
+                    103.80630000000001
                 ]
             },
             "layout": {
-                "medianMs": 24.526200000000004,
-                "p95Ms": 26.76228,
-                "minMs": 23.3658,
-                "maxMs": 27.1843,
+                "medianMs": 21.398400000000004,
+                "p95Ms": 22.21712,
+                "minMs": 20.8106,
+                "maxMs": 22.291900000000003,
                 "samplesMs": [
-                    23.3658,
-                    23.939500000000004,
-                    24.526200000000004,
-                    25.0742,
-                    27.1843
+                    20.8106,
+                    21.2039,
+                    21.398400000000004,
+                    21.918000000000004,
+                    22.291900000000003
                 ]
             },
             "meshRebuild": {
-                "medianMs": 15.953800000000001,
-                "p95Ms": 16.4724,
-                "minMs": 15.4289,
-                "maxMs": 16.4863,
+                "medianMs": 15.6765,
+                "p95Ms": 16.123700000000004,
+                "minMs": 14.9406,
+                "maxMs": 16.157500000000004,
                 "samplesMs": [
-                    15.4289,
-                    15.814400000000001,
-                    15.953800000000001,
-                    16.416800000000003,
-                    16.4863
+                    14.9406,
+                    15.378,
+                    15.6765,
+                    15.9885,
+                    16.157500000000004
                 ]
             },
-            "gcCollectionsDuringCreation": 2,
+            "gcCollectionsDuringCreation": 3,
             "allocatedMBDuringCreation": 0.0,
             "kbPerFullRebuildOp": 0.0,
             "shapingFairForThisSystem": true,
@@ -246,10 +246,10 @@
             "validityNote": "",
             "gcAllocCreationKB": 0.0,
             "gcReservedCreationKB": 0.0,
-            "gcGen0Delta": 2,
-            "gcGen1Delta": 2,
-            "gcGen2Delta": 2,
-            "totalMemoryDeltaKB": 37988.0
+            "gcGen0Delta": 3,
+            "gcGen1Delta": 3,
+            "gcGen2Delta": 3,
+            "totalMemoryDeltaKB": 44004.0
         },
         {
             "system": "OpenGlyph-ParallelOff",
@@ -258,58 +258,58 @@
             "iterations": 5,
             "warmups": 2,
             "objectCreation": {
-                "medianMs": 102.29050000000001,
-                "p95Ms": 105.56342000000001,
-                "minMs": 99.47420000000001,
-                "maxMs": 105.94510000000001,
+                "medianMs": 107.3053,
+                "p95Ms": 109.61132,
+                "minMs": 102.2365,
+                "maxMs": 109.80470000000001,
                 "samplesMs": [
-                    99.47420000000001,
-                    102.1525,
-                    102.29050000000001,
-                    104.03670000000001,
-                    105.94510000000001
+                    102.2365,
+                    105.6178,
+                    107.3053,
+                    108.8378,
+                    109.80470000000001
                 ]
             },
             "fullRebuild": {
-                "medianMs": 101.27420000000001,
-                "p95Ms": 102.44930000000001,
-                "minMs": 95.4448,
-                "maxMs": 102.50120000000001,
+                "medianMs": 95.94760000000001,
+                "p95Ms": 97.07066,
+                "minMs": 94.2039,
+                "maxMs": 97.0741,
                 "samplesMs": [
-                    95.4448,
-                    97.584,
-                    101.27420000000001,
-                    102.24170000000001,
-                    102.50120000000001
+                    94.2039,
+                    95.13470000000001,
+                    95.94760000000001,
+                    97.0569,
+                    97.0741
                 ]
             },
             "layout": {
-                "medianMs": 26.2954,
-                "p95Ms": 30.63374,
-                "minMs": 25.6541,
-                "maxMs": 31.215,
+                "medianMs": 24.668100000000004,
+                "p95Ms": 25.72456,
+                "minMs": 24.158,
+                "maxMs": 25.8384,
                 "samplesMs": [
-                    25.6541,
-                    25.9721,
-                    26.2954,
-                    28.3087,
-                    31.215
+                    24.158,
+                    24.602400000000004,
+                    24.668100000000004,
+                    25.2692,
+                    25.8384
                 ]
             },
             "meshRebuild": {
-                "medianMs": 18.1754,
-                "p95Ms": 19.5879,
-                "minMs": 17.8109,
-                "maxMs": 19.6898,
+                "medianMs": 19.300800000000004,
+                "p95Ms": 19.937980000000004,
+                "minMs": 18.9371,
+                "maxMs": 20.003600000000004,
                 "samplesMs": [
-                    17.8109,
-                    18.079700000000004,
-                    18.1754,
-                    19.180300000000004,
-                    19.6898
+                    18.9371,
+                    19.056800000000004,
+                    19.300800000000004,
+                    19.6755,
+                    20.003600000000004
                 ]
             },
-            "gcCollectionsDuringCreation": 0,
+            "gcCollectionsDuringCreation": 1,
             "allocatedMBDuringCreation": 0.0,
             "kbPerFullRebuildOp": 0.0,
             "shapingFairForThisSystem": true,
@@ -324,10 +324,10 @@
             "validityNote": "",
             "gcAllocCreationKB": 0.0,
             "gcReservedCreationKB": 0.0,
-            "gcGen0Delta": 0,
-            "gcGen1Delta": 0,
-            "gcGen2Delta": 0,
-            "totalMemoryDeltaKB": 11216.0
+            "gcGen0Delta": 1,
+            "gcGen1Delta": 1,
+            "gcGen2Delta": 1,
+            "totalMemoryDeltaKB": 3512.0
         },
         {
             "system": "OpenGlyph-ParallelOn",
@@ -336,55 +336,55 @@
             "iterations": 5,
             "warmups": 2,
             "objectCreation": {
-                "medianMs": 38.3992,
-                "p95Ms": 38.82504,
-                "minMs": 37.240500000000007,
-                "maxMs": 38.9165,
+                "medianMs": 38.0792,
+                "p95Ms": 38.988080000000007,
+                "minMs": 37.5845,
+                "maxMs": 39.036500000000007,
                 "samplesMs": [
-                    37.240500000000007,
-                    37.4756,
-                    38.3992,
-                    38.4592,
-                    38.9165
+                    37.5845,
+                    37.7327,
+                    38.0792,
+                    38.7944,
+                    39.036500000000007
                 ]
             },
             "fullRebuild": {
-                "medianMs": 32.5125,
-                "p95Ms": 35.286500000000007,
-                "minMs": 31.9432,
-                "maxMs": 35.8258,
+                "medianMs": 33.3295,
+                "p95Ms": 33.54574,
+                "minMs": 32.1958,
+                "maxMs": 33.5747,
                 "samplesMs": [
-                    31.9432,
-                    31.9999,
-                    32.5125,
-                    33.1293,
-                    35.8258
+                    32.1958,
+                    32.737300000000008,
+                    33.3295,
+                    33.4299,
+                    33.5747
                 ]
             },
             "layout": {
-                "medianMs": 23.901200000000004,
-                "p95Ms": 25.15606,
-                "minMs": 23.1502,
-                "maxMs": 25.1564,
+                "medianMs": 22.728,
+                "p95Ms": 24.56492,
+                "minMs": 21.739800000000004,
+                "maxMs": 24.8378,
                 "samplesMs": [
-                    23.1502,
-                    23.706,
-                    23.901200000000004,
-                    25.154700000000003,
-                    25.1564
+                    21.739800000000004,
+                    22.488300000000004,
+                    22.728,
+                    23.4734,
+                    24.8378
                 ]
             },
             "meshRebuild": {
-                "medianMs": 12.9403,
-                "p95Ms": 15.454080000000002,
-                "minMs": 12.2256,
-                "maxMs": 15.9814,
+                "medianMs": 13.0282,
+                "p95Ms": 14.466040000000002,
+                "minMs": 12.4175,
+                "maxMs": 14.758600000000002,
                 "samplesMs": [
-                    12.2256,
-                    12.232000000000001,
-                    12.9403,
-                    13.344800000000001,
-                    15.9814
+                    12.4175,
+                    12.776800000000002,
+                    13.0282,
+                    13.2958,
+                    14.758600000000002
                 ]
             },
             "gcCollectionsDuringCreation": 1,
@@ -405,7 +405,7 @@
             "gcGen0Delta": 1,
             "gcGen1Delta": 1,
             "gcGen2Delta": 1,
-            "totalMemoryDeltaKB": -2316.0
+            "totalMemoryDeltaKB": 4652.0
         },
         {
             "system": "OpenGlyph-ParallelOn",
@@ -414,58 +414,58 @@
             "iterations": 5,
             "warmups": 2,
             "objectCreation": {
-                "medianMs": 50.1839,
-                "p95Ms": 52.170100000000008,
-                "minMs": 48.2794,
-                "maxMs": 52.4258,
+                "medianMs": 52.157500000000009,
+                "p95Ms": 53.276160000000007,
+                "minMs": 49.1006,
+                "maxMs": 53.5133,
                 "samplesMs": [
-                    48.2794,
-                    49.7432,
-                    50.1839,
-                    51.1473,
-                    52.4258
+                    49.1006,
+                    51.067600000000009,
+                    52.157500000000009,
+                    52.327600000000007,
+                    53.5133
                 ]
             },
             "fullRebuild": {
-                "medianMs": 42.543400000000008,
-                "p95Ms": 44.60076,
-                "minMs": 42.3513,
-                "maxMs": 44.9225,
+                "medianMs": 44.668600000000008,
+                "p95Ms": 46.85318,
+                "minMs": 43.3829,
+                "maxMs": 47.1646,
                 "samplesMs": [
-                    42.3513,
-                    42.3907,
-                    42.543400000000008,
-                    43.3138,
-                    44.9225
+                    43.3829,
+                    44.173100000000008,
+                    44.668600000000008,
+                    45.6075,
+                    47.1646
                 ]
             },
             "layout": {
-                "medianMs": 23.6237,
-                "p95Ms": 24.70278,
-                "minMs": 21.428,
-                "maxMs": 24.8595,
+                "medianMs": 21.473300000000003,
+                "p95Ms": 24.948380000000005,
+                "minMs": 21.177300000000004,
+                "maxMs": 25.195600000000004,
                 "samplesMs": [
-                    21.428,
-                    22.5072,
-                    23.6237,
-                    24.0759,
-                    24.8595
+                    21.177300000000004,
+                    21.2053,
+                    21.473300000000003,
+                    23.959500000000003,
+                    25.195600000000004
                 ]
             },
             "meshRebuild": {
-                "medianMs": 17.211000000000003,
-                "p95Ms": 18.6524,
-                "minMs": 16.6498,
-                "maxMs": 18.960900000000004,
+                "medianMs": 16.46,
+                "p95Ms": 17.78944,
+                "minMs": 16.0045,
+                "maxMs": 17.9556,
                 "samplesMs": [
-                    16.6498,
-                    16.9433,
-                    17.211000000000003,
-                    17.418400000000003,
-                    18.960900000000004
+                    16.0045,
+                    16.216,
+                    16.46,
+                    17.1248,
+                    17.9556
                 ]
             },
-            "gcCollectionsDuringCreation": 0,
+            "gcCollectionsDuringCreation": 1,
             "allocatedMBDuringCreation": 0.0,
             "kbPerFullRebuildOp": 0.0,
             "shapingFairForThisSystem": true,
@@ -480,10 +480,10 @@
             "validityNote": "",
             "gcAllocCreationKB": 0.0,
             "gcReservedCreationKB": 0.0,
-            "gcGen0Delta": 0,
-            "gcGen1Delta": 0,
-            "gcGen2Delta": 0,
-            "totalMemoryDeltaKB": 10076.0
+            "gcGen0Delta": 1,
+            "gcGen1Delta": 1,
+            "gcGen2Delta": 1,
+            "totalMemoryDeltaKB": -324.0
         },
         {
             "system": "OpenGlyph-ParallelOn",
@@ -492,55 +492,55 @@
             "iterations": 5,
             "warmups": 2,
             "objectCreation": {
-                "medianMs": 40.3534,
-                "p95Ms": 41.8171,
-                "minMs": 39.845,
-                "maxMs": 41.9836,
+                "medianMs": 38.121700000000007,
+                "p95Ms": 38.8926,
+                "minMs": 37.395700000000008,
+                "maxMs": 38.9673,
                 "samplesMs": [
-                    39.845,
-                    40.173500000000007,
-                    40.3534,
-                    41.1511,
-                    41.9836
+                    37.395700000000008,
+                    38.0016,
+                    38.121700000000007,
+                    38.5938,
+                    38.9673
                 ]
             },
             "fullRebuild": {
-                "medianMs": 31.364700000000004,
-                "p95Ms": 32.56506,
-                "minMs": 30.9994,
-                "maxMs": 32.632000000000008,
+                "medianMs": 32.5234,
+                "p95Ms": 32.78954,
+                "minMs": 31.9233,
+                "maxMs": 32.8186,
                 "samplesMs": [
-                    30.9994,
-                    31.1929,
-                    31.364700000000004,
-                    32.2973,
-                    32.632000000000008
+                    31.9233,
+                    32.303200000000007,
+                    32.5234,
+                    32.673300000000008,
+                    32.8186
                 ]
             },
             "layout": {
-                "medianMs": 15.4191,
-                "p95Ms": 16.67418,
-                "minMs": 14.6699,
-                "maxMs": 16.78,
+                "medianMs": 15.2805,
+                "p95Ms": 16.47824,
+                "minMs": 15.1354,
+                "maxMs": 16.7453,
                 "samplesMs": [
-                    14.6699,
-                    15.107000000000001,
-                    15.4191,
-                    16.2509,
-                    16.78
+                    15.1354,
+                    15.1736,
+                    15.2805,
+                    15.41,
+                    16.7453
                 ]
             },
             "meshRebuild": {
-                "medianMs": 10.2775,
-                "p95Ms": 10.47732,
-                "minMs": 10.0862,
-                "maxMs": 10.519300000000002,
+                "medianMs": 11.074200000000002,
+                "p95Ms": 11.226560000000001,
+                "minMs": 10.8824,
+                "maxMs": 11.250200000000002,
                 "samplesMs": [
-                    10.0862,
-                    10.217500000000002,
-                    10.2775,
-                    10.3094,
-                    10.519300000000002
+                    10.8824,
+                    11.041400000000002,
+                    11.074200000000002,
+                    11.132,
+                    11.250200000000002
                 ]
             },
             "gcCollectionsDuringCreation": 0,
@@ -561,7 +561,7 @@
             "gcGen0Delta": 0,
             "gcGen1Delta": 0,
             "gcGen2Delta": 0,
-            "totalMemoryDeltaKB": 6920.0
+            "totalMemoryDeltaKB": 6900.0
         },
         {
             "system": "OpenGlyph-ParallelOn",
@@ -570,55 +570,55 @@
             "iterations": 5,
             "warmups": 2,
             "objectCreation": {
-                "medianMs": 40.124,
-                "p95Ms": 44.87066,
-                "minMs": 38.8434,
-                "maxMs": 45.4197,
+                "medianMs": 41.0043,
+                "p95Ms": 43.47474,
+                "minMs": 40.102900000000008,
+                "maxMs": 43.5627,
                 "samplesMs": [
-                    38.8434,
-                    39.101800000000007,
-                    40.124,
-                    42.6745,
-                    45.4197
+                    40.102900000000008,
+                    40.3307,
+                    41.0043,
+                    43.1229,
+                    43.5627
                 ]
             },
             "fullRebuild": {
-                "medianMs": 32.635400000000007,
-                "p95Ms": 33.484100000000008,
-                "minMs": 32.3556,
-                "maxMs": 33.6848,
+                "medianMs": 33.8798,
+                "p95Ms": 34.7051,
+                "minMs": 33.472100000000008,
+                "maxMs": 34.8248,
                 "samplesMs": [
-                    32.3556,
-                    32.47,
-                    32.635400000000007,
-                    32.6813,
-                    33.6848
+                    33.472100000000008,
+                    33.6433,
+                    33.8798,
+                    34.2263,
+                    34.8248
                 ]
             },
             "layout": {
-                "medianMs": 20.2915,
-                "p95Ms": 22.089660000000003,
-                "minMs": 18.6735,
-                "maxMs": 22.145500000000003,
+                "medianMs": 19.3515,
+                "p95Ms": 20.649820000000003,
+                "minMs": 17.951900000000003,
+                "maxMs": 20.922700000000004,
                 "samplesMs": [
-                    18.6735,
-                    19.003700000000003,
-                    20.2915,
-                    21.866300000000004,
-                    22.145500000000003
+                    17.951900000000003,
+                    18.8173,
+                    19.3515,
+                    19.558300000000004,
+                    20.922700000000004
                 ]
             },
             "meshRebuild": {
-                "medianMs": 16.3007,
-                "p95Ms": 17.83746,
-                "minMs": 14.9487,
-                "maxMs": 18.027,
+                "medianMs": 14.306700000000001,
+                "p95Ms": 14.484000000000002,
+                "minMs": 13.805100000000002,
+                "maxMs": 14.528300000000002,
                 "samplesMs": [
-                    14.9487,
-                    14.9914,
-                    16.3007,
-                    17.0793,
-                    18.027
+                    13.805100000000002,
+                    14.0721,
+                    14.306700000000001,
+                    14.3068,
+                    14.528300000000002
                 ]
             },
             "gcCollectionsDuringCreation": 1,
@@ -639,7 +639,7 @@
             "gcGen0Delta": 1,
             "gcGen1Delta": 1,
             "gcGen2Delta": 1,
-            "totalMemoryDeltaKB": -20816.0
+            "totalMemoryDeltaKB": -6624.0
         }
     ],
     "glyphRaster": [
@@ -648,8 +648,8 @@
             "font": "NotoSans-Regular",
             "glyphSize": 48,
             "glyphCount": 200,
-            "totalMs": 55.2051,
-            "msPerGlyph": 0.27602550000000006,
+            "totalMs": 59.575300000000009,
+            "msPerGlyph": 0.29787650000000007,
             "note": "UniTextFont.TryAddGlyphsBatch (FreeType raster + SDF pack)"
         },
         {
@@ -657,8 +657,8 @@
             "font": "NotoSans-Regular",
             "glyphSize": 48,
             "glyphCount": 167,
-            "totalMs": 7.1926000000000009,
-            "msPerGlyph": 0.04306946107784432,
+            "totalMs": 7.65,
+            "msPerGlyph": 0.04580838323353294,
             "note": "TMP TryAddCharacters ok=False"
         }
     ],
@@ -696,81 +696,81 @@
         {
             "textSet": "Latin",
             "parallel": false,
-            "shapeMsPerObj": 1.0687,
-            "layoutMsPerObj": 0.3242,
+            "shapeMsPerObj": 0.8411000000000001,
+            "layoutMsPerObj": 0.27030000000000006,
             "rasterMsPerObj": 0.0,
-            "meshMsPerObj": 0.1477,
-            "totalMsPerObj": 1.5406,
+            "meshMsPerObj": 0.13390000000000003,
+            "totalMsPerObj": 1.2453,
             "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
         },
         {
             "textSet": "Arabic",
             "parallel": false,
-            "shapeMsPerObj": 1.1777,
-            "layoutMsPerObj": 0.31820000000000006,
+            "shapeMsPerObj": 1.0376000000000004,
+            "layoutMsPerObj": 0.3378,
             "rasterMsPerObj": 0.0,
-            "meshMsPerObj": 0.2197,
-            "totalMsPerObj": 1.7156,
+            "meshMsPerObj": 0.3346,
+            "totalMsPerObj": 1.7100000000000002,
             "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
         },
         {
             "textSet": "Hebrew",
             "parallel": false,
-            "shapeMsPerObj": 0.8957000000000002,
-            "layoutMsPerObj": 0.2954,
+            "shapeMsPerObj": 0.8736000000000002,
+            "layoutMsPerObj": 0.23440000000000003,
             "rasterMsPerObj": 0.0,
-            "meshMsPerObj": 0.12710000000000003,
-            "totalMsPerObj": 1.3182,
+            "meshMsPerObj": 0.14730000000000002,
+            "totalMsPerObj": 1.2553,
             "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
         },
         {
             "textSet": "Mixed",
             "parallel": false,
-            "shapeMsPerObj": 0.7076000000000001,
-            "layoutMsPerObj": 0.3377,
+            "shapeMsPerObj": 0.9553,
+            "layoutMsPerObj": 0.24630000000000003,
             "rasterMsPerObj": 0.0,
-            "meshMsPerObj": 0.20520000000000003,
-            "totalMsPerObj": 1.2505000000000002,
+            "meshMsPerObj": 0.1636,
+            "totalMsPerObj": 1.3652,
             "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
         },
         {
             "textSet": "Latin",
             "parallel": true,
-            "shapeMsPerObj": 0.6864000000000001,
-            "layoutMsPerObj": 0.4198,
+            "shapeMsPerObj": 0.6861,
+            "layoutMsPerObj": 0.26430000000000006,
             "rasterMsPerObj": 0.0,
-            "meshMsPerObj": 0.1776,
-            "totalMsPerObj": 1.2838,
+            "meshMsPerObj": 0.13570000000000002,
+            "totalMsPerObj": 1.0861,
             "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
         },
         {
             "textSet": "Arabic",
             "parallel": true,
-            "shapeMsPerObj": 1.0913000000000002,
-            "layoutMsPerObj": 0.368,
+            "shapeMsPerObj": 1.1246999999999999,
+            "layoutMsPerObj": 0.2649,
             "rasterMsPerObj": 0.0,
-            "meshMsPerObj": 0.2467,
-            "totalMsPerObj": 1.7060000000000002,
+            "meshMsPerObj": 0.1888,
+            "totalMsPerObj": 1.5784,
             "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
         },
         {
             "textSet": "Hebrew",
             "parallel": true,
-            "shapeMsPerObj": 0.9975999999999999,
-            "layoutMsPerObj": 0.2803,
+            "shapeMsPerObj": 0.9366000000000001,
+            "layoutMsPerObj": 0.21430000000000003,
             "rasterMsPerObj": 0.0,
-            "meshMsPerObj": 0.1519,
-            "totalMsPerObj": 1.4298,
+            "meshMsPerObj": 0.1267,
+            "totalMsPerObj": 1.2776,
             "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
         },
         {
             "textSet": "Mixed",
             "parallel": true,
-            "shapeMsPerObj": 0.7456,
-            "layoutMsPerObj": 0.2737,
+            "shapeMsPerObj": 0.8230999999999999,
+            "layoutMsPerObj": 0.30510000000000006,
             "rasterMsPerObj": 0.0,
-            "meshMsPerObj": 0.16090000000000002,
-            "totalMsPerObj": 1.1802000000000002,
+            "meshMsPerObj": 0.2013,
+            "totalMsPerObj": 1.3295000000000002,
             "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
         }
     ]
