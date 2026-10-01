@@ -1,137 +1,88 @@
-# OpenGlyph benchmark results (valid runs only)
+# OpenGlyph benchmark results (round 3 — valid runs)
 
-OpenGlyph **1.1.0-preview** (MIT fork of UniText 1.0) vs **TextMeshPro** and **UI Toolkit**.
-Methodology follows UniText's published methodology — **100 objects, 10 iterations,
-3 warmups, ~2300 chars/object** (Latin + Arabic + Hebrew + Mixed), `UseParallel=false`
-— **plus** a parallel-ON OpenGlyph pass. Fixed random seed 12345.
+OpenGlyph **1.1.0-preview** (MIT fork of UniText 1.0) vs **TextMeshPro** and **UI Toolkit**,
+in a FRESH, render-proven Unity 6000.3.19f1 project (the previous project's TMP
+component was broken). Methodology: 100 objects, median+p95, warmups+iterations,
+Latin/Arabic/Hebrew/Mixed, OpenGlyph parallel off AND on, fixed seed 12345,
+validity gate enforced (incomplete phase => INVALID, never timed as real).
 
-> **A VALIDITY GATE now guards every number.** After each timed phase the runner
-> verifies each of the 100 objects actually produced output *inside the timed
-> window*: OpenGlyph `ResultGlyphs.Length>0 && ResultSize.y>0`; TMP
-> `textInfo.characterCount>0 && meshInfo[0].vertexCount>0` after
-> `ForceMeshUpdate(true,true)`; UI Toolkit `MeasureTextSize>0`. A phase that fails
-> is reported **INVALID** and its timing is NOT presented as a real measurement.
-> This is why the earlier "TMP 5.7 ms / UITK 0.4 ms" numbers are gone — they were
-> not real text generation.
+## Render proof (gate before any benchmark)
 
-Raw JSON: `Benchmarks~/Results/windows_il2cpp_results.json`,
-`Benchmarks~/Results/quest3s_il2cpp_results.json`.
+All three systems render real text (evidence PNGs in
+`D:/OpenGlyphWork/scratch/benchmarks/evidence/`, non-background pixel counts):
+
+| System | PNG | non-bg px | renders? |
+|---|---|---|---|
+| TextMeshPro | `tmp_render_check.png` | 4692 | ✅ |
+| OpenGlyph | `openglyph_render_check.png` | 6170 | ✅ |
+| UI Toolkit | `uitoolkit_render_check.png` | 4443 | ✅ |
 
 ## Environment
+i5-13420H (12 cores), 32 GB, RTX 4050 / Quest 3S Adreno 740. Unity 6000.3.19f1,
+IL2CPP Release. Incremental GC on.
 
-| | Windows | Quest 3S |
+## A. Valid per-object timings — Windows x64 IL2CPP Release (median ms, 100 objects)
+
+| System | Latin | Arabic | Hebrew | Mixed | valid | note |
+|---|---|---|---|---|---|---|
+| OpenGlyph parallel OFF | 92.2 | 144.4 | 101.4 | 103.1 | ✅ | creation med |
+| OpenGlyph parallel ON  | 38.2 | 50.5  | 39.5  | 39.2  | ✅ | ~2.4–2.9× faster than OFF |
+| **TextMeshPro**        | **417.1** | 12852 | 11730 | ~ | ✅ (Latin fair) | **real generation now** (verts≥7424 Latin); Arabic/Hebrew are TMP's unshaped fallback and run **10–13 s** (verts≈40–108 — mostly missing glyphs), NOT equivalent output |
+| UI Toolkit | 6.1 | 6.0 | 4.9 | 4.7 | ❌ in harness | render-PROVEN (PNG above) but the screen-space `UIDocument` harness does not resolve `resolvedStyle.height` headlessly, so these timings are flagged INVALID. The targetTexture render path (render proof) works; the timing harness needs the same targetTexture panel. |
+
+**The validity gate changed the story.** TMP Latin creation is **417 ms** here — in
+the same ballpark as UniText's published ~572 ms, and ~70× the bogus "5.7 ms" from
+the pre-gate runs. That earlier number was never real generation. **TMP cannot shape
+Arabic/Hebrew** — its non-Latin runs are 10–13 s of fallback with almost no glyphs,
+so only **Latin** is an apples-to-apples TMP comparison.
+
+**Fair Latin comparison (valid):** OpenGlyph ON **38 ms** vs TMP **417 ms** — on the
+one fair row, **OpenGlyph is ~11× FASTER than TMP** while doing real shaping. (The
+pre-gate rounds had this backwards because TMP wasn't generating.) OpenGlyph OFF is
+92 ms (~4.5× faster than TMP). UI Toolkit is not validly timed this round.
+
+## B. PR #5 gate — main (f00e898) vs phase2-families (f8a6a41)
+
+Same harness, Windows IL2CPP, OpenGlyph-only (phase2 changes OpenGlyph, not TMP/UITK),
+all four sets, parallel off/on. **Finding: phase2 regresses the LAYOUT phase on every
+text set (>5%), and Arabic mesh rebuild.** Per-phase delta % (phase2 vs main):
+
+| System | Set | Creation | Full Rebuild | Layout | Mesh | regression |
+|---|---|---|---|---|---|---|
+| OFF | Latin  | +6.5% | +0.7% | +8.0% | +5.9% | creation, layout, mesh |
+| OFF | Arabic | +3.2% | +3.4% | **+15.2%** | **+20.7%** | layout, mesh |
+| OFF | Hebrew | +5.1% | +4.0% | +12.4% | −1.5% | creation, layout |
+| OFF | Mixed  | −0.7% | +4.1% | +13.8% | +1.4% | layout |
+| ON  | Latin  | +6.4% | −2.0% | +6.0% | +4.6% | creation, layout |
+| ON  | Arabic | −0.7% | −3.3% | **+17.4%** | +6.0% | layout, mesh |
+| ON  | Hebrew | +2.1% | −0.9% | +11.5% | −7.8% | layout |
+| ON  | Mixed  | +2.3% | −9.6% | +5.6% | −1.4% | layout |
+
+**Where the time goes (profiler split, per object, ParallelOff):**
+
+| Set | main shape+raster / layout / mesh | phase2 shape+raster / layout / mesh |
 |---|---|---|
-| Device | i5-13420H, 32 GB, RTX 4050 | Meta Quest 3S, Adreno 740 |
-| OS | Windows 11 (10.0.26200) | Android 14 / API-34 |
-| Unity | 6000.3.19f1 | 6000.3.19f1 |
-| Backend | **IL2CPP, Release** | **IL2CPP, Release**, ARM64 |
-| Incremental GC | on | on |
-| Representative | yes | yes |
+| Latin  | 0.61 / 0.34 / 0.18 | **1.07** / 0.32 / 0.15 |
+| Arabic | 1.15 / 0.26 / 0.18 | 1.18 / **0.32** / **0.22** |
 
-## VALID — OpenGlyph per-object timings (median ms, 100 objects, 10 iters)
+**Verdict: REGRESSION.** phase2's font-families + variable-font work raises the
+Layout phase 6–17% across the board and Arabic mesh rebuild +21%. The split shows
+the cost lands in the shaping/layout path (Latin shape+raster 0.61→1.07 ms/obj;
+Arabic layout 0.26→0.32, mesh 0.18→0.22). Full Rebuild and Creation are mostly within
+noise. Recommend profiling the variable-font/families code path added by phase2
+before merge — the per-layout overhead is systematic, not a single-set outlier.
 
-### Windows x64 IL2CPP Release
+Raw JSON: `Results/windows_il2cpp_results.json` (goal A, full matrix),
+`Results/win_main_ogonly.json`, `Results/win_phase2_ogonly.json` (goal B).
 
-| System | Text set | Creation (med / p95) | Full Rebuild | Layout | Mesh | gen0 GC | heap Δ (KB) | valid |
-|---|---|---|---|---|---|---|---|---|
-| OpenGlyph OFF | Latin  | 89.1 / 94.3  | 79.6  | 28.8 | 15.9 | 50 | 155,052 | ✅ |
-| OpenGlyph OFF | Arabic | 145.8 / 157.2| 138.5 | 27.3 | 21.7 | 5  | 35,292  | ✅ |
-| OpenGlyph OFF | Hebrew | 99.2 / 103.5 | 91.1  | 21.2 | 16.3 | 6  | 39,624  | ✅ |
-| OpenGlyph OFF | Mixed  | 99.7 / 103.1 | 93.1  | 27.4 | 20.6 | 2  | —       | ✅ |
-| OpenGlyph ON  | Latin  | 36.0 / 37.3  | 31.2  | 22.7 | 12.2 | 1  | 13,644  | ✅ |
-| OpenGlyph ON  | Arabic | 48.7 / 52.1  | 42.0  | 19.5 | 16.5 | 1  | 7,172   | ✅ |
-| OpenGlyph ON  | Hebrew | 35.4 / 39.1  | 30.3  | 13.8 | 10.3 | 1  | 2,464   | ✅ |
-| OpenGlyph ON  | Mixed  | 38.5 / 39.1  | 33.0  | 18.0 | 14.4 | 1  | 3,448   | ✅ |
-
-### Quest 3S IL2CPP Release (Adreno 740)
-
-| System | Text set | Creation (med) | Full Rebuild | gen0 GC | valid |
-|---|---|---|---|---|---|
-| OpenGlyph OFF | Latin  | 181.8 | 150.5 | 59 | ✅ |
-| OpenGlyph OFF | Arabic | 323.5 | 285.8 | 6  | ✅ |
-| OpenGlyph OFF | Hebrew | 225.6 | 199.0 | 6  | ✅ |
-| OpenGlyph OFF | Mixed  | 224.2 | 197.6 | 1  | ✅ |
-| OpenGlyph ON  | Latin  | 118.0 | 97.2  | 2  | ✅ |
-| OpenGlyph ON  | Arabic | 153.5 | 128.6 | 1  | ✅ |
-| OpenGlyph ON  | Hebrew | 114.9 | 92.1  | 1  | ✅ |
-| OpenGlyph ON  | Mixed  | 123.7 | 96.4  | 2  | ✅ |
-
-**Parallel speedup (creation):** Windows ~2.5× (Latin 89→36, Arabic 146→49);
-Quest ~1.5–2.1× (Latin 182→118, Arabic 324→154). The weaker Quest scaling reflects
-fewer/slower mobile cores. Parallel also **collapses GC pressure**: Windows Latin
-drops from 50 gen0 collections (155 MB heap growth) to 1 collection (13.6 MB).
-
-## INVALID — not presented as measurements
-
-| System | Status | Reason |
-|---|---|---|
-| **TextMeshPro** (all sets, both platforms) | ❌ INVALID | `TMP_Settings` resolves null (`Resources.Load<TMP_Settings>("TMP Settings")` returns null in editor AND player, even with the essentials committed under `Assets/TextMesh Pro/Resources`, `link.xml` + Minimal stripping, and the matching script GUID). `TextMeshProUGUI.Awake` / `TMP_FontAsset.CreateFontAsset` therefore NRE on `TMP_Settings.get_clearDynamicDataOnBuild`. The runner catches this and marks every TMP row INVALID rather than timing an empty mesh. **TMP's settings pointer is not registered in this fresh project** — fixing it needs the TMP settings asset wired via Project Settings → TextMesh Pro (an interactive step), which was out of reach in batchmode within the time box. |
-| **UI Toolkit** (all sets) | ⚠️ SUSPECT | `MeasureTextSize` returns 0 width even with a default runtime theme assigned, so the ~0.4 ms times do **not** represent real glyph generation (UI Toolkit generates text lazily during panel repaint, which the harness could not force to completion here). Reported as not-validly-generating, not as a real comparison. |
-
-**Consequence:** there is **no valid TMP or UI Toolkit timing** to compare against
-in this round. The earlier "OpenGlyph is 9–21× slower than TMP" claim is **withdrawn**
-— it rested on TMP numbers that were not real generation. What is valid is the
-OpenGlyph-vs-OpenGlyph parallel comparison and the glyph-raster figure below.
-
-## VALID — glyph rasterization (add 200 glyphs to the atlas)
-
-| Engine | Platform | Glyphs | ms/glyph | valid |
-|---|---|---|---|---|
-| OpenGlyph FreeType (SDF pack) | Windows IL2CPP | 200 | **0.279** | ✅ |
-| OpenGlyph FreeType (SDF pack) | Quest 3S | 200 | **0.476** | ✅ |
-| Unity FontEngine (TMP dynamic) | both | 0 | — | ❌ `TryAddCharacters`/`CreateFontAsset` NRE (same TMP_Settings issue) |
-
-The round-1 device bug (`font path not found`) is **fixed**: fonts now load as
-`Resources` TextAssets (`Assets/Benchmarks/Resources/Fonts/*.bytes`), readable
-inside the APK where `StreamingAssets`/`File.*` is not.
-
-## OpenGlyph — where the time goes (per-object Stopwatch splits, Windows IL2CPP)
-
-| Text set | shape+raster | layout | mesh | total (ms/obj) | parallel |
-|---|---|---|---|---|---|
-| Latin  | 0.65 | 0.35 | 0.19 | 1.19 | OFF |
-| Latin  | 0.52 | 0.30 | 0.15 | 0.97 | ON |
-| Arabic | 1.18 | 0.35 | 0.36 | 1.89 | OFF |
-
-**Shaping + first-time rasterization dominates** (≈55–62% of per-object cost),
-layout and mesh generation are the minority. For the rendering phase: the biggest
-lever is the shaping/raster path (HarfBuzz + FreeType SDF), especially on Arabic
-where contextual shaping roughly doubles the shape cost vs Latin. (`shapeMsPerObj =
-total − layout − mesh`; layout and mesh are isolated re-dirties, so "shape+raster"
-also absorbs any first-pass atlas population.)
-
-## Allocation / GC notes (honest limits)
-
-- `GC.GetAllocatedBytesForCurrentThread()` returns **0 under IL2CPP** (not
-  implemented), so exact per-op KB is unavailable on these runs. Instead we report
-  **GC collection-count deltas (gen0/1/2)** and **`GC.GetTotalMemory` heap-growth
-  deltas**, which are valid under IL2CPP and tell the real story: parallel-off Latin
-  = 50 gen0 collections / 155 MB heap growth vs parallel-on = 1 / 13.6 MB.
-- Incremental GC was **on** for all runs (recorded in the JSON).
-- A negative heap delta (e.g. Mixed OFF) means a GC ran mid-phase; treat small/negative
-  values as "below the noise floor".
-
-## What ran where
-
-| Run | Status | Backend |
-|---|---|---|
-| Windows x64 standalone player | ✅ built + ran, OpenGlyph valid | IL2CPP/Release |
-| Quest 3S APK | ✅ built, installed, ran, pulled (round 2) | IL2CPP/Release ARM64 |
-| Editor play-mode | smoke only (not representative) | IL2CPP editor |
-
-## Still invalid / open
-
-- **TMP**: blocked by the TMP_Settings-null issue above; needs the settings asset
-  registered via Project Settings (interactive). Until then, no valid TMP numbers.
-- **UI Toolkit**: `MeasureTextSize` returns 0; needs a forced panel repaint/layout
-  with a resolved font to generate text before it can be validly timed.
-- A clean OpenGlyph-vs-TMP comparison therefore remains **pending** a working TMP.
-
-## Reproduce
-
-```
-powershell -ExecutionPolicy Bypass -File Benchmarks~\Tools~\run-benchmarks.ps1 -Do windows
-powershell -ExecutionPolicy Bypass -File Benchmarks~\Tools~\run-android.ps1   # on a machine with the Quest + adb
-```
-Unity **6000.3.19f1**. All heavy build output is directed to D: (TEMP/TMP/UPM_CACHE_ROOT);
-`Benchmarks~/Library` is a junction to D:.
+## Still open / honest limits
+- **UI Toolkit** renders (PNG proof) but is not validly TIMED in the benchmark
+  harness: `resolvedStyle.height` is 0 for a screen-space `UIDocument` in the
+  headless player. Fix = time UITK via a `targetTexture` panel (as the render proof
+  does) so layout resolves; deferred for time.
+- **Quest 3S round-3** (valid TMP + the gate on-device) was not re-run this round —
+  the TMP non-Latin fallback is 10–13 s/iteration, making the full on-device matrix
+  exceed the time box. The round-2 Quest OpenGlyph numbers remain valid; a device
+  TMP run needs the slow-TMP matrix budgeted separately.
+- **Allocation** per-op KB is unavailable under IL2CPP (`GetAllocatedBytesForCurrentThread`
+  returns 0); GC gen-counts + `GetTotalMemory` deltas are reported instead.
