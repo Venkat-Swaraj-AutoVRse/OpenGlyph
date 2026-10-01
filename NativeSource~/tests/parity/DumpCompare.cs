@@ -497,7 +497,15 @@ unsafe static class DumpCompare
         // register in a stable order
         C("faceinfo", true); C("charindex", true); C("metrics", true); C("outline", true);
         C("shape", true); C("var", true); C("varaxis", true); C("colrglyph", true); C("colrsummary", true);
-        C("sdf", false, 8, 1.0); C("bmp", false, 4, 0.5); C("blend2d", false, 2, 0.3);
+        // SDF bytes, hinted bitmaps and Blend2D fills were the categories most likely to drift
+        // from float/FMA/SIMD codegen differences between MSVC (Windows), GCC (Linux) and Clang
+        // (macOS). The first measurement run (CI 36857821827) showed Linux x86_64 AND macOS arm64
+        // are BYTE-IDENTICAL to the accepted Windows x64 reference in every one of these
+        // categories (maxAbs=0, 0.000% bytes differ). There is therefore no float-codegen spread
+        // to tolerate, so the gate is EXACT (max<=0, mean<=0): any nonzero cross-platform byte
+        // difference is a real regression and must fail. (FreeType's SDF/BSDF and autohinter are
+        // integer/fixed-point; Blend2D's fill here is deterministic — consistent with the result.)
+        C("sdf", false, 0, 0); C("bmp", false, 0, 0); C("blend2d", false, 0, 0);
 
         var refLines = File.ReadAllLines(refPath);
         var locLines = File.ReadAllLines(localRef);
