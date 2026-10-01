@@ -662,3 +662,134 @@ the legacy path computes — then the ported ramp matches. That propagation is t
 concrete, bounded next task; it was out of this session's remaining budget after the
 MSDF root-cause fix. The current shipped uber (fwidth) renders all cases correctly
 with 99.4–99.8 % within 2/255.
+
+---
+
+## 9. Component styles, per-span markup, migration & deprecation (Round-2 steps 1–4)
+
+This section documents the user-facing surface that removes `Material` assets and
+`UniTextAppearance` in favour of styles configured **on the component**, with a
+migration tool and a deprecation window where old assets still load and render
+identically. All behaviour is behind `UniTextSettings.UseUnifiedRenderer`
+(default **off**) plus the per-component `UniText.UnifiedRenderer` override; the
+legacy per-segment path is byte-for-byte unchanged when the flag is off.
+
+### 9.1 Component style API (`UniTextStyle`)
+
+`UniTextStyle` is a serializable struct authored **on the `UniText` component**,
+with the same fields as a `StyleTable` row / `GlyphStyle`:
+
+| Field | Meaning |
+|-------|---------|
+| `faceColor` | fill colour |
+| `faceDilate` (−1..1) | edge-weight bias |
+| `softness` (0..1) | edge AA / outline softness |
+| `outlineColor`, `outlineWidth` (0..1), `outlineDilate` (−1..1) | outline layer |
+| `underlayColor`, `underlayOffsetX/Y`, `underlayDilate`, `underlaySoftness` | drop-shadow layer |
+| `glowColor`, `glowOffset`, `glowOuter`, `glowInner`, `glowPower` | glow layer |
+
+- `UniText.OverrideStyle` (bool) + `UniText.Style` (`UniTextStyle`). When
+  `OverrideStyle` is **on**, the unified path shades every glyph from `Style`
+  instead of synthesising one from a legacy appearance/material via
+  `AppearanceStyleShim`. When **off**, the shim remains the fallback so a
+  component still referencing a `UniTextAppearance` keeps rendering unchanged.
+- `UniTextStyle.ToGlyphStyle()` / `FromGlyphStyle()` convert losslessly to and
+  from the runtime `GlyphStyle` that the per-component `StyleTable` packs.
+- Tests: `UniTextStyleTests` (round-trip, field-count parity with `GlyphStyle`,
+  `StyleTable` dedup, `OverrideStyle`/`Style` wiring).
+
+### 9.2 Per-span markup grammar
+
+The following tags set a style for a *range* of text. Each distinct composed
+style becomes **one deduped `StyleTable` row**, chosen per glyph via the per-vertex
+`styleIdx` (UV1.w) — so a text with several span styles is still **one renderer**
+(or two, counting a separate MSDF/emoji draw group).
+
+```
+<outline=#RRGGBB,w>…</outline>                     outline colour (+ optional alpha #RRGGBBAA) and width w∈[0,1]
+<underlay=#RRGGBBAA,x,y,dilate,softness>…</underlay>  drop-shadow: colour, offset x,y, dilate, softness (trailing params optional, default 0)
+<dilate=v>…</dilate>                               face dilation v∈[-1,1]
+<softness=v>…</softness>                            edge softness v∈[0,1]
+<style=Name>…</style>                              a whole named UniTextStyle from the component's UniTextStyleSheet (UniText.StyleSheet)
+```
+
+- Tags **nest and compose**: an inner tag layers only the field(s) it sets over
+  the style the outer tags produced (inner wins per field). `<style=Name>`
+  replaces the whole style; an inner `<outline=…>` then overrides just the
+  outline on top of the named style.
+- Colours are `#RGB` / `#RRGGBB` / `#RRGGBBAA` (hex). Follows the existing
+  `<tag=params>…</tag>` convention (`TagParseRule` + a `GlyphModifier`), the same
+  machinery as `<color>`.
+- Implementation: five `*ParseRule`s map to one `SpanStyleModifier` (Kind-driven)
+  that accumulates partial `SpanStyleOverride`s into one shared per-cluster buffer
+  (so nesting merges); the component's unified path owns a single `OnGlyph` that
+  composes the cluster's override over the base style, dedups it to a local id,
+  and stamps it into UV1.w; `UnifiedRenderBuilder` maps each local id to a shared
+  `StyleTable` row.
+- Register the tags per component with `UniText.RegisterModifier` (as any markup
+  tag), e.g. `new ModRegister { Modifier = new SpanStyleModifier(SpanStyleModifier.Kind.Outline), Rule = new OutlineParseRule() }`.
+- Tests: `SpanStyleTests` — grammar parsing (`TryParseOutline`/`TryParseUnderlay`/
+  `TryParseScalar`, malformed rejected), nesting/composition (`MergeOver`+
+  `ComposeOnto`, inner-wins), stylesheet whole-style + field override, collector
+  dedup (**a row per distinct span style**), and end-to-end
+  `AB<outline=#FF0000,0.2>CD</outline>EF` → **1 renderer**, ≥2 distinct styles,
+  distinct per-glyph `styleIdx`. Draw-group count ≤2 for any mix:
+  `UberDrawGroupTests`.
+
+### 9.3 Migration tool — `Tools/OpenGlyph/Migrate Appearance to Styles`
+
+Converts each `UniText` component's appearance/material settings into a component
+`UniTextStyle` (via the same `AppearanceStyleShim` mapping that keeps old assets
+rendering) and switches the component to the unified path.
+
+- **Dry-run report first.** `AppearanceMigration.DryRun(includeOpenScenes)` lists
+  counts (scanned / to-migrate / already-migrated / no-appearance) and a per-object
+  entry list, mutating nothing. The window (`AppearanceMigrationWindow`) shows this
+  before any apply.
+- **Apply.** `AppearanceMigration.Migrate(options, includeOpenScenes)` walks
+  project prefabs (`AssetDatabase` + `LoadPrefabContents`/`SaveAsPrefabAsset`) and
+  the open scenes (`Undo.RecordObject` + `RecordPrefabInstancePropertyModifications`).
+- **Undo** restores the pre-migration state for scene objects; prefab assets are
+  modified in place and are reversible via version control.
+- **Idempotent.** A component already using a component style (`OverrideStyle`)
+  is skipped (`reason="already migrated"`); a second run changes nothing.
+- **Mapping.** Face/outline/underlay/glow are read from the appearance's
+  materials (per-font override, else default materials); 2-pass outline+face
+  collapses to one multi-layer style. `UniTextStyleSheet` holds named styles for
+  `<style=Name>`.
+- **Auto-migrate on import — OFF by default**, behind the project setting
+  `UniTextSettings.AutoMigrateAppearanceOnImport`. When enabled, an
+  `AssetPostprocessor` migrates imported prefabs; otherwise migration is manual.
+- Tests: `AppearanceMigrationTests` — migrate → style equals the material values;
+  second run no-op (idempotent); Undo restores; temp prefab round-trips; dry run
+  never mutates.
+
+### 9.4 Deprecation timeline
+
+1. **Now (this round).** `UniTextAppearance` and its material API are marked
+   `[Obsolete(…, false)]` — a **warning, not an error**. Existing assets still
+   compile, load, and render **identically** through the compatibility shim with
+   the flag off. The package's own code stays warning-clean via file-scoped
+   `#pragma warning disable 618` in the deprecation-bridge files.
+2. **Deprecation window.** Both paths ship together. Projects migrate at their own
+   pace using the tool in §9.3; VRseBuilder (which consumes OpenGlyph as a package)
+   runs the same tool against its own project — this worktree never touches it.
+3. **Removal (later phase).** After the window, `UniTextAppearance` and the
+   material assets are removed; by then all assets are on component styles.
+- Tests: `AppearanceDeprecationTests` — asserts `[Obsolete]` is present with
+  `IsError == false` and the message points at the migration tool.
+
+### 9.5 Draw-call / renderer evidence (recap)
+
+Per §8.2/§8.4, the unified path collapses the per-segment renderers (and GPU draw
+calls) with no CPU regression at scale:
+
+| Scenario | Legacy draws / renderers | Unified draws / renderers |
+|----------|-------------------------:|--------------------------:|
+| one text, 3 SDF + MSDF | 18 / 3 | **5 / 1** |
+| 50 components, same mix | 455 / 150 | **5 / 50** |
+
+Structural renderer counts are asserted deterministically in EditMode
+(`UnifiedRendererEquivalenceTests`, `UberDrawGroupTests`); GPU draw calls + CPU are
+measured by the PlayMode `DrawCallBenchmarkPlayTests`. Per-span styles add
+`StyleTable` rows, **not** draw groups, so they never increase the draw count.
