@@ -102,6 +102,18 @@ set(PNG_STATIC   ON  CACHE BOOL "" FORCE)
 set(PNG_TESTS    OFF CACHE BOOL "" FORCE)
 set(PNG_TOOLS    OFF CACHE BOOL "" FORCE)
 set(PNG_FRAMEWORK OFF CACHE BOOL "" FORCE)
+# Disable libpng's CPU-specific optimizations. On the macOS universal (arm64;x86_64) and
+# iOS/Android-arm builds libpng's arm/*_neon_intrinsics.c fail to compile ("NEON intrinsics
+# not available with the soft-float ABI") because the NEON path is selected per-file but the
+# per-file flags don't carry a NEON-capable float ABI through CMake's universal/Xcode driver.
+# FreeType only uses libpng's baseline (non-SIMD) decode for color-bitmap strikes, so the
+# hardware paths are dead weight here; turning them off removes the broken translation units
+# on every arch without changing decode output.
+set(PNG_HARDWARE_OPTIMIZATIONS OFF CACHE BOOL "" FORCE)
+set(PNG_ARM_NEON "off" CACHE STRING "" FORCE)
+set(PNG_INTEL_SSE "off" CACHE STRING "" FORCE)
+set(PNG_POWERPC_VSX "off" CACHE STRING "" FORCE)
+set(PNG_MIPS_MSA "off" CACHE STRING "" FORCE)
 set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(libpng)
 # Seed FindPNG (used by FreeType) at the fetched static libpng, same technique as ZLIB:
@@ -294,10 +306,15 @@ if(OPENGLYPH_BUILD_EDITOR_DLL)
     ${OPENGLYPH_ED_EXPORTS})
   target_link_libraries(unitext_native_editor PRIVATE harfbuzz-subset harfbuzz)
   # harfbuzz + harfbuzz-subset are separate static libs that both embed the same CFF/number
-  # translation units, so MSVC sees duplicate (byte-identical) symbols. Allow multiple
-  # definitions; the editor DLL is functionally verified by the parity harness subset test.
+  # translation units, so the linker sees duplicate (byte-identical) symbols. Allow multiple
+  # definitions on every linker; the editor DLL is functionally verified by the parity harness
+  # subset test. MSVC: /FORCE:MULTIPLE. GNU ld (Linux/Android): --allow-multiple-definition.
+  # Apple ld64 treats duplicate archive symbols as a warning, not an error, so it needs no flag
+  # (and --allow-multiple-definition is not accepted there).
   if(MSVC)
     target_link_options(unitext_native_editor PRIVATE /FORCE:MULTIPLE /IGNORE:4088)
+  elseif(NOT APPLE)
+    target_link_options(unitext_native_editor PRIVATE "-Wl,--allow-multiple-definition")
   endif()
   target_include_directories(unitext_native_editor PRIVATE include)
   if(WIN32)
