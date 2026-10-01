@@ -6,14 +6,15 @@ quoted from the per-platform **Verify arch + ut_\* symbol count** steps of the
 source run.
 
 - **Source CI run:** [36830158490](https://github.com/Venkat-Swaraj-AutoVRse/OpenGlyph/actions/runs/36830158490) (branch `openglyph/phase0-native`)
+- **Windows static-CRT rebuild:** the three `Windows/` DLLs were rebuilt with the MSVC CRT linked statically (`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded…`, CMP0091 NEW) by run [36878829990](https://github.com/Venkat-Swaraj-AutoVRse/OpenGlyph/actions/runs/36878829990) (branch `openglyph/static-crt`) and recommitted. They now import **no VC++ runtime** — `unitext_native.dll` imports only `KERNEL32.dll`; `unitext_native_editor.dll` only `KERNEL32.dll` + `COMDLG32.dll` (OS file-dialog) — so a Unity player loads them without the VC++ redistributable installed. CI gates this with `dumpbin /dependents` (fails on any `VCRUNTIME*`/`MSVCP*`/`api-ms-win-crt-*` import). The static-CRT change is build-only: the Windows parity gate (fresh vs committed), the msdfref gate and the xplat_parity gate (Linux/macOS vs the Windows dump) all stayed green, i.e. the rendered output is byte-identical to the previous Windows binary. Only `Size` and `SHA-256` change below (the CRT objects are now linked in).
 - **Symbol contract (verified in CI):** runtime libraries export **117** `ut_*` symbols; editor libraries export **8**.
 - Static archives (iOS device, iOS simulator, tvOS, WebGL) are **self-contained**: FreeType + HarfBuzz + libpng + zlib are merged into the archive (Apple via `libtool -static`, WebGL via `emar`), and each passes a CI link smoke test (compile a C file referencing `ut_ft_init`, `ut_hb_buffer_create`, `ut_ft_get_outline_data` and link it against ONLY the bundled archive).
 
 | Path (under `Plugins/`) | Size (bytes) | SHA-256 | Architecture | `ut_*` count | Kind |
 |---|---:|---|---|---:|---|
-| `Windows/x86_64/unitext_native.dll` | 3499520 | `1468ea5ff69eb6d3aabf721df1a708e825cbeba0cd5cdf36d1bacd0964ff066f` | x64 (8664 machine) | 117 | runtime |
-| `Windows/x86_64/unitext_native_editor.dll` | 2674688 | `72544fb3e556c9942565297783820367262bd51d4b4b5110cc45accee2a7c45a` | x64 (8664 machine) | 8 | editor |
-| `Windows/ARM64/unitext_native.dll` | 2523648 | `d2a6fd708308f1de5d5599ebcd38d479cb38518b99612213adf487d866f1b68e` | ARM64 (AA64 machine) | 117 | runtime |
+| `Windows/x86_64/unitext_native.dll` | 3709440 | `21f1f82a071bf2c5d53d874643f96a03fe6fc4ae1d9c28de3af2e09a4a8a23bc` | x64 (8664 machine) | 117 | runtime |
+| `Windows/x86_64/unitext_native_editor.dll` | 2864128 | `030c46ef37bc60be7742e6cfa50e1a493e335648d3b4d9c64d7de1bb79c4dfc2` | x64 (8664 machine) | 8 | editor |
+| `Windows/ARM64/unitext_native.dll` | 2704896 | `8ef7ae4cdc72b66a9563dcddd133e7187400851104f59ab234b14519c2991400` | ARM64 (AA64 machine) | 117 | runtime |
 | `Linux/x86_64/libunitext_native.so` | 5534248 | `72cef2d54e96309e5193cc2e3dcb712ac8a25e63af1a7023b00b99fe8faad3d0` | ELF64 x86-64 (i386:x86-64) | 117 | runtime |
 | `Linux/x86_64/libunitext_native_editor.so` | 4200880 | `b5668e2524603afa41eedcc963c96686c7429617e59880fc15c176053aaf1c8d` | ELF64 x86-64 (i386:x86-64) | 8 | editor |
 | `Linux/ARM64/libunitext_native.so` | 4852200 | `aec34a9a8e4bb9878b1fc52d13e7048802b4b72ebfe18d10a057e2db8ecebb4b` | ELF64 aarch64 | 117 | runtime |
