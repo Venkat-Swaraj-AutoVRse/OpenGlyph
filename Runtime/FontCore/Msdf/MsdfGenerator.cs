@@ -36,13 +36,6 @@ namespace LightSide.Msdf
     /// </remarks>
     public static class MsdfGenerator
     {
-        private struct EdgePoint
-        {
-            public SignedDistance MinDistance;
-            public EdgeSegment NearEdge;
-            public double NearParam;
-        }
-
         public static float[] Generate(Shape shape, in MsdfConfig cfg)
         {
             int w = cfg.Width, h = cfg.Height;
@@ -51,56 +44,32 @@ namespace LightSide.Msdf
 
             double range = cfg.Range <= 0 ? 1 : cfg.Range;
 
+            // Faithful msdfgen generateMSDF: OverlappingContourCombiner<MultiDistanceSelector> with
+            // overlapSupport (core/msdfgen.cpp generateMSDF, core/contour-combiners.cpp,
+            // core/edge-selectors.cpp). The earlier flat global per-channel nearest-edge min did not
+            // resolve per-channel perpendicular distance with edge-domain gating nor combine
+            // overlapping contours by winding, which caused the measured RAW |Δ| at junctions and
+            // overlaps (W/g/&/@). One combiner is reused across all texels (msdfgen keeps the finder
+            // for the whole bitmap); it is reset per sample point.
+            var combiner = new MsdfDistance.OverlappingContourCombiner(shape);
+
             for (int y = 0; y < h; y++)
             {
                 // Bottom-up: row 0 is the bottom of the glyph.
                 int row = y;
                 for (int x = 0; x < w; x++)
                 {
-                    // Pixel centre in shape space.
+                    // Pixel centre in shape space == msdfgen transformation.unproject(x+.5, y+.5).
                     double px = (x + 0.5) / cfg.ScaleX - cfg.TranslateX;
                     double py = (y + 0.5) / cfg.ScaleY - cfg.TranslateY;
                     Vector2D p = new Vector2D(px, py);
 
-                    EdgePoint r = new EdgePoint { MinDistance = SignedDistance.Infinite };
-                    EdgePoint g = new EdgePoint { MinDistance = SignedDistance.Infinite };
-                    EdgePoint b = new EdgePoint { MinDistance = SignedDistance.Infinite };
+                    var d = MsdfDistance.ShapeDistance(combiner, shape, p);
 
-                    foreach (var contour in shape.Contours)
-                    {
-                        foreach (var edge in contour.Edges)
-                        {
-                            SignedDistance distance = edge.MinSignedDistance(p, out double t);
-                            if ((edge.Color & EdgeColor.Red) != 0 && distance < r.MinDistance)
-                            {
-                                r.MinDistance = distance; r.NearEdge = edge; r.NearParam = t;
-                            }
-                            if ((edge.Color & EdgeColor.Green) != 0 && distance < g.MinDistance)
-                            {
-                                g.MinDistance = distance; g.NearEdge = edge; g.NearParam = t;
-                            }
-                            if ((edge.Color & EdgeColor.Blue) != 0 && distance < b.MinDistance)
-                            {
-                                b.MinDistance = distance; b.NearEdge = edge; b.NearParam = t;
-                            }
-                        }
-                    }
-
-                    if (r.NearEdge != null)
-                        r.NearEdge.DistanceToPerpendicularDistance(ref r.MinDistance, p, r.NearParam);
-                    if (g.NearEdge != null)
-                        g.NearEdge.DistanceToPerpendicularDistance(ref g.MinDistance, p, g.NearParam);
-                    if (b.NearEdge != null)
-                        b.NearEdge.DistanceToPerpendicularDistance(ref b.MinDistance, p, b.NearParam);
-
-                    // Preserve each channel's OWN edge-relative sign (this per-channel independence is
-                    // what makes the median sharp at corners). Contour orientation is resolved up-front
-                    // by Shape.OrientContours() (called by MsdfBuilder), so each edge's directed sign
-                    // already means "inside"; no global field flip is applied here.
                     int i = (row * w + x) * 3;
-                    output[i + 0] = (float)(r.MinDistance.Distance / range + 0.5);
-                    output[i + 1] = (float)(g.MinDistance.Distance / range + 0.5);
-                    output[i + 2] = (float)(b.MinDistance.Distance / range + 0.5);
+                    output[i + 0] = (float)(d.r / range + 0.5);
+                    output[i + 1] = (float)(d.g / range + 0.5);
+                    output[i + 2] = (float)(d.b / range + 0.5);
                 }
             }
 
