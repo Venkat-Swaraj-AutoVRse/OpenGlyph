@@ -151,6 +151,7 @@ namespace OpenGlyph.Benchmarks
             private long sum;
             private int g0, g1, g2;
             private long totalMem;
+            private long allocStart;
 
             public static AllocSampler Begin()
             {
@@ -159,6 +160,10 @@ namespace OpenGlyph.Benchmarks
                 s.sum = 0;
                 s.g0 = GC.CollectionCount(0); s.g1 = GC.CollectionCount(1); s.g2 = GC.CollectionCount(2);
                 s.totalMem = GC.GetTotalMemory(false);
+                // Exact cumulative managed allocation on this (main) thread — monotonic,
+                // survives GCs, no per-frame sampling needed (the ProfilerRecorder
+                // "GC Allocated In Frame" resets each frame and under-counts here).
+                s.allocStart = GC.GetAllocatedBytesForCurrentThread();
                 return s;
             }
             public void Tick()
@@ -167,9 +172,10 @@ namespace OpenGlyph.Benchmarks
             }
             public void End(SystemTextResult r)
             {
-                if (allocated.Valid) { for (int i = 0; i < allocated.Count; i++) { } }
-                r.gcAllocCreationKB = sum / 1024.0;
-                r.allocatedMBDuringCreation = sum / (1024.0 * 1024.0);
+                long allocBytes = GC.GetAllocatedBytesForCurrentThread() - allocStart;
+                if (allocBytes < 0) allocBytes = 0;
+                r.gcAllocCreationKB = allocBytes / 1024.0;
+                r.allocatedMBDuringCreation = allocBytes / (1024.0 * 1024.0);
                 r.gcGen0Delta = GC.CollectionCount(0) - g0;
                 r.gcGen1Delta = GC.CollectionCount(1) - g1;
                 r.gcGen2Delta = GC.CollectionCount(2) - g2;
