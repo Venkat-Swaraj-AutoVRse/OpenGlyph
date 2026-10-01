@@ -721,6 +721,64 @@ untouched so SDF/MSDF/`<color>` stay bit-exact (those cases have no visible
 outline/underlay, so an outline-only change cannot regress them). CPU model + capture
 harness live in the host `BenchmarkBoot` (`DumpInputs`, scanline capture); the
 `_UberDebug` uniform was reverted out of the production shader.
+
+### 8.7 Outline/underlay — §8.6 hypothesis KILLED by direct measurement (STEP 1)
+
+Per the brief's STEP 1 ("prove or kill §8.6 by direct measurement, not inference"),
+both production fragment programs were instrumented with a temporary, batching-safe
+global `_UberDebug` uniform (reverted before commit) that returns the fragment's own
+`(dist, scale, outAlpha, outlineBias, scaleSoftness, faceBias, spreadRatio,
+normFactor)` encoded in RGB. Each path was rendered through ITS OWN real shader
+(`UniText/Uber` forced on vs `UniText/SDF SSD` forced off) into the world-space
+1280×720 RT, and an ALIGNED scanline through a large isolated `O` was dumped per-x
+(`BenchmarkBoot.DumpBothPaths`). Harness style: white face, red outline width 0.25,
+softness 0, dilate 0; font NotoSans 48pt, atlasPadding 12, atlasSize 1024.
+
+**Measured, FontSize 48, aligned scanline (the acceptance condition):**
+
+| term | UNIFIED (Uber) | LEGACY (SSD) |
+|------|---------------:|-------------:|
+| `scale`         | 10.54 | 10.54  — **IDENTICAL** |
+| `dist` (sample) | 0.020–0.035 | 0.020–0.035 — **IDENTICAL** |
+| `scaleSoftness` | 10.54 | 10.54 — **IDENTICAL** |
+| `spreadRatio` (UV1.x) | **0.251** | **0.024–0.027** |
+| `normFactor`    | **0.408** | **~3.6–4.5** |
+| `outlineBias`   | **+2.0** (→ outAlpha 0) | **−1.2 → +0.04** (real ring) |
+| `outAlpha`      | **0.000** everywhere | **1.0 → 0.3** across the ring |
+
+**§8.6 is KILLED.** `scale` and `dist` are bit-identical between the two paths on the
+aligned scanline. The merged single-draw mesh does NOT yield a different
+`ddx/ddy(uv0.y)` derivative — exactly the suspicion the brief flagged ("identical uv0
+and positions should give identical derivatives"). The §8.6 ≈0.43 reading came from
+`DumpUberIntermediates` drawing the LEGACY mesh through the UNIFIED material (whose
+UV1 the legacy mesh does not populate the uber way), not from a real derivative gap.
+
+**Actual root cause (→ STEP 2b).** The one differing intermediate is `spreadRatio`
+carried in **UV1.x**: unified feeds **0.251** (the generator's real
+`atlasPadding/pointSize = 12/48 = 0.25`, carried faithfully by `UnifiedRenderBuilder`
+from the source mesh TEXCOORD1.x), while the legacy `UniText/SDF SSD` fragment
+effectively uses **~0.024 ≈ 0.25 × REFERENCE_SPREAD_RATIO(0.1)**. Hence
+`normFactor = 0.1/spreadRatio` is **0.4 unified vs ~4.0 legacy** — a ~10× gap. That
+gap flows straight into `outlineBias = (0.5 − (baseWeight +
+(faceDilate+outlineWidth)·0.5)·normFactor)·scaleSoftness − 0.5`: unified's small
+normFactor leaves `outlineBias ≈ +2`, so `outAlpha = saturate(dist·scaleSoftness −
+outlineBias) = 0` for the whole ring (the outline never lights — measured nonBg 3690
+vs legacy 5555). Legacy's larger normFactor drives `outlineBias` negative at the
+inner ring, saturating `outAlpha` to 1.0 → the wide red ring. The face edge (a near
+step at dist≈0.5) is insensitive to normFactor, which is why SDF/MSDF/`<color>`
+stay bit-exact (maxΔ 0) and only outline/underlay diverge. The generator always
+produces `spreadRatio=0.25` (`[GEN-SPREAD]` logged it for every generate); the ~10×
+is NOT a per-vertex scale difference and NOT the derivative — it is the normFactor
+the two effect-layer paths resolve.
+
+**Fix direction.** Correct the OUTLINE and UNDERLAY `normFactor` in `UniText/Uber`
+to match legacy's effective value (≈ `1/spreadRatio`, i.e. ×1 rather than
+×REFERENCE_SPREAD_RATIO for those layers), leaving the FACE ramp and the in-frag
+`scale`/`dist` untouched so SDF/MSDF/`<color>` remain bit-identical. Validated by
+re-dumping the aligned scanline and the five-case pixel harness, not by a swept magic
+width constant. All `_UberDebug` uniforms and the `[GEN-SPREAD]` log are reverted
+before commit.
+
 ---
 
 ## 9. Component styles, per-span markup, migration & deprecation (Round-2 steps 1–4)
