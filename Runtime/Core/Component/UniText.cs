@@ -193,6 +193,23 @@ namespace LightSide
         private UnifiedRendererMode unifiedRendererMode = UnifiedRendererMode.UseProjectSetting;
 
         /// <summary>
+        /// Per-component override for the Render-Architecture R2 unified single-renderer path.
+        /// <see cref="UnifiedRendererMode.UseProjectSetting"/> follows
+        /// <see cref="UniTextSettings.UseUnifiedRenderer"/>; ForceOn/ForceOff override it. Setting it
+        /// marks the component dirty so the next rebuild uses the chosen path.
+        /// </summary>
+        public UnifiedRendererMode UnifiedRenderer
+        {
+            get => unifiedRendererMode;
+            set
+            {
+                if (unifiedRendererMode == value) return;
+                unifiedRendererMode = value;
+                SetVerticesDirty();
+            }
+        }
+
+        /// <summary>
         /// Whether this component renders through the R2 unified single-CanvasRenderer-per-draw-group
         /// path (UniText/Uber + shared Texture2DArray + style table). Resolves the per-component
         /// <see cref="unifiedRendererMode"/> against the project default. False keeps the legacy path.

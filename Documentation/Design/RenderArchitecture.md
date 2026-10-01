@@ -439,3 +439,60 @@ the per-segment CanvasRenderer split in `UniText.UpdateSubMeshes` with a single
 renderer + array-atlas, add the `(sliceIdx, glyphMode, styleIdx)` vertex packing
 in `UniTextMeshGenerator`, build the component style model + migration tool, and
 measure before/after on the real sample scenes with a GPU present.
+
+
+---
+
+## 8. Round-2 measured results (2026-10-01) — production path behind `UseUnifiedRenderer`
+
+The unified single-renderer path is now wired into `UniText` behind
+`UniTextSettings.UseUnifiedRenderer` (+ per-component `UnifiedRenderer`
+override), default **off**. Verified on Unity 6000.3.19f1 (batchmode EditMode +
+a Development standalone Windows player for GPU counters).
+
+### 8.1 Correctness
+- Full EditMode suite: **188 passed / 0 failed / 1 skipped** with the flag **off**
+  (default), and **identically 188 / 0 / 1** with the flag forced **on** for the
+  whole suite (`UNITEXT_FORCE_UNIFIED=1` → `[SetUpFixture]`). No existing text
+  test asserts legacy per-segment-renderer structure that the unified path
+  breaks, so it is a faithful drop-in. (The 1 skip is a pre-existing COLR
+  `DllSmoke` ignore in both modes.)
+- Off-vs-on **geometry equivalence** (default appearance, "Reading 123"): the
+  unified path submits a vertex-identical mesh (tol 1e-3; the merge copies
+  positions verbatim) and draws through **1** `UniText/Uber` CanvasRenderer where
+  legacy used several.
+
+### 8.2 Draw calls — structural CanvasRenderer count (deterministic)
+| Scenario | Legacy (off) | Unified (on) |
+|----------|-------------:|-------------:|
+| (a) one text, 3 SDF + MSDF | **3 renderers** | **1 renderer** |
+| (b) 50 components, same mix | **150 renderers** | **50 renderers** |
+
+The per-component renderer collapse is exactly as designed: n → 1 (text-only /
+same Alpha8 group here) per component.
+
+### 8.3 Draw calls — GPU `ProfilerRecorder` (standalone dev player, 320×240)
+| Scenario | Legacy draws / batches / setpass | Unified draws / batches / setpass |
+|----------|---------------------------------:|----------------------------------:|
+| (a) one text | 2 / 2 / 2 | 3 / 3 / 3 |
+| (b) 50 components | 2 / 2 / 2 | **102 / 102 / 101** |
+
+**Honest finding (a real regression to fix next).** In the 50-component case the
+legacy path's GPU draws are tiny (**2**) because Unity's dynamic UI batching
+already collapses many CanvasRenderers that share the **same** atlas texture and
+material — which the 50 identical legacy components do. The current unified build
+creates a **separate uber `Material` instance and a separate per-component mesh**
+per component, and distinct material instances **do not batch**, so 50 components
+cost ~**2 draws × 50 ≈ 102**. So while the unified path wins decisively on
+*renderer count* and on a *single* mixed-font text, as currently built it
+*defeats* cross-component UI batching and is worse on the GPU for many identical
+components.
+
+**Fix (next step, not this round):** share ONE uber material and ONE process-wide
+`Texture2DArray` across components (the `SharedGlyphAtlas` registry already makes
+the array shared; the material must be shared too, and per-component data —
+clip rect, style-table — moved to `MaterialPropertyBlock`/per-vertex so one
+material batches across components). The absolute counts above are from a 320×240
+dev player with trivial geometry, so treat them as *relative* evidence of the
+batching behaviour, not absolute budgets. Atlas-budget defaults (decision §5.5)
+should be set after this batching fix, from numbers on representative scenes.
