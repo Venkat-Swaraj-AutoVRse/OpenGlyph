@@ -47,6 +47,17 @@ namespace LightSide.Msdf
                 _minPositivePerp = Math.Abs(_minTrueDistance.Distance);
             }
 
+            /// <summary>Re-initialise to the freshly-constructed (infinite) state for reuse — equivalent
+            /// to a default construction, so a reused selector behaves exactly like a new one.</summary>
+            public void ClearInfinite()
+            {
+                _minTrueDistance = SignedDistance.Infinite;
+                _minNegativePerp = -Math.Abs(_minTrueDistance.Distance);
+                _minPositivePerp = Math.Abs(_minTrueDistance.Distance);
+                _nearEdge = null;
+                _nearEdgeParam = 0;
+            }
+
             public static bool GetPerpendicularDistance(ref double distance, Vector2D ep, Vector2D edgeDir)
             {
                 double ts = Vector2D.Dot(ep, edgeDir);
@@ -140,6 +151,15 @@ namespace LightSide.Msdf
                 _p = p;
             }
 
+            /// <summary>Re-initialise to the fresh (infinite) state at p for reuse as a combine
+            /// selector — equivalent to `new MultiDistanceSelector()` then reset(p), without the
+            /// stale-point delta adjustment, so it is correct to reuse across texels.</summary>
+            public void ClearInfinite(Vector2D p)
+            {
+                _r.ClearInfinite(); _g.ClearInfinite(); _b.ClearInfinite();
+                _p = p;
+            }
+
             public void AddEdge(ref EdgeCache cache, EdgeSegment prevEdge, EdgeSegment edge, EdgeSegment nextEdge)
             {
                 EdgeColor color = edge.Color;
@@ -211,23 +231,75 @@ namespace LightSide.Msdf
                 int n = shape.Contours.Count;
                 _windings = new int[n];
                 _edgeSelectors = new MultiDistanceSelector[n];
+                _contourEdges = new EdgeSegment[n][];
+                int total = 0;
                 for (int i = 0; i < n; i++)
                 {
                     _windings[i] = shape.Contours[i].Winding();
                     _edgeSelectors[i] = new MultiDistanceSelector();
+                    _contourEdges[i] = shape.Contours[i].Edges.ToArray();
+                    total += _contourEdges[i].Length;
                 }
+                // Persistent per-edge cache (msdfgen shapeEdgeCache, sized to shape.edgeCount()),
+                // reused across every texel so isEdgeRelevant can skip far edges — the key perf
+                // optimisation. Output is unchanged: a skipped edge is provably farther than the
+                // running min.
+                _cache = new EdgeCache[Math.Max(1, total)];
+                _shapeSel = new MultiDistanceSelector();
+                _innerSel = new MultiDistanceSelector();
+                _outerSel = new MultiDistanceSelector();
             }
+
+            private readonly EdgeSegment[][] _contourEdges;
+            private readonly EdgeCache[] _cache;
+            private readonly MultiDistanceSelector _shapeSel = new MultiDistanceSelector();
+            private readonly MultiDistanceSelector _innerSel = new MultiDistanceSelector();
+            private readonly MultiDistanceSelector _outerSel = new MultiDistanceSelector();
 
             public void Reset(Vector2D p) { _p = p; foreach (var s in _edgeSelectors) s.Reset(p); }
             public MultiDistanceSelector EdgeSelector(int i) => _edgeSelectors[i];
 
+            /// <summary>
+            /// Full ShapeDistanceFinder.distance(origin) for this combiner: resets each contour
+            /// selector, feeds its edges (prev/cur/next wrap) against the PERSISTENT cache slots, then
+            /// combines by winding. The cache slots carry over from the previous texel, so
+            /// isEdgeRelevant prunes edges far from the running min — identical result, far fewer
+            /// signedDistance() evaluations (the key perf optimisation, matching msdfgen's reused
+            /// shapeEdgeCache).
+            /// </summary>
+            public (double r, double g, double b) ComputeShapeDistance(Vector2D origin)
+            {
+                Reset(origin);
+                int cacheIdx = 0;
+                for (int ci = 0; ci < _contourEdges.Length; ci++)
+                {
+                    var edges = _contourEdges[ci];
+                    int m = edges.Length;
+                    if (m == 0) continue;
+                    var sel = _edgeSelectors[ci];
+                    EdgeSegment prevEdge = m >= 2 ? edges[m - 2] : edges[0];
+                    EdgeSegment curEdge = edges[m - 1];
+                    for (int e = 0; e < m; e++)
+                    {
+                        EdgeSegment nextEdge = edges[e];
+                        sel.AddEdge(ref _cache[cacheIdx++], prevEdge, curEdge, nextEdge);
+                        prevEdge = curEdge;
+                        curEdge = nextEdge;
+                    }
+                }
+                return Distance();
+            }
+
             public (double r, double g, double b) Distance()
             {
                 int contourCount = _edgeSelectors.Length;
-                var shapeSel = new MultiDistanceSelector();
-                var innerSel = new MultiDistanceSelector();
-                var outerSel = new MultiDistanceSelector();
-                shapeSel.Reset(_p); innerSel.Reset(_p); outerSel.Reset(_p);
+                // Reused combine selectors, re-initialised to the fresh (infinite) state each call —
+                // equivalent to msdfgen's locally-constructed shape/inner/outer selectors, but without
+                // per-texel allocation.
+                var shapeSel = _shapeSel;
+                var innerSel = _innerSel;
+                var outerSel = _outerSel;
+                shapeSel.ClearInfinite(_p); innerSel.ClearInfinite(_p); outerSel.ClearInfinite(_p);
                 for (int i = 0; i < contourCount; i++)
                 {
                     var edgeDistance = _edgeSelectors[i].Distance();
@@ -283,38 +355,11 @@ namespace LightSide.Msdf
         }
 
         /// <summary>
-        /// ShapeDistanceFinder.distance(origin) for OverlappingContourCombiner&lt;MultiDistanceSelector&gt;:
-        /// feeds each contour's edges with the prev/cur/next wrap exactly as msdfgen's loop, then
-        /// combines. msdfgen keeps a persistent per-edge EdgeCache array (shapeEdgeCache) across
-        /// successive distance() calls to skip far edges; we instead reset a fresh cache per edge,
-        /// which only disables that optimisation — the selected distance is identical because every
-        /// edge is still offered to the selector (isEdgeRelevant on a fresh zero cache returns true).
-        /// Returns per-channel distances (NOT yet range-mapped).
+        /// ShapeDistanceFinder.distance(origin) for OverlappingContourCombiner&lt;MultiDistanceSelector&gt;.
+        /// Delegates to the combiner's persistent-cache path (allocation-free per texel), matching
+        /// msdfgen's reused shapeEdgeCache. Returns per-channel distances (NOT yet range-mapped).
         /// </summary>
         public static (double r, double g, double b) ShapeDistance(OverlappingContourCombiner combiner, Shape shape, Vector2D origin)
-        {
-            combiner.Reset(origin);
-            int ci = 0;
-            foreach (var contour in shape.Contours)
-            {
-                var edges = contour.Edges;
-                if (edges.Count > 0)
-                {
-                    var sel = combiner.EdgeSelector(ci);
-                    EdgeSegment prevEdge = edges.Count >= 2 ? edges[edges.Count - 2] : edges[0];
-                    EdgeSegment curEdge = edges[edges.Count - 1];
-                    for (int e = 0; e < edges.Count; e++)
-                    {
-                        EdgeSegment nextEdge = edges[e];
-                        var cache = new EdgeCache();
-                        sel.AddEdge(ref cache, prevEdge, curEdge, nextEdge);
-                        prevEdge = curEdge;
-                        curEdge = nextEdge;
-                    }
-                }
-                ci++;
-            }
-            return combiner.Distance();
-        }
+            => combiner.ComputeShapeDistance(origin);
     }
 }
