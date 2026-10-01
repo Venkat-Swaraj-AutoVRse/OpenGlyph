@@ -212,6 +212,15 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   set(BLEND2D_STATIC ON CACHE BOOL "" FORCE)
   set(BLEND2D_NO_INSTALL ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(blend2d)
+  # On a macOS universal (arm64;x86_64) pass, Blend2D compiles its AArch64 JIT path
+  # (pipecompiler_a64.cpp etc., which #include <asmjit/a64.h>) but its own
+  # target_include_directories(blend2d ... ${ASMJIT_INCLUDE_DIRS}) does not reliably cover
+  # every core TU for the secondary arch, so context.cpp fails with "'asmjit/a64.h' file not
+  # found". The embedded asmjit sources live under <asmjit>/src; add that dir to the blend2d
+  # target's include path unconditionally so the asmjit umbrella headers always resolve.
+  if(TARGET blend2d AND EXISTS "${asmjit_SOURCE_DIR}/src")
+    target_include_directories(blend2d BEFORE PRIVATE "${asmjit_SOURCE_DIR}/src")
+  endif()
 endif()
 
 # ---- Runtime library: unitext_native -----------------------------------------
