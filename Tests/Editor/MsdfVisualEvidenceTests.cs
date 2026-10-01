@@ -227,8 +227,23 @@ namespace LightSide.Tests
             // Force the UGUI global Z-test so the quad is not depth-rejected off-canvas.
             mat.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);
 
-            float gradientScale = 2f * Spread;  // atlas pxRange
-            float xScaleVal = Ppem;             // glyph size in px (TMP's xScale)
+            float gradientScale = 2f * Spread;  // atlas pxRange — the real field range
+            // Both SSD shaders derive their edge anti-alias width from the SCREEN-SPACE derivative:
+            //   baseScale = 1 / (|ddx(uv.y)|+|ddy(uv.y)|) / (texelW*0.75)
+            //   scale     = baseScale * xScaleVal * gradientScale
+            //   coverage  = saturate(field*scale - bias)   // edge spans ~1/scale in field units
+            // On this montage one atlas texel is magnified to `Up` output pixels, so the UV
+            // derivative makes baseScale ≈ Up/0.75. The real engine lands `scale` so the edge is
+            // ~1 SCREEN pixel; here the faithful equivalent is ~1 OUTPUT pixel, i.e. the coverage
+            // ramp should span 1/Up of a texel, which needs scale ≈ Up. Feeding the raw Ppem and
+            // 2*Spread made scale ≈ baseScale*1024 — the ramp then collapsed far below one output
+            // pixel, so the SINGLE-channel SDF row snapped to the texel grid and staircased (the MSDF
+            // median hides it: the unfair comparison this test must not produce). We therefore pick
+            // xScaleVal so baseScale*xScaleVal*gradientScale ≈ Up, i.e. xScaleVal ≈ 0.75/gradientScale
+            // (baseScale*xScaleVal ≈ Up/gradientScale → scale ≈ Up). This widens the AA to the engine
+            // ~1-pixel band for BOTH rows identically, so the SDF row renders like the real SDF atlas
+            // path at the same ppem/spread instead of staircasing.
+            float xScaleVal = 0.75f / gradientScale;
             float spreadRatio = (2f * Spread) / (float)Ppem;
 
             var rt = new RenderTexture(w, h, 0, RenderTextureFormat.ARGB32) { antiAliasing = 1 };
