@@ -104,8 +104,8 @@ namespace OpenGlyph.Benchmarks
             yield return RunTMP();
             yield return RunUIToolkit();
 
-            RunGlyphRaster();
-            RunBuildSize();
+            yield return RunGlyphRaster();
+            yield return RunBuildSize();
             WriteResults();
 
             Debug.Log("[Bench] DONE");
@@ -644,16 +644,18 @@ namespace OpenGlyph.Benchmarks
         }
 
         // =================================================================== glyph raster
-        private void RunGlyphRaster()
+        private IEnumerator RunGlyphRaster()
         {
+            // Android-safe font bytes: Resources TextAsset -> file -> UnityWebRequest.
+            byte[] fontBytes = null;
+            yield return ReadFontBytes("NotoSans-Regular", "NotoSans-Regular.ttf", b => fontBytes = b);
+
             // OpenGlyph FreeType path (public UniTextFont API).
             try
             {
-                string fontPath = ResolveFontPath("NotoSans-Regular.ttf");
-                if (fontPath != null)
+                if (fontBytes != null && fontBytes.Length > 0)
                 {
-                    var bytes = File.ReadAllBytes(fontPath);
-                    var font = UniTextFont.CreateFontAsset(bytes, glyphRasterSize, 0.25f, UniTextRenderMode.SDF, 1024);
+                    var font = UniTextFont.CreateFontAsset(fontBytes, glyphRasterSize, 0.25f, UniTextRenderMode.SDF, 1024);
                     font.LoadFontFace();
                     var indices = new List<uint>(glyphRasterCount);
                     for (uint cp = 0x20; indices.Count < glyphRasterCount && cp < 0x5FF; cp++)
@@ -673,7 +675,7 @@ namespace OpenGlyph.Benchmarks
                         note = "UniTextFont.TryAddGlyphsBatch (FreeType raster + SDF pack)"
                     });
                 }
-                else report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "font path not found" });
+                else report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "font bytes unavailable" });
             }
             catch (Exception ex) { report.glyphRaster.Add(new GlyphRasterResult { engine = "FreeType (OpenGlyph)", note = "exception: " + ex.Message }); }
 
@@ -707,20 +709,31 @@ namespace OpenGlyph.Benchmarks
             catch (Exception ex) { report.glyphRaster.Add(new GlyphRasterResult { engine = "UnityFontEngine (TMP dynamic)", note = "exception: " + ex.Message }); }
         }
 
-        private static string ResolveFontPath(string fileName)
+        // Load font bytes cross-platform. BenchBuild commits the TTFs as Resources
+        // TextAssets (Fonts/<name>.bytes), readable in any player incl. Android where
+        // StreamingAssets lives inside the APK; fall back to a direct file on desktop.
+        private IEnumerator ReadFontBytes(string resourceName, string fileName, Action<byte[]> done)
         {
+            var ta = Resources.Load<TextAsset>("Fonts/" + resourceName);
+            if (ta != null && ta.bytes != null && ta.bytes.Length > 0) { done(ta.bytes); yield break; }
+
             string sa = Path.Combine(Application.streamingAssetsPath, "Fonts", fileName);
-            if (File.Exists(sa)) return sa;
-            return null;
+            if (File.Exists(sa)) { byte[] b = null; try { b = File.ReadAllBytes(sa); } catch { } if (b != null) { done(b); yield break; } }
+
+            Debug.LogWarning("[Bench] font bytes not found for " + resourceName + " (no Resources TextAsset, no file at " + sa + ")");
+            done(null);
+            yield break;
         }
 
-        private void RunBuildSize()
+        private IEnumerator RunBuildSize()
         {
-            foreach (var f in new[] { "NotoSans-Regular.ttf", "NotoSansArabic-Regular.ttf", "NotoSansHebrew-Regular.ttf" })
+            // Font byte sizes shipped (read cross-platform so Android reports real sizes).
+            foreach (var f in new[] { ("NotoSans-Regular", "NotoSans-Regular.ttf"), ("NotoSansArabic-Regular", "NotoSansArabic-Regular.ttf"), ("NotoSansHebrew-Regular", "NotoSansHebrew-Regular.ttf") })
             {
-                string p = ResolveFontPath(f);
-                long bytes = p != null && File.Exists(p) ? new FileInfo(p).Length : 0;
-                report.buildSize.Add(new BuildSizeResult { system = "OpenGlyph", font = f, fontBytes = bytes, fontMB = bytes / (1024.0 * 1024.0), note = "raw TTF; no font compression yet" });
+                byte[] b = null;
+                yield return ReadFontBytes(f.Item1, f.Item2, x => b = x);
+                long bytes = b?.Length ?? 0;
+                report.buildSize.Add(new BuildSizeResult { system = "OpenGlyph", font = f.Item2, fontBytes = bytes, fontMB = bytes / (1024.0 * 1024.0), note = "raw TTF; no font compression yet" });
             }
             if (tmpSourceFont != null)
                 report.buildSize.Add(new BuildSizeResult { system = "TMP", font = tmpSourceFont.name, note = "TMP ships a font asset (atlas + glyph table); size depends on atlas dims + static/dynamic." });
