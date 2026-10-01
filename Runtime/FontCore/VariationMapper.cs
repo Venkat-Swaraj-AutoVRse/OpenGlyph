@@ -71,17 +71,42 @@ namespace LightSide
         private float Clamp(int axisIndex, float v) =>
             Mathf.Clamp(v, axes[axisIndex].min, axes[axisIndex].max);
 
+        /// <summary>Default number of quantization buckets across each axis range (1% granularity).</summary>
+        public const int DefaultBuckets = 100;
+
+        // Quantizes a clamped coordinate on axis i into an integer slot in [0, buckets]. A zero-range
+        // axis (min==max) always yields slot 0. This is what caps atlas entries when an axis is
+        // swept continuously.
+        private int Slot(int i, float clamped, int buckets)
+        {
+            float range = axes[i].max - axes[i].min;
+            if (range <= 0f || buckets <= 0) return 0;
+            float t = (clamped - axes[i].min) / range;        // 0..1
+            return Mathf.Clamp(Mathf.RoundToInt(t * buckets), 0, buckets);
+        }
+
         /// <summary>
-        /// Maps <paramref name="spec"/> (and optional optical size) to the full design-coordinate
-        /// vector (one per axis, defaults where the request is silent), returns the parallel tag list
-        /// and the <see cref="VariationKey"/> for cache separation.
+        /// Maps <paramref name="spec"/> (and optical size) to the full design-coordinate vector plus
+        /// a quantized <see cref="VariationKey"/>. Free coordinates bucket at 1/<paramref name="buckets"/>
+        /// of each axis range (default 1%).
         /// </summary>
         /// <param name="spec">Requested weight/width/style.</param>
-        /// <param name="opticalSize">Render point size to drive <c>opsz</c>, or ≤0 to leave default.</param>
+        /// <param name="opticalSize">
+        /// Render point size used to auto-drive <c>opsz</c> (CSS font-optical-sizing: auto). Pass ≤0
+        /// to leave <c>opsz</c> at its default (optical sizing off). Ignored when
+        /// <paramref name="opszExplicit"/> is true.
+        /// </param>
         /// <param name="tags">Output: axis tags in axis order.</param>
-        /// <param name="coords">Output: design coords in axis order.</param>
+        /// <param name="coords">Output: design coords in axis order (for FreeType).</param>
+        /// <param name="buckets">Quantization buckets per axis (default 100 == 1%).</param>
+        /// <param name="opszExplicit">
+        /// True when the caller set <c>opsz</c> explicitly (via <paramref name="explicitOpsz"/>); then
+        /// the explicit value wins and <paramref name="opticalSize"/> is NOT auto-applied.
+        /// </param>
+        /// <param name="explicitOpsz">The explicit opsz value, used only when <paramref name="opszExplicit"/>.</param>
         /// <returns>The variation key, or <see cref="VariationKey.None"/> for a static font.</returns>
-        public VariationKey Map(FontStyleSpec spec, float opticalSize, out uint[] tags, out float[] coords)
+        public VariationKey Map(FontStyleSpec spec, float opticalSize, out uint[] tags, out float[] coords,
+            int buckets = DefaultBuckets, bool opszExplicit = false, float explicitOpsz = 0f)
         {
             tags = null; coords = null;
             if (!isVariable || axes.Length == 0)
@@ -89,6 +114,7 @@ namespace LightSide
 
             tags = new uint[axes.Length];
             coords = new float[axes.Length];
+            var slots = new int[axes.Length];
 
             for (int i = 0; i < axes.Length; i++)
             {
@@ -99,12 +125,18 @@ namespace LightSide
                 else if (axes[i].tag == WDTH) v = spec.width;
                 else if (axes[i].tag == ITAL) v = spec.style == StyleAxis.Italic ? 1f : 0f;
                 else if (axes[i].tag == SLNT) v = spec.style == StyleAxis.Oblique ? spec.slant : axes[i].def;
-                else if (axes[i].tag == OPSZ && opticalSize > 0f) v = opticalSize;
+                else if (axes[i].tag == OPSZ)
+                {
+                    if (opszExplicit) v = explicitOpsz;              // explicit wins
+                    else if (opticalSize > 0f) v = opticalSize;      // auto from rendered size
+                    // else leave at default (optical sizing off)
+                }
 
                 coords[i] = Clamp(i, v);
+                slots[i] = Slot(i, coords[i], buckets);
             }
 
-            return VariationKey.FromCoords(tags, coords);
+            return VariationKey.FromQuantized(tags, slots);
         }
     }
 }
