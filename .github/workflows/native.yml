@@ -733,19 +733,21 @@ jobs:
           path: winref-dump
       - name: Build parity harness
         run: dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$RUNNER_TEMP/parity-bin"
-      - name: Compare committed ${{ matrix.os }} binary vs Windows reference (REPORT-ONLY)
+      - name: Compare committed ${{ matrix.os }} binary vs Windows reference (GATE)
         run: |
           set -euo pipefail
           echo "=== Windows reference dump manifest ==="
           cat winref-dump/manifest.txt
           echo "=== compare: ${{ matrix.lib }} vs winref-dump ==="
           # The macOS .dylib is universal (arm64+x86_64); the arm64 runner loads the arm64 slice.
-          # Report-only: exit 0 regardless, so the measurement run is always green. The table is
-          # the deliverable here. Add --gate to enforce once tolerances are evidence-based.
+          # HARD GATE (--gate): the first measurement run proved Linux x86_64 and macOS arm64 are
+          # byte-identical to the accepted Windows x64 reference in every category, so the gate is
+          # EXACT (tolerances max<=0, mean<=0 in DumpCompare.cs). Any nonzero cross-platform
+          # difference now fails the job. `set -e` + --gate's non-zero exit stops the job.
           dotnet "$RUNNER_TEMP/parity-bin/parity.dll" compare \
             "${{ matrix.lib }}" \
             "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf" \
-            "winref-dump" | tee "$RUNNER_TEMP/compare-${{ matrix.os }}.txt"
+            "winref-dump" --gate | tee "$RUNNER_TEMP/compare-${{ matrix.os }}.txt"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
