@@ -123,6 +123,13 @@ namespace LightSide
             return mats;
         }
 
+        /// <summary>
+        /// Render-Architecture R2 sub-task 3: the appearance's DEFAULT material array (the materials
+        /// used when a font has no override). Used by the migration tool to synthesise a component style
+        /// when no font is assigned on the component. Returns an empty array when none are set.
+        /// </summary>
+        public Material[] GetDefaultMaterials() => defaultMaterialsArr ?? Array.Empty<Material>();
+
         [NonSerialized] private Dictionary<Material[], Material[]> msdfVariantCache;
         [NonSerialized] private Shader cachedMsdfShader;
 

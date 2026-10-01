@@ -117,6 +117,19 @@ namespace LightSide
 
         /// <summary>Gets the default appearance for new UniText components (Editor only).</summary>
         public static UniTextAppearance DefaultAppearance => Instance?.defaultAppearance;
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2 sub-task 3: when ON, imported/changed prefabs and scenes are " +
+                 "AUTO-migrated from legacy appearance/material settings to component styles via " +
+                 "Tools/OpenGlyph/Migrate Appearance to Styles. OFF (default) — migration is manual only. " +
+                 "Leave OFF unless you want every asset import to rewrite UniText components.")]
+        private bool autoMigrateAppearanceOnImport = false;
+
+        /// <summary>
+        /// Render-Architecture R2 sub-task 3: project-wide opt-in for auto-migrating appearance/material
+        /// settings to component styles on asset import. False (default) = manual migration only.
+        /// </summary>
+        public static bool AutoMigrateAppearanceOnImport => Instance != null && Instance.autoMigrateAppearanceOnImport;
     #endif
 
         /// <summary>Gets the compiled Unicode data asset, loaded from Resources.</summary>
