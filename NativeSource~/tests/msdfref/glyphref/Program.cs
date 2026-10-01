@@ -193,8 +193,8 @@ static class GlyphRef
         md.AppendLine();
         md.AppendLine("Per-texel |Δ| between OpenGlyph and msdfgen fields (channel values in [0,1]; 1/255≈0.0039).");
         md.AppendLine();
-        md.AppendLine("| glyph | WxH | colours eq | RAW max | RAW mean | CORRECTED max | CORRECTED mean |");
-        md.AppendLine("|-------|-----|-----------|---------|----------|---------------|----------------|");
+        md.AppendLine("| glyph | WxH | colours eq | RAW max | RAW mean | CORRECTED(no-dist) max | CORRECTED(no-dist) mean | CORR default max |");
+        md.AppendLine("|-------|-----|-----------|---------|----------|---------------|----------------|------|");
 
         Console.WriteLine($"{"gly",-4} {"WxH",-9} {"colEq",-6} {"rawMax",-8} {"rawMean",-9} {"corrMax",-9} {"corrMean",-9}");
         int failures = 0;
@@ -238,15 +238,20 @@ static class GlyphRef
 
             var refRaw = ReadField(pfxOur + ".ref.raw.f32", out _, out _, out _);
             var refCorr = ReadField(pfxOur + ".ref.corrected.f32", out _, out _, out _);
+            var refCorrNoDist = ReadField(pfxOur + ".ref.corrected_nodist.f32", out _, out _, out _);
 
             var dRaw = Compare(rawRes.Field, refRaw, w, h);
-            var dCorr = Compare(corrRes.Field, refCorr, w, h);
+            // The C# port implements the DO_NOT_CHECK_DISTANCE classifier path, so the apples-to-apples
+            // corrected reference is msdfgen's own DO_NOT_CHECK_DISTANCE output. We also report the
+            // delta vs msdfgen's shipping default (CHECK_DISTANCE_AT_EDGE) for context.
+            var dCorr = Compare(corrRes.Field, refCorrNoDist, w, h);
+            var dCorrDefault = Compare(corrRes.Field, refCorr, w, h);
 
             // Colour parity: compare OpenGlyph colours vs msdfgen's own colouring of the SAME shape.
             bool colEq = CompareColors(ourColors, pfxOur + ".refrecolor.msdfgen_colors.txt", out int nEdges, out int nDiff);
 
             Console.WriteLine($"{ch,-4} {w}x{h,-6} {(colEq ? "yes" : nDiff + "/" + nEdges),-6} {dRaw.maxR.ToString("F5"),-8} {dRaw.meanR.ToString("F6"),-9} {dCorr.maxR.ToString("F5"),-9} {dCorr.meanR.ToString("F6"),-9}");
-            md.AppendLine($"| {ch} | {w}x{h} | {(colEq ? "yes" : $"{nDiff}/{nEdges}")} | R{dRaw.maxR:F5} G{dRaw.maxG:F5} B{dRaw.maxB:F5} | R{dRaw.meanR:F6} G{dRaw.meanG:F6} B{dRaw.meanB:F6} | R{dCorr.maxR:F5} G{dCorr.maxG:F5} B{dCorr.maxB:F5} | R{dCorr.meanR:F6} G{dCorr.meanG:F6} B{dCorr.meanB:F6} |");
+            md.AppendLine($"| {ch} | {w}x{h} | {(colEq ? "yes" : $"{nDiff}/{nEdges}")} | R{dRaw.maxR:F5} G{dRaw.maxG:F5} B{dRaw.maxB:F5} | R{dRaw.meanR:F6} G{dRaw.meanG:F6} B{dRaw.meanB:F6} | R{dCorr.maxR:F5} G{dCorr.maxG:F5} B{dCorr.maxB:F5} | R{dCorr.meanR:F6} G{dCorr.meanG:F6} B{dCorr.meanB:F6} | R{dCorrDefault.maxR:F4} |");
 
             // Raw target: identical within 1e-4 per channel (task). Track for the summary.
             float rawWorst = Math.Max(dRaw.maxR, Math.Max(dRaw.maxG, dRaw.maxB));

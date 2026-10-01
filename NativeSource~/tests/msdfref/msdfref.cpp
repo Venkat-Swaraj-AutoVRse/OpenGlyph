@@ -137,6 +137,21 @@ int main(int argc, char **argv) {
         dumpField(p.c_str(), &buf[0], w, h, 3);
     }
 
+    // CORRECTED_NODIST: EDGE_PRIORITY + DO_NOT_CHECK_DISTANCE — the SDF-only classifier path, which
+    // is exactly what the C# MsdfErrorCorrection port implements (no ShapeDistanceChecker). This is
+    // the apples-to-apples corrected reference for the parity test.
+    {
+        std::vector<float> buf((size_t) w * h * 3, 0.f);
+        BitmapRef<float, 3> ref(&buf[0], w, h);
+        MSDFGeneratorConfig cfg;
+        cfg.overlapSupport = true;
+        cfg.errorCorrection.mode = ErrorCorrectionConfig::EDGE_PRIORITY;
+        cfg.errorCorrection.distanceCheckMode = ErrorCorrectionConfig::DO_NOT_CHECK_DISTANCE;
+        generateMSDF(ref, shape, projection, distRange, cfg);
+        std::string p = std::string(outPrefix) + ".corrected_nodist.f32";
+        dumpField(p.c_str(), &buf[0], w, h, 3);
+    }
+
     printf("msdfref: wrote %s.{raw,corrected}.f32 (%dx%d range=%g scale=%g,%g translate=%g,%g)\n",
            outPrefix, w, h, range, sx, sy, tx, ty);
     return 0;
