@@ -33,6 +33,38 @@ namespace LightSide.Tests
         [Test]
         public void BeforeAfter_DictionaryWrap_RendersEnginePng()
         {
+            RenderBeforeAfter("Thai", RealLayoutFixtures.FindThaiFontPath(), "NotoSansThai-Regular (fixture)",
+                SegmentationFixtures.Thai[0].Text + SegmentationFixtures.Thai[1].Text
+              + SegmentationFixtures.Thai[2].Text + SegmentationFixtures.Thai[3].Text,
+                "thai-segmentation-before-after.png");
+        }
+
+        /// <summary>
+        /// Khmer and Myanmar before/after renders, mirroring the Thai one above but driven through
+        /// the complex-script fixtures. BEFORE (left): no dictionary — one unbreakable SA token that
+        /// overruns the narrow panel; AFTER (right): the same text + width WITH the script's
+        /// dictionary assigned, wrapped at word boundaries. The picture is OpenGlyph's own output:
+        /// its SDF atlas, its <see cref="UniTextMeshGenerator"/> mesh, drawn with the font's SDF
+        /// material — no external rasteriser.
+        /// </summary>
+        [TestCase(SegmentationScript.Khmer, "NotoSansKhmer-Regular.ttf", "khmer-segmentation-before-after.png")]
+        [TestCase(SegmentationScript.Myanmar, "NotoSansMyanmar-Regular.ttf", "myanmar-segmentation-before-after.png")]
+        public void BeforeAfter_DictionaryWrap_ComplexScript_RendersEnginePng(
+            SegmentationScript script, string fontFile, string outFile)
+        {
+            string fontPath = RealLayoutFixtures.FindComplexScriptFont(script, out var cases);
+            string text = cases[0].Text + cases[1].Text + cases[2].Text + cases[3].Text;
+            RenderBeforeAfter(script.ToString(), fontPath, fontFile + " (fixture)", text, outFile);
+        }
+
+        /// <summary>
+        /// Renders a BEFORE (no dictionary) / AFTER (dictionary) composite for one script and writes
+        /// it as a PNG, asserting the engine actually drew glyph pixels in each panel and that the
+        /// dictionary adds word-break opportunities. Shared by the Thai and complex-script tests.
+        /// </summary>
+        private void RenderBeforeAfter(string scriptLabel, string fontPath, string fontName,
+            string text, string outFileName)
+        {
             SegHelper.EnsureUnicode();
 
             if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
@@ -40,22 +72,18 @@ namespace LightSide.Tests
                               "needs a GPU to rasterise the atlas/mesh. Run EditMode WITHOUT -nographics " +
                               "to produce the before/after PNG. (The layout correctness tests do not need graphics.)");
 
-            string fontPath = RealLayoutFixtures.FindThaiFontPath();
             if (fontPath == null)
-                Assert.Ignore("Thai font fixture missing; cannot render engine output.");
+                Assert.Ignore($"{scriptLabel} font fixture missing; cannot render engine output.");
 
             var font = UniTextFont.CreateFontAsset(File.ReadAllBytes(fontPath));
             if (font == null)
-                Assert.Ignore("Font backend unavailable; cannot build the Thai font to render.");
-            font.name = "NotoSansThai-Regular (fixture)";
+                Assert.Ignore($"Font backend unavailable; cannot build the {scriptLabel} font to render.");
+            font.name = fontName;
             var stack = ScriptableObject.CreateInstance<UniTextFontStack>();
             stack.fonts.Add(font);
             var appearance = RealLayoutFixtures.LoadDefaultAppearance();
 
-            string text = SegmentationFixtures.Thai[0].Text + SegmentationFixtures.Thai[1].Text
-                        + SegmentationFixtures.Thai[2].Text + SegmentationFixtures.Thai[3].Text;
-
-            string outPath = RealLayoutFixtures.RenderOutputPath("thai-segmentation-before-after.png");
+            string outPath = RealLayoutFixtures.RenderOutputPath(outFileName);
             RenderTexture rt = null;
             Texture2D readback = null;
             try
@@ -125,12 +153,12 @@ namespace LightSide.Tests
                 // Sanity: the engine drew SOMETHING (non-background pixels) in each panel.
                 int beforePx = NonBackgroundPixels(readback, 0, PanelW);
                 int afterPx = NonBackgroundPixels(readback, PanelW, PanelW * 2);
-                TestContext.WriteLine($"Rendered pixels — before panel: {beforePx}, after panel: {afterPx}");
+                TestContext.WriteLine($"[{scriptLabel}] Rendered pixels — before panel: {beforePx}, after panel: {afterPx}");
                 Assert.Greater(beforePx, 50, "BEFORE panel has no rendered glyph pixels — engine render produced nothing.");
                 Assert.Greater(afterPx, 50, "AFTER panel has no rendered glyph pixels — engine render produced nothing.");
 
                 File.WriteAllBytes(outPath, readback.EncodeToPNG());
-                TestContext.WriteLine($"Engine-rendered before/after PNG written: {outPath} " +
+                TestContext.WriteLine($"[{scriptLabel}] Engine-rendered before/after PNG written: {outPath} " +
                     $"(before: {beforeLines} line(s), {beforeWordBreaks} word-breaks; " +
                     $"after: {afterLines} line(s), {afterWordBreaks} word-breaks)");
                 Assert.IsTrue(File.Exists(outPath), "PNG was not written.");

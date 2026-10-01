@@ -255,20 +255,17 @@ namespace LightSide.Tests
         }
 
         /// <summary>
-        /// Khmer / Myanmar real-layout coverage runs only when a compatibly-licensed font for
-        /// one of those scripts is present in the package. None is bundled today (only the Thai
-        /// OFL fixture is), so this test skips cleanly rather than fail — matching the task's
-        /// "if a font is available" condition. If such a font is added under
-        /// <c>Tests/Editor/Fixtures/</c> later, this test picks it up automatically.
+        /// Khmer and Myanmar real-layout coverage, using the bundled OFL Noto Sans fixtures
+        /// (see Fixtures/SOURCES.md). Each script must wrap only at dictionary word boundaries
+        /// and never inside a grapheme cluster.
         /// </summary>
-        [Test]
-        public void KhmerOrMyanmar_NarrowWidth_WrapsAtWordBoundaries_WhenFontAvailable()
+        [TestCase(SegmentationScript.Khmer)]
+        [TestCase(SegmentationScript.Myanmar)]
+        public void ComplexScript_NarrowWidth_WrapsAtWordBoundaries(SegmentationScript script)
         {
-            var candidate = RealLayoutFixtures.FindComplexScriptFont(out SegmentationScript script,
+            var candidate = RealLayoutFixtures.FindComplexScriptFont(script,
                 out SegmentationFixtures.Case[] cases);
-            if (candidate == null)
-                Assert.Ignore("No Khmer/Myanmar font fixture under a compatible licence is bundled; " +
-                              "real-layout wrap coverage for those scripts is skipped (Thai is covered).");
+            Assert.IsNotNull(candidate, $"{script} font fixture missing under Tests/Editor/Fixtures/.");
 
             SegHelper.AssignDictionaries();
             var fontBytes = File.ReadAllBytes(candidate);
@@ -282,10 +279,12 @@ namespace LightSide.Tests
                 string text = cases[0].Text + cases[1].Text + cases[2].Text + cases[3].Text;
                 var s = new TextProcessSettings { fontSize = 36f, baseDirection = TextDirection.Auto };
                 tp.EnsureFirstPass(text, s);
+                Assert.IsTrue(tp.HasValidFirstPassData, $"{script}: first pass (shape/analyze) produced no valid data.");
                 int n = tp.buf.codepoints.count;
-                float maxWidth = Mathf.Max(1f, tp.GetUnwrappedWidth() / 8f);
-                tp.EnsureLines(maxWidth, 36f, true);
+                Assert.Greater(n, 0, $"{script}: no codepoints after parse.");
 
+                // Break opportunities (dictionary + UAX#14) and grapheme boundaries over the SAME
+                // processor codepoint buffer the layout used.
                 var cps = new int[n];
                 for (int i = 0; i < n; i++) cps[i] = tp.buf.codepoints[i];
                 var breaks = new LineBreakType[n + 1];
@@ -293,14 +292,58 @@ namespace LightSide.Tests
                 var grapheme = new bool[n + 1];
                 new GraphemeBreaker(UnicodeData.Provider).GetBreakOpportunities(cps, grapheme);
 
-                Assert.Greater(tp.buf.lines.count, 1, $"{script}: narrow width should produce multiple lines.");
-                for (int i = 1; i < tp.buf.lines.count; i++)
+                // Choose a width ABOVE the widest single word (the max advance between two
+                // consecutive break opportunities), exactly as the Thai test does. Khmer and
+                // Myanmar can contain a single dictionary word wider than unwrapped/8 (a Khmer
+                // coeng stack or a long Burmese compound); at a width below that word the layout
+                // MUST emergency-break it mid-word, which is legitimate overflow handling, not a
+                // segmentation bug. Picking a width ≥ the widest word means no word overflows, so
+                // every wrap boundary is then required to be a real dictionary word boundary.
+                var cpw = tp.buf.cpWidths;
+                float widestWord = 0f, acc = 0f;
+                for (int i = 0; i < n; i++)
+                {
+                    acc += (i < cpw.count ? cpw[i] : 0f);
+                    if (breaks[i + 1] != LineBreakType.None) { if (acc > widestWord) widestWord = acc; acc = 0f; }
+                }
+                if (acc > widestWord) widestWord = acc;
+                float unwrapped = tp.GetUnwrappedWidth();
+                float maxWidth = Mathf.Max(widestWord * 1.25f + 1f, unwrapped / 8f);
+
+                tp.EnsureLines(maxWidth, 36f, true);
+
+                int lineCount = tp.buf.lines.count;
+                Assert.Greater(lineCount, 1,
+                    $"{script}: width ({maxWidth:F1}px of {unwrapped:F1}px unwrapped, widest word {widestWord:F1}px) should wrap into multiple lines; got {lineCount}.");
+
+                // Every line after the first starts at a wrap boundary: it must be a legal break
+                // opportunity (never mid-word) AND a grapheme boundary (never mid-cluster).
+                for (int i = 1; i < lineCount; i++)
                 {
                     int ls = tp.buf.lines[i].range.start;
-                    if (ls <= 0 || ls >= n) continue;
-                    Assert.AreNotEqual(LineBreakType.None, breaks[ls], $"{script}: line {i} wraps mid-word at {ls}.");
-                    Assert.IsTrue(grapheme[ls], $"{script}: line {i} wraps mid-cluster at {ls}.");
+                    Assert.That(ls, Is.GreaterThan(0).And.LessThanOrEqualTo(n),
+                        $"{script}: line {i} start index {ls} out of range.");
+                    if (ls >= n) continue; // trailing empty line, if any
+                    Assert.AreNotEqual(LineBreakType.None, breaks[ls],
+                        $"{script}: line {i} starts at codepoint {ls} (U+{cps[ls]:X4}) which is NOT a break opportunity (mid-word wrap).");
+                    Assert.IsTrue(grapheme[ls],
+                        $"{script}: line {i} starts at codepoint {ls} (U+{cps[ls]:X4}) which is inside a grapheme cluster (mid-cluster wrap).");
                 }
+
+                // A line that contains an interior break opportunity must honour the width budget
+                // (a line may exceed it only when it is a single unbreakable token).
+                for (int i = 0; i < lineCount; i++)
+                {
+                    var line = tp.buf.lines[i];
+                    bool hasInteriorBreak = false;
+                    for (int k = line.range.start + 1; k < line.range.End && k <= n; k++)
+                        if (breaks[k] != LineBreakType.None) { hasInteriorBreak = true; break; }
+                    if (hasInteriorBreak)
+                        Assert.LessOrEqual(line.width, maxWidth + 1f,
+                            $"{script}: line {i} (width {line.width:F1}) exceeds maxWidth {maxWidth:F1} despite containing an interior break.");
+                }
+
+                Debug.Log($"[RealLayoutTests] {script}: {n} codepoints shaped by the real font, wrapped into {lineCount} lines at {maxWidth:F1}px (widest word {widestWord:F1}px); all wrap boundaries are dictionary word + grapheme boundaries.");
             }
             finally
             {

@@ -20,22 +20,25 @@ namespace LightSide.Tests
         public static string FindThaiFontPath() => FindFixtureFont("NotoSansThai-Regular.ttf");
 
         /// <summary>
-        /// Finds any bundled Khmer or Myanmar font fixture (none ship today). Returns the path
-        /// and the matching script + reference sentences, or null if none is present.
+        /// Finds the bundled font fixture for a complex script (Khmer: NotoSansKhmer-Regular.ttf,
+        /// Myanmar: NotoSansMyanmar-Regular.ttf, both OFL). Returns the path and the script's
+        /// reference sentences, or null if the fixture is missing.
         /// </summary>
-        public static string FindComplexScriptFont(out SegmentationScript script,
+        public static string FindComplexScriptFont(SegmentationScript script,
             out SegmentationFixtures.Case[] cases)
         {
-            // Preference order; add a fixture under Tests/Editor/Fixtures/ to enable coverage.
-            var khmer = FindFixtureFont("NotoSansKhmer-Regular.ttf")
-                     ?? FindFixtureFont("NotoSerifKhmer-Regular.ttf");
-            if (khmer != null) { script = SegmentationScript.Khmer; cases = SegmentationFixtures.Khmer; return khmer; }
-
-            var mm = FindFixtureFont("NotoSansMyanmar-Regular.ttf")
-                  ?? FindFixtureFont("Padauk-Regular.ttf");
-            if (mm != null) { script = SegmentationScript.Myanmar; cases = SegmentationFixtures.Myanmar; return mm; }
-
-            script = default; cases = null; return null;
+            switch (script)
+            {
+                case SegmentationScript.Khmer:
+                    cases = SegmentationFixtures.Khmer;
+                    return FindFixtureFont("NotoSansKhmer-Regular.ttf");
+                case SegmentationScript.Myanmar:
+                    cases = SegmentationFixtures.Myanmar;
+                    return FindFixtureFont("NotoSansMyanmar-Regular.ttf");
+                default:
+                    cases = null;
+                    return null;
+            }
         }
 
         private static string FindFixtureFont(string fileName)
