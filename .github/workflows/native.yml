@@ -549,6 +549,14 @@ jobs:
           emar -M < "$MRI"
           emranlib "$RUNNER_TEMP/libunitext_native.a" || true
           ls -l "$RUNNER_TEMP/libunitext_native.a"
+      - name: Stage outputs
+        run: |
+          mkdir -p out/WebGL
+          cp "$RUNNER_TEMP/libunitext_native.a" out/WebGL/libunitext_native.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-webgl
+          path: out/
       - name: Link smoke test (emcc)
         run: |
           set -euo pipefail
@@ -581,28 +589,23 @@ jobs:
           f="$RUNNER_TEMP/libunitext_native.a"
           echo "=== $f ==="
           file "$f"
-          # `llvm-objdump -f` on an `ar` archive prints no per-member format, so extract one
-          # member object and check ITS format is wasm.
-          mkdir -p "$RUNNER_TEMP/arxt" && (cd "$RUNNER_TEMP/arxt" && emar t "$f" | head -1 > member.name && emar x "$f" "$(cat member.name)")
+          # `llvm-objdump -f` on an `ar` archive prints no per-member format, and its wording
+          # for a wasm object varies by LLVM version, so extract one member and check the
+          # unambiguous WebAssembly magic: a wasm object/binary begins with the 4 bytes \0asm.
+          mkdir -p "$RUNNER_TEMP/arxt" && (cd "$RUNNER_TEMP/arxt" && emar t "$f" | grep -E '\.o$' | head -1 > member.name && emar x "$f" "$(cat member.name)")
           member="$RUNNER_TEMP/arxt/$(cat "$RUNNER_TEMP/arxt/member.name")"
           echo "probe member: $member"
-          fmt="$(llvm-objdump -f "$member" 2>/dev/null | grep -iE 'file format|architecture' || true)"
-          echo "$fmt"
-          printf '%s' "$fmt" | grep -qi 'wasm' || { echo "ARCH FAIL: member not wasm"; exit 1; }
+          file "$member" || true
+          llvm-objdump -f "$member" 2>/dev/null | head -3 || true
+          magic=$(head -c 4 "$member" | od -An -tx1 | tr -d ' \n')
+          echo "member magic: $magic (wasm = 0061736d)"
+          if [ "$magic" != "0061736d" ]; then echo "ARCH FAIL: member not WebAssembly (\\0asm)"; exit 1; fi
           # Count defined (not undefined) ut_* symbols across the archive, deduped by name.
           n=$(llvm-nm --defined-only "$f" 2>/dev/null \
                | awk '{print $NF}' | sed 's/^_//' \
                | grep -E '^ut_[A-Za-z0-9_]+$' | sort -u | wc -l | tr -d ' ')
           echo "  defined ut_* symbols: $n (expect $UT_RUNTIME_SYMS)"
           if [ "$n" -ne "$UT_RUNTIME_SYMS" ]; then llvm-nm --defined-only "$f" 2>/dev/null | grep -E ' ut_' | awk '{print $NF}' | sort -u; echo "SYMBOL COUNT FAIL"; exit 1; fi
-      - name: Stage outputs
-        run: |
-          mkdir -p out/WebGL
-          cp "$RUNNER_TEMP/libunitext_native.a" out/WebGL/libunitext_native.a
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-webgl
-          path: out/
 
   # ---------------------------------------------------------------- Assemble Plugins/ tree
   assemble:
