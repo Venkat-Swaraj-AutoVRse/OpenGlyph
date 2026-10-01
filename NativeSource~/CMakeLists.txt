@@ -22,6 +22,20 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# iOS/tvOS ship STATIC libs (no linking/bundling happens here), but the Xcode generator still
+# runs a code-signing phase and FAILS CI with "Signing for ... requires a development team"
+# because the hosted runner has no provisioning profile. A static archive is never signed, so
+# disable signing for every target in this build. Set BEFORE FetchContent defines any target
+# so the fetched dependency targets (freetype, harfbuzz, png, zlib, blend2d) inherit it too.
+# No effect on Windows/Linux/macOS-dylib/Android (non-Xcode or non-embedded) builds.
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+  set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED  "NO" CACHE STRING "" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO" CACHE STRING "" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY    ""   CACHE STRING "" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM      ""   CACHE STRING "" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE        "NO" CACHE STRING "" FORCE)
+endif()
+
 # Work around a CMake 4.2 GNUInstallDirs bug (infinite recursion in
 # _GNUInstallDirs_RUNSTATEDIR_get_default) triggered when Blend2D includes it: shadow the
 # stock module with a lean shim (cmake/GNUInstallDirs.cmake) placed first on the module path.
@@ -53,18 +67,30 @@ FetchContent_Declare(zlib
   GIT_SHALLOW    TRUE)
 set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(zlib)
-# Point find_package(ZLIB) (used by libpng and FreeType) at the fetched build. Under the VS
-# multi-config generator the static lib lands at <bindir>/<Config>/zlibstatic.lib. Seed the
-# FindZLIB cache vars + ZLIB_FOUND so no configure-time file existence check is needed, and
-# provide the ZLIB::ZLIB imported-style target for consumers that prefer it.
+# zlib's CMakeLists unconditionally defines BOTH a shared `zlib` and a static `zlibstatic`
+# target, and on UNIX-like platforms (which includes Emscripten) sets OUTPUT_NAME=z on both.
+# On a single-config generator where dynamic linking is unavailable (Emscripten/wasm), the
+# `zlib` SHARED target is silently downgraded to STATIC and then collides with `zlibstatic`
+# on the same output file `libz.a` -> "ninja: multiple rules generate _deps/zlib-build/libz.a".
+# We only ever link the static `zlibstatic`, so give the shared target a distinct output name
+# and drop it from the default build; this removes the collision without patching the source.
+if(TARGET zlib)
+  set_target_properties(zlib PROPERTIES OUTPUT_NAME zlibdyn EXCLUDE_FROM_ALL ON)
+endif()
+# Point find_package(ZLIB) (used by libpng and FreeType) at the fetched build USING THE TARGET,
+# not a hardcoded, config- and platform-specific library file path. The previous approach wrote
+# a literal "<bindir>/$<CONFIG>/zlibstatic.lib" into ZLIB_LIBRARY: the generator expression is
+# not evaluated by find_package consumers (seen verbatim in Linux logs) and the ".lib" / name is
+# MSVC-only, so non-Windows builds leaked a Windows path. Seed FindZLIB from the imported-style
+# ZLIB::ZLIB target instead, which carries the correct per-platform artifact and include dirs.
 set(ZLIB_INCLUDE_DIR  "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
 set(ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
-set(ZLIB_LIBRARY  "${zlib_BINARY_DIR}/$<CONFIG>/zlibstatic.lib" CACHE STRING "" FORCE)
-set(ZLIB_LIBRARIES zlibstatic CACHE STRING "" FORCE)
-set(ZLIB_FOUND TRUE CACHE BOOL "" FORCE)
 if(TARGET zlibstatic AND NOT TARGET ZLIB::ZLIB)
   add_library(ZLIB::ZLIB ALIAS zlibstatic)
 endif()
+set(ZLIB_LIBRARY  ZLIB::ZLIB CACHE STRING "" FORCE)
+set(ZLIB_LIBRARIES ZLIB::ZLIB CACHE STRING "" FORCE)
+set(ZLIB_FOUND TRUE CACHE BOOL "" FORCE)
 
 # ---- libpng (libpng/PNG license) ---------------------------------------------
 FetchContent_Declare(libpng
@@ -78,17 +104,21 @@ set(PNG_TOOLS    OFF CACHE BOOL "" FORCE)
 set(PNG_FRAMEWORK OFF CACHE BOOL "" FORCE)
 set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(libpng)
-# Seed FindPNG (used by FreeType) at the fetched static libpng, same technique as ZLIB.
+# Seed FindPNG (used by FreeType) at the fetched static libpng, same technique as ZLIB:
+# bind to the PNG::PNG target rather than a hardcoded "<bindir>/$<CONFIG>/libpng16_static.lib"
+# path. That literal name is MSVC-only (ELF/Mach-O produce libpng16.a, no $<CONFIG> dir on
+# single-config generators) and previously leaked a Windows ".lib" path into Linux/macOS/
+# Android/WebGL builds. The target carries the correct artifact name per platform.
 if(TARGET png_static)
   set(PNG_PNG_INCLUDE_DIR "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
   set(PNG_INCLUDE_DIR     "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
   set(PNG_INCLUDE_DIRS    "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE PATH "" FORCE)
-  set(PNG_LIBRARY   "${libpng_BINARY_DIR}/$<CONFIG>/libpng16_static.lib" CACHE STRING "" FORCE)
-  set(PNG_LIBRARIES png_static CACHE STRING "" FORCE)
-  set(PNG_FOUND TRUE CACHE BOOL "" FORCE)
   if(NOT TARGET PNG::PNG)
     add_library(PNG::PNG ALIAS png_static)
   endif()
+  set(PNG_LIBRARY   PNG::PNG CACHE STRING "" FORCE)
+  set(PNG_LIBRARIES PNG::PNG CACHE STRING "" FORCE)
+  set(PNG_FOUND TRUE CACHE BOOL "" FORCE)
 endif()
 
 # ---- FreeType (FTL / GPLv2 dual) ---------------------------------------------
@@ -116,6 +146,33 @@ set(HB_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
 set(HB_BUILD_UTILS     OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(freetype harfbuzz)
+
+# ---- Build-order wiring for FreeType's zlib/png dependencies -------------------
+# FreeType enables zlib + libpng support and #includes png.h, which in turn includes the
+# GENERATED header pnglibconf.h (emitted into libpng's binary dir by libpng's own custom
+# targets). find_package(PNG) hands FreeType the include dir but creates NO target-level
+# ordering, so on generators that don't infer it from a linked target at compile time
+# (Visual Studio, Xcode) FreeType's sources can compile before pnglibconf.h exists:
+#   png.h(329): fatal error C1083: Cannot open include file: 'pnglibconf.h'
+# Make the ordering explicit: FreeType must wait for the png/zlib static libs (which already
+# depend on their generated headers) to be built first. This is pure ordering; it does not
+# change what FreeType links or how it is compiled.
+if(TARGET freetype)
+  if(TARGET png_static)
+    add_dependencies(freetype png_static)
+  endif()
+  if(TARGET zlibstatic)
+    add_dependencies(freetype zlibstatic)
+  endif()
+  # Belt-and-suspenders: if libpng exposed a dedicated header-generation target, order on it
+  # too so the generated pnglibconf.h is guaranteed present before any FreeType translation
+  # unit is compiled, independent of the static-lib target's own dependency edges.
+  foreach(_png_gentarget png_genfiles pnglibconf_h genfiles)
+    if(TARGET ${_png_gentarget})
+      add_dependencies(freetype ${_png_gentarget})
+    endif()
+  endforeach()
+endif()
 
 # ---- Blend2D (M2, gated) ------------------------------------------------------
 # Blend2D is implemented (src/ut_bl.cpp) and pinned, but its master CMakeLists triggers a
