@@ -4,9 +4,6 @@
 EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
-  m_Scenes:
-  - enabled: 1
-    path: Assets/Benchmarks/Scenes/Benchmark.unity
-    guid: f2d6423f2dc0af641a268fe9bec38df2
+  m_Scenes: []
   m_configObjects: {}
   m_UseUCBPForAssetBundles: 0
