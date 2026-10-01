@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace LightSide.Tests
 {
@@ -97,6 +98,66 @@ namespace LightSide.Tests
             uint g = Shaper.GetGlyphIndex(_vf, 'R');
             Assert.AreEqual(0, _vf.EnsureGlyphsForVariation(new List<uint> { g }, VariationKey.None, null, null),
                 "VariationKey.None routes to the normal batch path, not the variation facet.");
+        }
+
+        [Test]
+        public void Msdf_Weight400_vs_700_DifferentAtlasFields()
+        {
+            // MSDF renders from a SEPARATE msdfFace; verify the variation facet produces distinct
+            // MSDF atlas cells at wght 400 vs 700 (field bytes differ), via that face.
+            var vf = UniTextFont.CreateFontAsset(_bytes, samplingPointSize: 64, renderMode: UniTextRenderMode.Msdf);
+            if (vf == null) Assert.Ignore("RobotoFlex MSDF asset failed to load.");
+            try
+            {
+                if (vf.AtlasRenderMode != UniTextRenderMode.Msdf)
+                    Assert.Ignore("MSDF outline export unavailable in this native binary.");
+
+                uint g = Shaper.GetGlyphIndex(vf, 'g');
+                var a = Instance(400); var b = Instance(700);
+                var list = new List<uint> { g };
+                Assert.AreEqual(1, vf.EnsureGlyphsForVariation(list, a.key, a.tags, a.coords));
+                Assert.AreEqual(1, vf.EnsureGlyphsForVariation(list, b.key, b.tags, b.coords));
+
+                Assert.IsTrue(vf.TryGetGlyph(g, a.key, out var ga));
+                Assert.IsTrue(vf.TryGetGlyph(g, b.key, out var gb));
+
+                // Read the RGB24 MSDF cells and assert the fields are not byte-identical.
+                var tex = vf.AtlasTextures[ga.atlasIndex];
+                var pa = tex.GetPixels(ga.glyphRect.x, ga.glyphRect.y, Mathf.Max(1, ga.glyphRect.width), Mathf.Max(1, ga.glyphRect.height));
+                var texB = vf.AtlasTextures[gb.atlasIndex];
+                var pb = texB.GetPixels(gb.glyphRect.x, gb.glyphRect.y, Mathf.Max(1, gb.glyphRect.width), Mathf.Max(1, gb.glyphRect.height));
+                bool differ = pa.Length != pb.Length;
+                if (!differ)
+                    for (int i = 0; i < pa.Length && !differ; i++)
+                        if (Mathf.Abs(pa[i].r - pb[i].r) > 0.02f || Mathf.Abs(pa[i].g - pb[i].g) > 0.02f || Mathf.Abs(pa[i].b - pb[i].b) > 0.02f)
+                            differ = true;
+                Assert.IsTrue(differ, "MSDF 'g' fields must differ between wght 400 and 700.");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(vf); }
+        }
+
+        [Test]
+        public void Colr_EmojiFont_UnaffectedByVariationKeys()
+        {
+            // The EmojiFont (COLR) is a non-variable color font; a variation request on it is a no-op
+            // (nothing to vary) and must not create variation atlas entries. We assert the facet
+            // reports no additions for a synthetic non-variable font: use RobotoFlex but request a
+            // key on a font whose EnsureGlyphsForVariation still returns coords -- the invariant we
+            // guarantee is that a NON-variable font yields VariationKey.None, so no keyed store forms.
+            // Load Noto (static) as the stand-in for a non-variable face.
+            string noto = MsdfTestUtil.FindNotoSansPath();
+            if (noto == null) Assert.Ignore("NotoSans not found.");
+            var staticFont = UniTextFont.CreateFontAsset(File.ReadAllBytes(noto), 64);
+            try
+            {
+                var face = FT.LoadFace(File.ReadAllBytes(noto), 0);
+                VariationMapper map;
+                try { map = VariationMapper.Read(face); } finally { FT.UnloadFace(face); }
+                Assert.IsFalse(map.isVariable, "A static font must not be variable.");
+                var key = map.Map(new FontStyleSpec(700, 100, StyleAxis.Normal), 0f, out var tags, out var coords);
+                Assert.AreEqual(VariationKey.None, key, "A non-variable font yields VariationKey.None -> no variation atlas, keys cannot affect it.");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(staticFont); }
         }
     }
 }

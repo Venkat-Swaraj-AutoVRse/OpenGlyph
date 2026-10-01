@@ -885,6 +885,13 @@ namespace LightSide
             var metricsConversion = pointSize > 0 && pointSize != unitsPerEm ? (float)unitsPerEm / pointSize : 1f;
 
             bool msdfAvailable = mode0 == UniTextRenderMode.Msdf && msdfVarFace != IntPtr.Zero && Msdf.MsdfNative.Probe(msdfVarFace);
+            Msdf.IGlyphOutlineSource msdfSource = null;
+            if (msdfAvailable)
+            {
+                var mf = msdfVarFace;
+                msdfSource = injectedOutlineSource ?? new Msdf.FreeTypeOutlineSource(mf,
+                    (gi, ppem) => FT.SetPixelSize(mf, ppem) && FT.LoadGlyph(mf, gi, FT.LOAD_DEFAULT | FT.LOAD_NO_HINTING));
+            }
 
             int added = 0;
             foreach (var gi in glyphIndices)
@@ -898,7 +905,7 @@ namespace LightSide
                 else if (mode0 == UniTextRenderMode.Smooth)
                     ok = SmoothGlyphRenderer.TryRender(face, gi, pointSize, out r);
                 else if (msdfAvailable)
-                    ok = Msdf.MsdfGlyphRenderer.TryRender(msdfVarFace, gi, pointSize, spread, injectedOutlineSource, out r, out _);
+                    ok = Msdf.MsdfGlyphRenderer.TryRender(msdfVarFace, gi, pointSize, spread, msdfSource, out r, out _);
                 else
                     ok = SdfGlyphRenderer.TryRender(face, gi, pointSize, FT.LOAD_DEFAULT | FT.LOAD_NO_BITMAP, spread, out r);
 
