@@ -26,10 +26,12 @@ namespace LightSide.Tests
 
         private static string OutDir()
         {
-            // Prefer D: scratch; fall back to project parent.
-            string d = @"D:\OpenGlyphWork\scratch\benchmarks";
-            try { Directory.CreateDirectory(d); return d; }
-            catch { var p = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "benchmarks")); Directory.CreateDirectory(p); return p; }
+            // No machine-specific path in a package test: honour OPENGLYPH_BENCH_OUT if set, else the
+            // platform temp cache. The harness (CI / a dev script) sets the env var to collect output.
+            string env = System.Environment.GetEnvironmentVariable("OPENGLYPH_BENCH_OUT");
+            string dir = !string.IsNullOrEmpty(env) ? env : Application.temporaryCachePath;
+            try { Directory.CreateDirectory(dir); return dir; }
+            catch { return Application.temporaryCachePath; }
         }
 
         [TearDown]
