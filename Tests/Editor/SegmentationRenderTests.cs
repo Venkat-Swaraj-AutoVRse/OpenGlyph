@@ -74,7 +74,19 @@ namespace LightSide.Tests
                 Assert.Greater(afterWordBreaks, 0,
                     "AFTER panel (dictionary) must gain dictionary word-break opportunities.");
 
-                rt = new RenderTexture(PanelW * 2, PanelH, 24, RenderTextureFormat.ARGB32)
+                // Canvas height must FIT the taller panel. The AFTER panel wraps the narrow Thai run
+                // into many lines; with the fixed PanelH the lines below PanelH fell outside the
+                // ortho frustum and were cropped off the bottom of the PNG. Size the target to the
+                // actual laid-out content: max line count across panels × a generous per-line pitch
+                // (Thai stacks above+below the baseline, so 1.6×FontSize is a safe upper bound),
+                // plus top/bottom margin — never smaller than PanelH.
+                int maxLines = Mathf.Max(beforeLines, afterLines);
+                const float LinePitch = 1.6f;   // upper-bound line advance as a multiple of FontSize
+                const int VMargin = 16;         // px top+bottom breathing room
+                int canvasH = Mathf.Max(PanelH, Mathf.CeilToInt(maxLines * FontSize * LinePitch) + 2 * VMargin);
+                TestContext.WriteLine($"Canvas height {canvasH}px for {maxLines} line(s) (was fixed {PanelH}px).");
+
+                rt = new RenderTexture(PanelW * 2, canvasH, 24, RenderTextureFormat.ARGB32)
                 { antiAliasing = 1 };
 
                 var drawMat = BuildAtlasMaterial();
@@ -84,12 +96,12 @@ namespace LightSide.Tests
                     cb.SetRenderTarget(rt);
                     cb.ClearRenderTarget(true, true, new Color(0.09f, 0.09f, 0.11f, 1f));
 
-                    // One ortho over the whole 2*PanelW x PanelH target. Layout space has the text
+                    // One ortho over the whole 2*PanelW x canvasH target. Layout space has the text
                     // origin at the top with y increasing downward, so we map y to -y and sit the
                     // top near the top of each panel. Each panel's glyphs are offset in X by its
                     // model matrix (left = 0, right = PanelW).
                     var view = Matrix4x4.identity;
-                    var proj = Matrix4x4.Ortho(0, PanelW * 2, PanelH, 0, -100f, 100f);
+                    var proj = Matrix4x4.Ortho(0, PanelW * 2, canvasH, 0, -100f, 100f);
                     cb.SetViewProjectionMatrices(view, proj);
 
                     DrawPanel(cb, before, drawMat, panelX: 0f);
