@@ -270,6 +270,16 @@ namespace LightSide
         internal bool IsDistanceFieldMode =>
             EffectiveRenderMode == UniTextRenderMode.SDF || EffectiveRenderMode == UniTextRenderMode.Msdf;
 
+        /// <summary>True when the effective mode is a rasterised bitmap (Smooth grayscale or Mono 1-bit).</summary>
+        internal bool IsBitmapMode =>
+            EffectiveRenderMode == UniTextRenderMode.Smooth || EffectiveRenderMode == UniTextRenderMode.Mono;
+
+        /// <summary>
+        /// True when this font renders single-channel coverage bitmaps (Smooth/Mono) into an Alpha8
+        /// atlas. Excludes color fonts (EmojiFont), whose Smooth atlas is RGBA color, not coverage.
+        /// </summary>
+        internal bool IsCoverageBitmapMode => IsBitmapMode && !IsColor;
+
         /// <summary>
         /// Gets the glyph render mode ACTUALLY in effect. Equal to the configured mode except that
         /// <see cref="UniTextRenderMode.Msdf"/> degrades to <see cref="UniTextRenderMode.SDF"/> when
@@ -813,6 +823,13 @@ namespace LightSide
             public float metricsConversion;
             /// <summary>True when this batch must be rendered pixel-perfect (Mono, 0/255, no spread).</summary>
             public bool pixelPerfect;
+            /// <summary>
+            /// True when this batch renders single-channel coverage bitmaps (Smooth grayscale or Mono
+            /// 1-bit) for a regular (non-color) font. Pixel-perfect is a special case of this.
+            /// </summary>
+            public bool coverageBitmap;
+            /// <summary>The effective render mode captured when the batch was prepared.</summary>
+            public UniTextRenderMode renderMode;
         }
 
         /// <summary>
@@ -839,15 +856,15 @@ namespace LightSide
             var pointSize = faceInfo.pointSize > 0 ? faceInfo.pointSize : 90;
             var spread = AtlasPadding;
 
-            // Pixel-perfect: sample at an integer multiple of the font's native pixels-per-em and
-            // disable the SDF spread entirely (Mono coverage has no distance field). Only engages
-            // when the font is genuinely a pixel/bitmap font, so other fonts are unaffected.
+            // Bitmap coverage modes (Smooth grayscale, Mono 1-bit) for regular fonts have no distance
+            // field, so no spread. Pixel-perfect is a special case: it additionally samples at an
+            // integer multiple of the font's native pixels-per-em.
+            bool coverageBitmap = IsCoverageBitmapMode;
             bool pixelPerfect = PixelPerfectActive;
-            if (pixelPerfect)
-            {
-                pointSize = ChoosePixelPerfectPpem(pointSize);
+            if (coverageBitmap || pixelPerfect)
                 spread = 0;
-            }
+            if (pixelPerfect)
+                pointSize = ChoosePixelPerfectPpem(pointSize);
 
             var metricsConversion = pointSize > 0 && pointSize != unitsPerEm
                 ? (float)unitsPerEm / pointSize
@@ -872,7 +889,9 @@ namespace LightSide
                 pointSize = pointSize,
                 spread = spread,
                 metricsConversion = metricsConversion,
-                pixelPerfect = pixelPerfect
+                pixelPerfect = pixelPerfect,
+                coverageBitmap = coverageBitmap || pixelPerfect,
+                renderMode = EffectiveRenderMode
             };
         }
 
@@ -883,18 +902,24 @@ namespace LightSide
         /// <returns>Rendered glyph data (SdfRenderedGlyph[] for SDF fonts). Null on failure.</returns>
         public virtual object RenderPreparedBatch(PreparedBatch batch)
         {
-            // Pixel-perfect Mono path: render 1-bit coverage (0/255) at the integer ppem chosen in
-            // PrepareGlyphBatch. Rendered sequentially on the shared face — pixel-font batches are
-            // small and this avoids sharing a mono render state across pool threads. Bypasses the
-            // SDF/MSDF paths entirely, so those modes are byte-for-byte unaffected.
-            if (batch.pixelPerfect)
+            // Coverage-bitmap path (Smooth grayscale + Mono 1-bit) for regular fonts. Renders
+            // single-channel Alpha8 coverage at the batch ppem. Rendered sequentially on the shared
+            // face (mono/normal render state is per-face). Bypasses SDF/MSDF entirely, so those modes
+            // are byte-for-byte unaffected. EmojiFont overrides this method, so color never reaches here.
+            if (batch.coverageBitmap)
             {
                 var face = EnsureFTFace();
                 if (face == IntPtr.Zero) return null;
-                var mono = new SdfRenderedGlyph[batch.filteredGlyphs.Count];
+                bool mono = batch.pixelPerfect || batch.renderMode == UniTextRenderMode.Mono;
+                var cov = new SdfRenderedGlyph[batch.filteredGlyphs.Count];
                 for (int i = 0; i < batch.filteredGlyphs.Count; i++)
-                    MonoGlyphRenderer.TryRender(face, batch.filteredGlyphs[i], batch.pointSize, out mono[i]);
-                return mono;
+                {
+                    if (mono)
+                        MonoGlyphRenderer.TryRender(face, batch.filteredGlyphs[i], batch.pointSize, out cov[i]);
+                    else
+                        SmoothGlyphRenderer.TryRender(face, batch.filteredGlyphs[i], batch.pointSize, out cov[i]);
+                }
+                return cov;
             }
 
             // Resolve the effective mode up front (probes the export exactly once). This is what the
@@ -1193,17 +1218,18 @@ namespace LightSide
                 : mode == UniTextRenderMode.Msdf ? TextureFormat.RGB24
                 : TextureFormat.RGBA32;
 
-            // Pixel-perfect Mono coverage is single-channel 0/255 — store it in Alpha8 so the
-            // channel-coherence guard in PackRenderedBatch accepts it and the atlas holds no AA.
-            if (PixelPerfectActive)
+            // Regular (non-color) Smooth/Mono render single-channel coverage — store it in Alpha8 so
+            // the channel-coherence guard in PackRenderedBatch accepts it. Color Smooth (EmojiFont)
+            // keeps RGBA32. SDF/MSDF are unchanged.
+            if (IsCoverageBitmapMode)
                 texFormat = TextureFormat.Alpha8;
 
             var texture = new Texture2D(atlasSize, atlasSize, texFormat, false);
 
-            // Pixel-perfect fonts require a point-filtered, mip-free atlas so integer-scaled glyphs
-            // stay crisp with no bilinear blur. Every other mode keeps the historical Bilinear
-            // default, so existing SDF/MSDF/Smooth atlases are byte-for-byte unaffected.
-            if (PixelPerfectActive)
+            // Filtering: Mono and pixel-perfect require Point (no bilinear blur, crisp integer scale);
+            // Smooth (AA coverage) uses the default Bilinear so its gradients interpolate smoothly.
+            // SDF/MSDF and color Smooth keep the historical Bilinear default — byte-for-byte unchanged.
+            if (PixelPerfectActive || (IsCoverageBitmapMode && mode == UniTextRenderMode.Mono))
                 texture.filterMode = FilterMode.Point;
 
             var rawData = texture.GetRawTextureData<byte>();
