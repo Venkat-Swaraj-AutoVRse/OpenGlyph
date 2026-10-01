@@ -75,6 +75,16 @@ namespace LightSide.Tests
             return a;
         }
 
+        /// <summary>
+        /// Forgets that dictionaries were assigned, so a later <see cref="AssignDictionaries"/>
+        /// re-runs. Used by tests that swap the <see cref="UniTextSettings"/> instance (e.g. the
+        /// no-dictionary fallback test) and then need the shipped dictionaries restored.
+        /// </summary>
+        public static void ResetDictionaryAssignment()
+        {
+            _dictsAssigned = false;
+        }
+
 #if UNITY_EDITOR
         private static TextAsset FindDictionary(string name)
         {

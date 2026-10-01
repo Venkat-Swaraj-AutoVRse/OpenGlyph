@@ -26,3 +26,33 @@ instead (same script, comparable prose).
 texts: it embeds each text plus the SA-run ranges and the reference word
 boundaries produced by **ICU4N 60.1.0-alpha.356** (ICU word BreakIterator),
 restricted to positions interior to SA runs.
+
+---
+
+## Font fixture — `NotoSansThai-Regular.ttf`
+
+Used by the real-layout test (`RealLayoutTests.cs`) to drive OpenGlyph's actual
+shaping + line-breaking pipeline over Thai text with a Thai-capable font, so the
+dictionary word boundaries can be checked against real wrap points. Like the text
+fixtures it is **test data only**: it lives under `Tests/Editor/Fixtures/` and is
+NOT shipped in any player build (that folder is compiled only into the EditMode
+test assembly).
+
+**License:** **SIL Open Font License, Version 1.1 (OFL-1.1)** —
+https://scripts.sil.org/OFL. This is confirmed by the font's own `name` table:
+name ID 13 (License Description) reads *"This Font Software is licensed under the
+SIL Open Font License, Version 1.1"* and name ID 14 points to the OFL URL. The
+OFL explicitly permits bundling the font with software, including for testing.
+
+| File | Family / version | Copyright | Pinned source |
+|------|------------------|-----------|---------------|
+| `NotoSansThai-Regular.ttf` | Noto Sans Thai, Version 2.002 (`name` ID 3: `2.002;GOOG;NotoSansThai-Regular`) | 2022 The Noto Project Authors (https://github.com/notofonts/thai) | `google/fonts@64fcce14ed3e59cb68c3d225c016c738923ff0dc`, path `ofl/notosansthai/NotoSansThai[wdth,wght].ttf` (see the sibling `.pin` file) |
+
+The pinned source in [google/fonts](https://github.com/google/fonts) is the
+`wght,wdth` **variable** font under `ofl/` (Google Fonts' OFL tree). The committed
+fixture is the **Regular static instance** of that family (the `wght=400`,
+`wdth=100` default master), which is why its `name` ID 3 is `NotoSansThai-Regular`;
+the upstream copyright, version and OFL licence are carried unchanged. The `.pin`
+file records the exact upstream commit so the fixture's provenance is auditable.
+No Khmer/Myanmar/Lao font fixture is bundled; the real-layout test only renders a
+script for which a font is present (Thai), and skips the others cleanly.
