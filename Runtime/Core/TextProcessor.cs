@@ -1253,6 +1253,11 @@ namespace LightSide
             {
                 ref readonly var run = ref runs[i];
 
+                uint[] vtags = null; float[] vcoords = null;
+                if (!run.variationKey.IsNone && fontProvider != null)
+                    fontProvider.GetVariationCoords(run.fontId, run.styleSpec,
+                        opszAuto ? buf.shapingFontSize : 0f, out vtags, out vcoords);
+
                 var result = Shaper.Shape(
                     cp,
                     run.range.start,
@@ -1260,7 +1265,10 @@ namespace LightSide
                     fontProvider,
                     run.fontId,
                     run.script,
-                    run.Direction);
+                    run.Direction,
+                    run.variationKey,
+                    vtags,
+                    vcoords);
 
                 var glyphStart = buf.shapedGlyphs.count;
                 AddShapedGlyphs(result.Glyphs);

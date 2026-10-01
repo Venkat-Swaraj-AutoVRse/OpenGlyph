@@ -117,5 +117,46 @@ namespace LightSide.Tests
             Assert.IsTrue(sawRegular, "The non-bold spans must stay on the Regular face.");
             Assert.IsTrue(boldRunRealBold, "The bold run must be flagged realBold (synthesis suppressed).");
         }
+
+        [Test]
+        public void TextProcessor_VariableFont_Weight400_vs_700_DifferentRunWidth()
+        {
+            string vfPath = MsdfTestUtil.FindRobotoFlexPath();
+            if (vfPath == null) Assert.Ignore("RobotoFlex-VF.ttf not fetched.");
+            var vf = UniTextFont.CreateFontAsset(File.ReadAllBytes(vfPath), 48);
+            _created.Add(vf);
+
+            var fam = ScriptableObject.CreateInstance<FontFamily>();
+            fam.familyName = "Roboto Flex";
+            fam.AddFace(vf);
+            _created.Add(fam);
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>();
+            stack.fonts.Add(vf);
+            stack.family = fam;
+            _created.Add(stack);
+            var provider = new UniTextFontProvider(stack, null, 48f);
+
+            float Width(int weight)
+            {
+                var buffers = new UniTextBuffers();
+                buffers.EnsureRentBuffers(32);
+                var proc = new TextProcessor(buffers);
+                proc.SetFontProvider(provider);
+                var spec = new FontStyleSpec(weight, 100, StyleAxis.Normal);
+                proc.SetStyleSource(true, spec, null, null);
+                var settings = new TextProcessSettings { fontSize = 48f, baseDirection = TextDirection.Auto };
+                proc.EnsureFirstPass("Reading", settings);
+                float w = 0f;
+                for (int i = 0; i < proc.buf.shapedRuns.count; i++) w += proc.buf.shapedRuns[i].width;
+                buffers.EnsureReturnBuffers();
+                return w;
+            }
+
+            Shaper.ClearAllCaches();
+            float w400 = Width(400);
+            float w700 = Width(700);
+            Assert.AreNotEqual(w400, w700,
+                $"Same text through TextProcessor must differ in width between wght 400 ({w400}) and 700 ({w700}).");
+        }
     }
 }
