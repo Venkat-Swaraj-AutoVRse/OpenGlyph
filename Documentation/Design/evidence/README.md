@@ -98,29 +98,29 @@ itemization, shaping, the Phase-2 face resolution, AND the synthetic `BoldModifi
   component + variation atlas: convincing monotonic thickening.
 - `phase2_family_component_msdf.png` — the same family in MSDF mode.
 
-**Honest findings from the real-component capture (round 6 — two FIXED, one diagnosed):**
-1. **First glyph in a dark box on every row** — DIAGNOSED, pre-existing, NOT Phase 2.
-   `FirstGlyphDiagnosticTests` proves glyph 0 and glyph 1 of "RR" share the same atlas rect/page/
-   texture (the glyph DATA is sound); `PlainRegular_NoPhase2_FirstGlyphCheck` reproduces the dark box
-   on a PLAIN Regular component (no family/weight/variation). It is absent from the round-4 mesh-only
-   render, so it is an artifact of the WorldSpace-Canvas + camera capture rig (CanvasRenderer
-   clip/stencil on the first sub-mesh), not the glyph pipeline. Left for a separate UGUI pass (outside
-   Phase 2's scope).
-2. **Synthetic bold/italic now renders** (rows 5-6) — FIXED. Root cause: `AttributeParser.Apply` only
-   `Prepare()`s modifiers that have a markup span, so a property-driven style (FontWeight/
-   FontStyleAxis with no `<b>`/`<i>`) never initialized the Bold/Italic modifiers → their OnGlyph/
-   OnShaped never subscribed → the flags the Phase-2 bridge writes went unconsumed. (ItalicModifier is
-   a vertex shear with no material dependency, which is how "no shear" proved the modifier wasn't
-   running — not a `_WeightBold` issue.) FIX: `UniText.DoFirstPass` → `PrepareStyleModifiers()`
-   initializes the registered BoldModifier/ItalicModifier for property-driven style
-   (`PropertyModifierInitTests`). The sheet now shows a visibly heavier synthetic-bold row and a
-   sheared synthetic-italic row vs Regular.
-3. **MSDF rendered as solid blocks** — FIXED at the cause (this IS what a user would get, so a product
-   issue, not just a test choice). `UniTextAppearance.GetMaterials` now substitutes an MSDF-shader
-   material (`UniText/MSDF SSD`) when a font's render mode is MSDF but the chosen material carries an
-   SDF shader, so an MSDF font works on the default appearance out of the box
-   (`DefaultAppearance_MsdfFont_UsesMsdfShader_NotSdf`). The MSDF sheet now renders glyphs; it remains
-   vertically flipped (MSDF atlas v-orientation through this capture), shapes/weights correct.
+**Honest findings from the real-component capture (round 7 update):**
+1. **First glyph in a dark box on every row** — NOT fully root-caused yet; bounded with evidence,
+   confirmed NOT Phase 2 and NOT the glyph data. Ruled out, each with a test/observation:
+   (a) atlas DATA — `FirstGlyphDiagnosticTests` proves glyph 0 and glyph 1 of "RR" share the same
+   atlas rect/page/texture; (b) mesh UVs — `xScale`/`gradientScale`/UV are uniform per segment, so
+   the first glyph gets the same TEXCOORD data as the rest; (c) the base-Graphic quad — overriding
+   `OnPopulateMesh` to `vh.Clear()` did NOT remove the box (reverted, not shipped as a no-op);
+   (d) it reproduces on a PLAIN Regular component (`PlainRegular_NoPhase2_FirstGlyphCheck`) and is
+   ABSENT from the round-4 direct-mesh render. Remaining locus: the UGUI WorldSpace `CanvasRenderer`
+   draw / first-draw-vs-atlas-upload / filtering in this camera-capture rig — a UGUI-integration/
+   capture concern, pre-existing (reproduces on the pure 1.0 path), not a Phase-2 or glyph-pipeline
+   bug. Row 5's brighter (white) first-glyph block under synthetic bold suggests the first quad
+   samples an atlas corner texel at full coverage, consistent with a UGUI first-sub-mesh draw-order
+   issue rather than clipping. Left for a dedicated UGUI/VR pass with a proper on-device capture.
+2. **Synthetic bold/italic renders** (rows 5-6) — FIXED in round 6 (`PrepareStyleModifiers`): the
+   synthetic-bold row is heavier and the synthetic-italic row is sheared vs Regular.
+3. **MSDF — FIXED at the cause (product bug), round 7.** EVIDENCE:
+   `AtlasCell_P_SdfAndMsdf_SameOrientation` showed the 'P' atlas CELL was vertically inverted between
+   SDF and MSDF — a DATA flip, not UV/shader (both shaders handle UV identically) and not the capture
+   rig (SDF upright in the same rig). ROOT CAUSE: `MsdfBuilder` encoded `.Rgb` with a stray
+   `(h-1-y)` row flip, inverting MSDF relative to the SDF path. FIX: emit `.Rgb` row-straight to match
+   the SDF orientation the shared atlas-pack + mesh UVs assume. The MSDF sheet is now UPRIGHT and
+   renders real glyphs; MSDF parity tests (which assert on `.Field`, untouched) still pass.
 
 The earlier round-4 `*_camera_*.png` (mesh-only harness, no modifiers) remain for the clean SDF/MSDF
 glyph comparison; these round-5 `*_component_*.png` are the full-component-path evidence.
