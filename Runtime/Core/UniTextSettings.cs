@@ -94,6 +94,12 @@ namespace LightSide
         /// </summary>
         public static bool UseUnifiedRenderer => Instance != null && Instance.useUnifiedRenderer;
 
+        /// <summary>TEST ONLY: forces the project-wide unified-renderer default on the current instance.</summary>
+        internal static void SetUseUnifiedRendererForTests(bool value)
+        {
+            if (Instance != null) { Instance.useUnifiedRenderer = value; Changed?.Invoke(); }
+        }
+
         public static event Action Changed;
 
     #if UNITY_EDITOR
