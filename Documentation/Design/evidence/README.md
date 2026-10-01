@@ -98,23 +98,29 @@ itemization, shaping, the Phase-2 face resolution, AND the synthetic `BoldModifi
   component + variation atlas: convincing monotonic thickening.
 - `phase2_family_component_msdf.png` — the same family in MSDF mode.
 
-**Honest findings from the real-component capture (reported, not hidden):**
-1. **MSDF renders as solid blocks in `phase2_family_component_msdf.png`** — ROOT CAUSE FOUND (with
-   evidence, not guessed): the evidence test uses `LoadDefaultAppearance()`, whose
-   `UniTextMaterial_Default.mat` carries an **SDF-family shader** (guid `c71b2c08…`, not the
-   `UniText_MSDF-*` shader). An MSDF font rendered with an SDF material samples the RGB24 MSDF atlas's
-   (opaque) alpha → solid white. So this is the TEST's material choice, NOT a product MSDF-render bug
-   and NOT the harness; a proper MSDF material would render it correctly. SDF rows use the matching
-   SDF shader and render fine. MSDF *variation correctness* is proven by
-   `VariationAtlasTests.Msdf_Weight400_vs_700_DifferentAtlasFields`. (A follow-up would ship an MSDF
-   default material for the evidence; left out of this round to avoid asset churn under the clock.)
-2. **Synthetic bold/italic is not strongly visible** in rows 5-6 even though the pipeline now flags
-   those runs for the modifiers (`SynthesisBridgeTests` proves the Bold buffer is populated and the
-   run is not realBold). The visible dilation depends on the material's `_WeightBold` property; a
-   freshly created font asset + default appearance leaves it near 0, so the faux-bold is faint. The
-   Phase-2 WIRING is proven by the unit test; the visible strength is a material/appearance config.
-3. **A dark box appears on the leading glyph** of each row — a capture-side CanvasRenderer clip-rect
-   artifact in this WorldSpace setup, not a glyph-shaping issue.
+**Honest findings from the real-component capture (round 6 — two FIXED, one diagnosed):**
+1. **First glyph in a dark box on every row** — DIAGNOSED, pre-existing, NOT Phase 2.
+   `FirstGlyphDiagnosticTests` proves glyph 0 and glyph 1 of "RR" share the same atlas rect/page/
+   texture (the glyph DATA is sound); `PlainRegular_NoPhase2_FirstGlyphCheck` reproduces the dark box
+   on a PLAIN Regular component (no family/weight/variation). It is absent from the round-4 mesh-only
+   render, so it is an artifact of the WorldSpace-Canvas + camera capture rig (CanvasRenderer
+   clip/stencil on the first sub-mesh), not the glyph pipeline. Left for a separate UGUI pass (outside
+   Phase 2's scope).
+2. **Synthetic bold/italic now renders** (rows 5-6) — FIXED. Root cause: `AttributeParser.Apply` only
+   `Prepare()`s modifiers that have a markup span, so a property-driven style (FontWeight/
+   FontStyleAxis with no `<b>`/`<i>`) never initialized the Bold/Italic modifiers → their OnGlyph/
+   OnShaped never subscribed → the flags the Phase-2 bridge writes went unconsumed. (ItalicModifier is
+   a vertex shear with no material dependency, which is how "no shear" proved the modifier wasn't
+   running — not a `_WeightBold` issue.) FIX: `UniText.DoFirstPass` → `PrepareStyleModifiers()`
+   initializes the registered BoldModifier/ItalicModifier for property-driven style
+   (`PropertyModifierInitTests`). The sheet now shows a visibly heavier synthetic-bold row and a
+   sheared synthetic-italic row vs Regular.
+3. **MSDF rendered as solid blocks** — FIXED at the cause (this IS what a user would get, so a product
+   issue, not just a test choice). `UniTextAppearance.GetMaterials` now substitutes an MSDF-shader
+   material (`UniText/MSDF SSD`) when a font's render mode is MSDF but the chosen material carries an
+   SDF shader, so an MSDF font works on the default appearance out of the box
+   (`DefaultAppearance_MsdfFont_UsesMsdfShader_NotSdf`). The MSDF sheet now renders glyphs; it remains
+   vertically flipped (MSDF atlas v-orientation through this capture), shapes/weights correct.
 
 The earlier round-4 `*_camera_*.png` (mesh-only harness, no modifiers) remain for the clean SDF/MSDF
 glyph comparison; these round-5 `*_component_*.png` are the full-component-path evidence.
