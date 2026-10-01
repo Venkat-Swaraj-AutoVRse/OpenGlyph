@@ -563,3 +563,26 @@ coverage sits a fraction inside legacy's edge contour (legacy biases coverage vi
 Closing it fully means matching legacy's dilate/sharpness bias and alpha-output mode
 in the uber fragment program; it is a sub-pixel edge-weight tune, not broken
 rendering. (Layer 1 remains bit-identical.)
+
+**Legacy-formula port — attempted, reverted, exact remaining work.** Rather than
+blind-tune, the legacy `UniText/SDF-Base` coverage was ported into the uber shader:
+the per-vertex `scale = baseScale·xScaleVal·gradientScale` (from `vPosition.w`,
+`_ScaleX/_ScaleY`, `_ScreenParams`, `_Sharpness`, and UV0.z/.w), `normFactor`,
+`baseWeight` (`_WeightNormal/_WeightBold/_ScaleRatioA`), and the **linear ramp**
+`saturate(dist·scaleSoft − bias)` with `bias = (0.5 − (baseWeight +
+dilate·_ScaleRatioA·0.5)·normFactor)·scaleSoft − 0.5` — replacing the `fwidth`
+smoothstep. Result: it **tightened the edge** (maxΔ 127→**98** on face/color/
+underlay) but did **not** close the nonBg gap (SDF 3207→3282, still ~20 % below
+legacy) and **regressed the outline** (nonBg 4858→2088 — the ported outline bias is
+wrong without the real per-component uniforms). Root reason it can't close here:
+legacy's `scale` consumes **`_ScaleX`, `_ScaleY`, `_ScaleRatioA`** which the legacy
+pipeline sets on the material **per component from the canvas**; the unified path
+leaves them at 1, so the screen-space scale (hence the ramp slope and weight)
+differs. The port was **reverted** (it was net-negative: no gain + an outline
+regression). Closing the residual to ≤2/255 on ≥99.5 % requires the `UniText`
+component to propagate `_ScaleX/_ScaleY/_ScaleRatioA` (and `_Sharpness`,
+`_WeightNormal/_Bold`) onto the shared uber material each rebuild — the same values
+the legacy path computes — then the ported ramp matches. That propagation is the
+concrete, bounded next task; it was out of this session's remaining budget after the
+MSDF root-cause fix. The current shipped uber (fwidth) renders all cases correctly
+with 99.4–99.8 % within 2/255.
