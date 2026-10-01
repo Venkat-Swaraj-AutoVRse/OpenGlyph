@@ -525,31 +525,40 @@ unambiguous — it is **not** a regression:
   this micro-benchmark; a real win needs the repack cached across frames when the
   text is unchanged (future step). Reported straight, flat-to-slightly-worse.
 
-### 8.5 Pixel equivalence — PROVEN
+### 8.5 Pixel equivalence — two layers, one honest gap
 
-- **Geometry equivalence:** the unified path submits a **vertex-identical** mesh to
-  the legacy path (max positional delta < 1e-3; SDF + MSDF).
-- **Pixel equivalence (matched neutral shaders):** both paths' actual meshes are
-  rendered through MATCHED neutral display shaders over the same glyph atlas —
-  legacy via the Texture2D SDF/MSDF reconstruction (`EngineRenderHarness`), unified
-  via an identical **Texture2DArray** reconstruction (`Hidden/OpenGlyphArrayPreview`,
-  per-vertex slice from UV1) — into a RenderTexture, then compared per pixel. Result
-  for **SDF, MSDF, and a `<color>` per-span run**: **maxDelta = 0, 0.00 % pixels
-  differ, nonBg(off) == nonBg(on)** — i.e. **bit-identical**. The pages-as-slices
-  array indirection addresses the exact same atlas texels, the UVs are identical,
-  and per-vertex color (the span) matches. Side-by-side+diff PNGs:
-  `Documentation/Design/evidence/unified_vs_legacy_{sdf,msdf,color_span}.png`
-  (the diff panel is black).
-- **Why neutral shaders, not the production UI shaders:** rendering the real legacy
-  UGUI multi-CanvasRenderer path to an offscreen RenderTexture yields a black image
-  in a batchmode editor (the per-child UI submission does not reproduce offscreen),
-  so a production-shader offscreen diff is not trustworthy here. Matching the neutral
-  shaders holds the AA math constant so the comparison isolates exactly what the
-  unified path changes — geometry, UVs, atlas-content fidelity — which is bit-exact.
-  (The production uber-shader itself is separately verified to compile + be supported,
-  and its SDF `.a` / MSDF `median3` reconstruction mirrors the legacy shaders.)
-- **Underlay / outline / emoji:** outline+underlay are driven by the style table from
-  `AppearanceStyleShim` (unit-tested) and the default appearance carries none, so the
-  default-appearance pixel diff above exercises the common path at bit-exactness; a
-  styled-span outline/underlay pixel case and an emoji (color-font) case remain for a
-  follow-up once a bundled OFL color font is wired into the fixtures.
+Rendered on a **World-Space canvas → camera → 1280×720 RenderTexture** in a standalone
+dev player (0 exceptions). A key correction: a **bare `UniTextAppearance` has no
+material**, so the LEGACY path draws nothing (its earlier "black offscreen" and
+"0 marginal draws" were this, not an offscreen-capture bug). With a face material
+assigned (as any real scene has) legacy renders — `nonBg_off > 0` for every case
+below — so the comparison is now valid.
+
+**Layer 1 — atlas/geometry indirection: BIT-IDENTICAL.** Both paths' meshes through
+MATCHED neutral shaders (EditMode `UnifiedRendererPixelEquivalenceTests`): maxDelta
+= 0 for SDF, MSDF, `<color>` span. The pages-as-slices array indirection, UVs and
+per-vertex colour are exact.
+
+**Layer 2 — PRODUCTION shaders (`UniText/Uber` vs legacy SDF/MSDF), real UGUI path:**
+
+| case | legacy nonBg | unified nonBg | maxΔ | %px > 2/255 |
+|------|-------------:|--------------:|-----:|------------:|
+| SDF        | 4065 | 2861  | 127 | 0.28 % |
+| MSDF       | 4368 | 17188 | 255 | 1.74 % |
+| color span | 8636 | 5952  | 127 | 0.61 % |
+| outline    | 5555 | 4406  | 255 | 0.45 % |
+| underlay   | 2737 | 1896  | 127 | 0.19 % |
+
+PNGs: `Documentation/Design/evidence/prod_unified_vs_legacy_{sdf,msdf,color_span,outline,underlay}.png`.
+
+**Honest gap:** these are NOT pixel-equivalent. The small %>2/255 masks a large
+maxΔ (up to 255) and very different lit-pixel counts — most starkly **MSDF (unified
+17188 vs legacy 4368 lit px)**: the uber shader renders MSDF far "fatter"/brighter
+than the legacy MSDF shader. The uber shader's SDF/MSDF **edge reconstruction
+constants do not yet match** the production legacy shaders (threshold/softness,
+`screenPxRange`/scale term, premultiply). So the unified path is geometrically and
+atlas-exact (Layer 1) but **not yet a visual drop-in through its own shader
+(Layer 2)** — the uber fragment program needs its coverage math aligned to the
+legacy shaders (notably the MSDF median→coverage mapping and the SDF
+`scale`/softness term) before it can replace them. This is the concrete next task.
+(Earlier commits' "bit-identical" claim was Layer 1 only; corrected here.)
