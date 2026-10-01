@@ -23,6 +23,7 @@ namespace LightSide.Tests
         private readonly List<Object> _junk = new();
         private Camera _cam;
         private Canvas _canvas;
+        private int _aOffRenderers, _aOnRenderers, _bOffRenderers, _bOnRenderers;
 
         private static string OutDir()
         {
@@ -139,8 +140,10 @@ namespace LightSide.Tests
                 for (int f = 0; f < 6; f++) yield return null;
                 var m = Measure();
                 int rendererCount = t.ActiveSubMeshRendererCountForTests;
+                if (mode == UniText.UnifiedRendererMode.ForceOff) _aOffRenderers = rendererCount; else _aOnRenderers = rendererCount;
                 results.Append($"  \"a_{mode}\": {{ \"draws\": {m.draws}, \"batches\": {m.batches}, \"setpass\": {m.setpass}, \"renderers\": {rendererCount} }},\n");
                 var go_a = t.gameObject; _junk.Remove(go_a); Object.DestroyImmediate(go_a);
+                UnifiedRenderBuilder.ResetShared();
                 SharedGlyphAtlas.Clear();
                 for (int f = 0; f < 2; f++) yield return null;
             }
@@ -160,20 +163,25 @@ namespace LightSide.Tests
                 var m = Measure();
                 int totalRenderers = 0;
                 foreach (var c in comps) totalRenderers += c.ActiveSubMeshRendererCountForTests;
+                if (mode == UniText.UnifiedRendererMode.ForceOff) _bOffRenderers = totalRenderers; else _bOnRenderers = totalRenderers;
                 results.Append($"  \"b_{mode}\": {{ \"draws\": {m.draws}, \"batches\": {m.batches}, \"setpass\": {m.setpass}, \"renderers\": {totalRenderers} }},\n");
                 foreach (var c in comps) { var cg = c.gameObject; _junk.Remove(cg); Object.DestroyImmediate(cg); }
+                UnifiedRenderBuilder.ResetShared();
                 SharedGlyphAtlas.Clear();
                 for (int f = 0; f < 2; f++) yield return null;
             }
 
-            results.Append("  \"note\": \"renderers = active CanvasRenderers (structural); draws/batches/setpass are ProfilerRecorder frame counters (0 if headless).\"\n}\n");
+            results.Append("  \"note\": \"renderers = active CanvasRenderers (structural); draws/batches/setpass are ProfilerRecorder frame counters (0 in EditMode). GPU draw strictness is asserted by the standalone-player benchmark.\"\n}\n");
 
             string outPath = Path.Combine(OutDir(), "drawcall_benchmark.json");
             File.WriteAllText(outPath, results.ToString());
             Debug.Log("[DrawCallBenchmark] wrote " + outPath + "\n" + results);
 
-            // The structural CanvasRenderer count is deterministic even headless: the unified path
-            // must not use MORE renderers than legacy in either scenario.
+            // Strict structural assertion (deterministic in EditMode): the unified path must use NO
+            // MORE CanvasRenderers than legacy in EITHER scenario (it uses far fewer: a->1, b->50).
+            Assert.LessOrEqual(_aOnRenderers, _aOffRenderers, "scenario (a): unified renderers must be <= legacy");
+            Assert.LessOrEqual(_bOnRenderers, _bOffRenderers, "scenario (b): unified renderers must be <= legacy");
+            Assert.AreEqual(1, _aOnRenderers, "scenario (a) all-SDF text should collapse to ONE renderer");
             Assert.Pass("Benchmark written to " + outPath);
         }
     }
