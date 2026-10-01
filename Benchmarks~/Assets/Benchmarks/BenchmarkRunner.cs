@@ -372,10 +372,20 @@ namespace OpenGlyph.Benchmarks
         // =================================================================== TMP
         private IEnumerator RunTMP()
         {
-            // Ensure a usable TMP font asset at runtime.
+            // Ensure a usable TMP font asset at runtime, without throwing on a null
+            // TMP_Settings (which happens when the settings asset isn't in the build).
             TMP_FontAsset fa = tmpFontAsset;
+            string tmpInitError = null;
+            if (fa == null)
+            {
+                // Prefer TMP's own committed default font asset (resolves without CreateFontAsset).
+                fa = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+            }
             if (fa == null && tmpSourceFont != null)
-                fa = TMP_FontAsset.CreateFontAsset(tmpSourceFont);
+            {
+                try { fa = TMP_FontAsset.CreateFontAsset(tmpSourceFont); }
+                catch (Exception ex) { tmpInitError = "TMP could not initialize (TMP_Settings null in build): " + ex.Message; Debug.LogWarning("[Bench] " + tmpInitError); }
+            }
 
             foreach (var kind in BenchmarkTexts.All())
             {
@@ -384,6 +394,15 @@ namespace OpenGlyph.Benchmarks
                 bool fair = kind == TextSetKind.Latin;
                 var res = NewRes("TMP", kind, expectedChars, fair,
                     fair ? null : "TMP cannot shape Arabic/Hebrew without a plugin; measures unshaped fallback, NOT equivalent output.");
+
+                if (fa == null)
+                {
+                    res.creationValid = res.fullRebuildValid = res.layoutValid = res.meshRebuildValid = false;
+                    res.validityNote = tmpInitError ?? "TMP font asset unavailable (TMP_Settings not in build); no valid TMP measurement.";
+                    report.perSystemText.Add(res);
+                    Debug.LogWarning($"[Bench] TMP {kind}: INVALID — {res.validityNote}");
+                    continue;
+                }
 
                 var objs = new List<TextMeshProUGUI>(objectCount);
                 var rects = new List<RectTransform>(objectCount);
