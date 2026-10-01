@@ -395,9 +395,38 @@ default), independent of font count, span count, or outline/shadow use.
 
 ---
 
-*Round 2 (next): the feasibility spike — build a throwaway Unity host, prototype
-the Texture2DArray + uber-shader + style-buffer path, render 3 fonts + emoji +
-MSDF + per-span outline on an Overlay and a World-Space canvas, measure draw
-calls/batches (Frame Debugger + `UnityStats`/`ProfilerRecorder`) before vs after,
-and confirm the texture path compiles & runs for Android/GLES3 (APK) with a note
-on WebGL2.*
+## 7. Feasibility spike results (Round 1, 2026-10-01)
+
+The riskiest claim — collapsing a mixed 3-fonts + emoji + MSDF + per-span-outline
+text to **one draw call** — was prototyped (`Spike~/RenderArch/`, throwaway) and
+measured on Unity 6000.3.19f1:
+
+- One `Texture2DArray` (5 slices: 3 SDF + 1 MSDF + 1 emoji/COLR), one uber-shader
+  with a per-glyph `glyphMode` branch, and a per-glyph/per-span `styleIdx` into a
+  `StructuredBuffer<GlyphStyle>` composited face + outline + underlay in one pass.
+- Measured structural CanvasRenderer count (= UI draw-call groups):
+  **Overlay 5 → 1, World 5 → 1.** The uber-shader compiled with no errors; the
+  array + buffer material bound and rendered through a single CanvasRenderer
+  across all five mixed-mode runs including the per-span outline. VERDICT: **PASS**.
+- `supports2DArrayTextures = True`, `maxTextureSize = 8192` on the test editor.
+- GPU-submit counters (`UnityStats.drawCalls`) are 0 under `-nographics`; the
+  structural count is what determines UI draw calls. Round 2 confirms on a real
+  GPU with Frame Debugger + `ProfilerRecorder("Draw Calls Count","Batches Count")`
+  and CPU frame time.
+- **Android/GLES3: PARTIAL.** The IL2CPP arm64 build (GLES3+Vulkan) compiled all
+  scripts, resolved the bundled SDK/NDK/JDK/Gradle, and ran IL2CPP producing the
+  native player **with no spike-shader compile errors**, then failed at the LLVM
+  native-strip stage with `No space left on device` — the host C: drive was at 0
+  bytes free. Environmental, not a design/toolchain defect. Re-run on a host with
+  disk headroom to finish. WebGL2 has `sampler2DArray` but not UI
+  `StructuredBuffer`, so it uses the float-texture style-table fallback (§3.4).
+
+See `Spike~/RenderArch/README.md` for the full result dump and reproduction.
+
+### Next (Round 2 implementation)
+
+Wire the proposed path into the real pipeline behind the obsolete shim: replace
+the per-segment CanvasRenderer split in `UniText.UpdateSubMeshes` with a single
+renderer + array-atlas, add the `(sliceIdx, glyphMode, styleIdx)` vertex packing
+in `UniTextMeshGenerator`, build the component style model + migration tool, and
+measure before/after on the real sample scenes with a GPU present.
