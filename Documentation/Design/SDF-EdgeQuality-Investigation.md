@@ -127,7 +127,8 @@ RenderTexture (see the "s" clipping note below). `Documentation/Design/evidence/
 - `openglyph_sac_spread025{,_zoom5x,_s_zoom5x}.png` — before (0.25): complete "sac", edges
   soft/feathered, ink coverage 47,832 px.
 - `openglyph_sac_spread010{,_zoom5x,_s_zoom5x}.png` — after (0.10): complete "sac", crisp edges,
-  ink coverage 47,449 px; the leading "s" is whole and as sharp as the "a"/"c".
+  ink coverage 47,449 px; edges as sharp as TMP. The leading "s" is NOT yet whole: its lower-right
+  bowl still ends in a hard vertical edge (see "Open: second s-bowl crop" below).
 - `tmp_sac{,_zoom5x,_s_zoom5x}.png` — TMP reference (crisp). OpenGlyph at 0.10 is on par; a small
   secondary shader-scale softness gap remains (see Recommended fix #2).
 
@@ -187,6 +188,19 @@ on the "sx" case without the shader fix and PASSES with it (verified by stashing
 The existing pixel-equivalence tests (SDF/MSDF/`<color>`/outline/underlay) use neutral display
 shaders by design and so never exercised the Uber composite — which is why they stayed green while
 the wall shipped; the new test closes that gap by rendering through the real Uber shader.
+
+**Open: second s-bowl crop (NOT fixed).** The fix above removes the 0.5 grey band, but the leading
+"s" in "sac" still has a hard vertical edge (black beyond it, no grey) at the right of its lower bowl,
+at the bowl's widest point; TMP's bowl is round there. Measured so far:
+- The atlas cell for "s" is complete and rounded (8× dump), and "s" rendered alone is whole.
+- Removing quads from the merged "sac" mesh: "s" only is whole; "s"+"a" and full "sac" are cut. So
+  the right neighbour's presence causes it.
+- With the default style, killing the underlay or the outline layer does not remove the cut, and
+  drawing the quads in reverse order does not move it. The resolved default style has the outline
+  off (alpha 0, width 0).
+- It reproduces through the camera / CanvasRenderer path, but not when the same mesh and material
+  are drawn directly with a CommandBuffer.
+The `LeadingGlyphWallTests` guard only covers the grey band, not this crop.
 
 ### 6. Tests (Unity 6000.3.19f1, batchmode, real GPU — no -nographics)
 | Platform | Renderer | passed | failed | skipped | inconclusive |
