@@ -401,6 +401,31 @@ namespace LightSide.Tests
             Assert.AreEqual(1, g.lineCount, $"Unwrapped paragraph is one line (mode {mode}).");
         }
 
+        [Test]
+        public void FreshComponent_DefaultsToPlainFace_NoHalo()
+        {
+            // A fresh GlyphMeshProUGUI must render like TMP: plain face, NO outline / underlay /
+            // glow (the dark-halo bug came from the default appearance material's disabled underlay
+            // being read when OverrideStyle was off). Assert the component overrides the style with
+            // a clean one.
+            var comp = NewComponent();
+            try
+            {
+                comp.text = "Plain";
+                Assert.IsTrue(comp.OverrideStyle,
+                    "Fresh component should override the appearance style to force a plain face.");
+                var s = comp.Style;
+                Assert.AreEqual(0f, s.outlineColor.a, 1e-4, "Default outline must be fully transparent.");
+                Assert.AreEqual(0f, s.outlineWidth, 1e-4, "Default outline width must be 0.");
+                Assert.AreEqual(0f, s.underlayColor.a, 1e-4, "Default underlay (halo/shadow) must be fully transparent.");
+                Assert.AreEqual(0f, s.glowColor.a, 1e-4, "Default glow must be fully transparent.");
+                // Face colour follows the component colour.
+                comp.color = Color.red;
+                Assert.AreEqual(Color.red, comp.Style.faceColor, "Plain-face colour should follow the component colour.");
+            }
+            finally { DestroyComponent(comp); }
+        }
+
         private void RequireTmp()
         {
             // TMP's dynamic SDF atlas path is non-deterministic under the headless NullGfxDevice

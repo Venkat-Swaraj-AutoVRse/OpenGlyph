@@ -50,6 +50,10 @@ namespace OpenGlyph
         [SerializeField] private int m_maxVisibleLines = int.MaxValue;
         [SerializeField] private bool m_richText = true;
 
+        [Tooltip("Default a fresh component to a plain face (TMP's look) by overriding the engine " +
+                 "style with a clean UniTextStyle. Clear to use the appearance/material styling instead.")]
+        [SerializeField] private bool m_plainFaceStyle = true;
+
         // No-alloc numeric SetText scratch buffer (mirrors TMP's reusable buffer).
         private char[] m_numberBuffer = new char[32];
         private readonly StringBuilder m_formatBuffer = new StringBuilder(64);
@@ -265,7 +269,18 @@ namespace OpenGlyph
         // =====================================================================
         // Color / gradient
         // =====================================================================
-        // color is inherited from UniText (override Color color).
+
+        /// <summary>Mirrors <c>TMP_Text.color</c>. Overrides the inherited <c>Graphic.color</c> to
+        /// keep the plain-face style's face colour in sync when <see cref="m_plainFaceStyle"/> is on.</summary>
+        public override Color color
+        {
+            get => base.color;
+            set
+            {
+                base.color = value;
+                if (m_plainFaceStyle && isActiveAndEnabled) ApplyPlainFaceDefault();
+            }
+        }
 
         /// <summary>Mirrors <c>TMP_Text.enableVertexGradient</c>.</summary>
         public bool enableVertexGradient
@@ -656,6 +671,32 @@ namespace OpenGlyph
             FontStyleAxis = (m_fontStyle & FontStyles.Italic) != 0 ? StyleAxis.Italic : StyleAxis.Normal;
             WordWrap = m_textWrappingMode == TextWrappingModes.Normal
                        || m_textWrappingMode == TextWrappingModes.PreserveWhitespace;
+            ApplyPlainFaceDefault();
+        }
+
+        /// <summary>When <see cref="m_plainFaceStyle"/> is set (the default), force a plain face —
+        /// TMP's look — by overriding the engine style with a clean <see cref="UniTextStyle"/>
+        /// (zero outline / underlay / glow). This prevents the ambient default <c>UniTextAppearance</c>
+        /// material (whose disabled-underlay serialized default would otherwise be read by the
+        /// appearance shim) from adding a dark halo/shadow around every glyph. Face colour follows
+        /// the component <c>color</c>. Clearing <see cref="m_plainFaceStyle"/> restores the engine's
+        /// appearance-driven styling.</summary>
+        private void ApplyPlainFaceDefault()
+        {
+            if (!m_plainFaceStyle) return;
+            var plain = UniTextStyle.Default; // white face, no outline/underlay/glow
+            plain.faceColor = color;          // keep the glyph face tinted by the component colour
+            Style = plain;
+            OverrideStyle = true;             // use Style, not the appearance material
+            // The component-authored style is honoured only on the UNIFIED renderer path; the legacy
+            // path renders the appearance MATERIAL directly (whose disabled-underlay serialized default
+            // produces the dark halo). A TMP-parity component wants the plain face, so default to the
+            // unified renderer unless the user explicitly forced a mode. Only switch when a real
+            // graphics device is present — the unified path needs a GPU, and forcing it under
+            // NullGfxDevice (headless EditMode) hangs.
+            if (UnifiedRenderer == UnifiedRendererMode.UseProjectSetting
+                && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
+                UnifiedRenderer = UnifiedRendererMode.ForceOn;
         }
     }
 }
