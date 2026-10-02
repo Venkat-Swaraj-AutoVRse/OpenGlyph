@@ -286,6 +286,95 @@ namespace LightSide.Tests
             }
         }
 
+        [Test]
+        public void FontStyle_Upper_Lower_SideBySide()
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+                Assert.Ignore("No real graphics device; case render evidence skipped.");
+            string notoPath = FindNoto();
+            if (notoPath == null) Assert.Ignore("NotoSans-Regular.ttf fixture not found.");
+            var ogFont = UniTextFont.CreateFontAsset(File.ReadAllBytes(notoPath));
+            if (ogFont == null) Assert.Ignore("UniTextFont build failed.");
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>();
+            stack.fonts.Add(ogFont);
+
+            TMP_FontAsset tmpFont = null; Font unityFont = null;
+#if UNITY_EDITOR
+            unityFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/ParityFonts/NotoSans-Regular.ttf");
+#endif
+            if (unityFont == null) unityFont = Font.CreateDynamicFontFromOSFont("Noto Sans", (int)FontSize);
+            if (unityFont != null)
+                try { tmpFont = TMP_FontAsset.CreateFontAsset(unityFont, 90, 9,
+                    UnityEngine.TextCore.LowLevel.GlyphRenderMode.SDFAA, 1024, 1024, AtlasPopulationMode.Dynamic, true); }
+                catch (System.Exception ex) { Debug.LogWarning($"[CaseEvidence] TMP build failed: {ex.Message}"); }
+
+            var rt = new RenderTexture(Width, Height, 24, RenderTextureFormat.ARGB32) { antiAliasing = 1 };
+            rt.Create();
+            var bg = new Color(0.10f, 0.10f, 0.12f, 1f);
+            var gos = new System.Collections.Generic.List<GameObject>();
+            try
+            {
+                var canvasGo = new GameObject("CCanvas", typeof(Canvas)); gos.Add(canvasGo);
+                var canvas = canvasGo.GetComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace;
+                ((RectTransform)canvasGo.transform).sizeDelta = new Vector2(Width, Height);
+                var camGo = new GameObject("CCam", typeof(Camera)); gos.Add(camGo);
+                var cam = camGo.GetComponent<Camera>();
+                cam.orthographic = true; cam.orthographicSize = Height / 2f; cam.aspect = (float)Width / Height;
+                cam.transform.position = new Vector3(0, 0, -10);
+                cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = bg; cam.targetTexture = rt;
+                canvas.worldCamera = cam;
+
+                const string sample = "MixedCase Text";
+                float rowH = (Height - 80) / 3f;
+                System.Action<string, float, OpenGlyph.FontStyles> ogRow = (lbl, yTop, st) =>
+                {
+                    var go = new GameObject("og_" + lbl, typeof(RectTransform)); go.transform.SetParent(canvasGo.transform, false);
+                    var r = (RectTransform)go.transform; r.sizeDelta = new Vector2(Width/2f-40, rowH-10);
+                    r.anchoredPosition = new Vector2(-Width/4f, Height/2f-40-yTop-rowH/2f);
+                    var c = go.AddComponent<GlyphMeshProUGUI>(); c.FontStack = stack; c.fontSize = FontSize; c.color = Color.white;
+                    c.alignment = OpenGlyph.TextAlignmentOptions.Left; c.fontStyle = st; c.text = lbl + ": " + sample;
+                    c.ForceMeshUpdate(ignoreActiveState: true); gos.Add(go);
+                };
+                ogRow("Plain", 0*rowH, OpenGlyph.FontStyles.Normal);
+                ogRow("Upper", 1*rowH, OpenGlyph.FontStyles.UpperCase);
+                ogRow("Lower", 2*rowH, OpenGlyph.FontStyles.LowerCase);
+                if (tmpFont != null)
+                {
+                    System.Action<string, float, TMPro.FontStyles> tmRow = (lbl, yTop, st) =>
+                    {
+                        var go = new GameObject("tmp_" + lbl, typeof(RectTransform)); go.transform.SetParent(canvasGo.transform, false);
+                        var r = (RectTransform)go.transform; r.sizeDelta = new Vector2(Width/2f-40, rowH-10);
+                        r.anchoredPosition = new Vector2(Width/4f, Height/2f-40-yTop-rowH/2f);
+                        var t = go.AddComponent<TextMeshProUGUI>(); t.font = tmpFont; t.fontSize = FontSize; t.color = Color.white;
+                        t.alignment = TMPro.TextAlignmentOptions.Left; t.fontStyle = st; t.text = lbl + ": " + sample; t.ForceMeshUpdate(); gos.Add(go);
+                    };
+                    tmRow("Plain", 0*rowH, TMPro.FontStyles.Normal);
+                    tmRow("Upper", 1*rowH, TMPro.FontStyles.UpperCase);
+                    tmRow("Lower", 2*rowH, TMPro.FontStyles.LowerCase);
+                }
+                Canvas.ForceUpdateCanvases(); cam.Render();
+                var prev = RenderTexture.active; RenderTexture.active = rt;
+                var tex = new Texture2D(Width, Height, TextureFormat.RGBA32, false);
+                tex.ReadPixels(new Rect(0,0,Width,Height),0,0); tex.Apply(); RenderTexture.active = prev;
+                string path = Path.Combine(EvidenceDir(), "fontstyle_upper_lower.png");
+                File.WriteAllBytes(path, tex.EncodeToPNG()); Object.DestroyImmediate(tex);
+                Debug.Log($"[RenderEvidence] fontStyle upper/lower -> {path}");
+                Assert.IsTrue(File.Exists(path) && new FileInfo(path).Length > 1000, "Evidence PNG not written.");
+            }
+            finally
+            {
+                foreach (var g in gos) { if (g != null) { var c = g.GetComponent<Camera>(); if (c != null) c.targetTexture = null; } }
+                rt.Release(); Object.DestroyImmediate(rt);
+                foreach (var g in gos) if (g != null) Object.DestroyImmediate(g);
+                if (stack != null) Object.DestroyImmediate(stack);
+                if (ogFont != null) Object.DestroyImmediate(ogFont);
+                if (tmpFont != null) Object.DestroyImmediate(tmpFont);
+#if UNITY_EDITOR
+                if (unityFont != null && !UnityEditor.AssetDatabase.Contains(unityFont)) Object.DestroyImmediate(unityFont);
+#endif
+            }
+        }
+
         private static string FindNoto()
         {
             string[] candidates =

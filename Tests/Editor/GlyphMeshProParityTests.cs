@@ -467,6 +467,14 @@ namespace LightSide.Tests
                 Assert.IsTrue(comp.Text.Contains("<u>") && comp.Text.Contains("<s>"),
                     "Both flags must compose both tags. Engine Text=" + comp.Text);
 
+                // UpperCase / LowerCase compose the engine's case-transform tags around the run.
+                comp.fontStyle = OpenGlyph.FontStyles.UpperCase;
+                Assert.IsTrue(comp.Text.Contains("<uppercase>") && comp.Text.Contains("</uppercase>"),
+                    "UpperCase flag must compose <uppercase>…</uppercase>. Engine Text=" + comp.Text);
+                comp.fontStyle = OpenGlyph.FontStyles.LowerCase;
+                Assert.IsTrue(comp.Text.Contains("<lowercase>") && comp.Text.Contains("</lowercase>"),
+                    "LowerCase flag must compose <lowercase>…</lowercase>. Engine Text=" + comp.Text);
+
                 // Clearing the flags returns the engine source to the raw text (no stale tags).
                 comp.fontStyle = OpenGlyph.FontStyles.Normal;
                 Assert.AreEqual("Hello", comp.Text, "Clearing style flags must restore the raw engine source.");

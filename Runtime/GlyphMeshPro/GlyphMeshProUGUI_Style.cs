@@ -43,7 +43,8 @@ namespace OpenGlyph
         /// working engine modifier) is set. This commit: Underline, Strikethrough. Other flags are
         /// stored and round-trip but are not yet wrapped (their engine modifiers are Round-2 gaps).</summary>
         private bool HasWrappingStyle =>
-            (m_fontStyle & (FontStyles.Underline | FontStyles.Strikethrough)) != 0;
+            (m_fontStyle & (FontStyles.Underline | FontStyles.Strikethrough
+                            | FontStyles.UpperCase | FontStyles.LowerCase)) != 0;
 
         /// <summary>Composes the active style flags into a tag wrapper around <paramref name="raw"/>.
         /// Order is outer-to-inner: case transform (outermost, so it applies to the whole run),
@@ -62,7 +63,9 @@ namespace OpenGlyph
             // added here. Emitting a tag with no engine rule would leak the literal "<sup>" into the
             // rendered run, so unsupported flags are intentionally NOT wrapped yet.
 
-            // Opening tags, outermost first.
+            // Opening tags, outermost first (case transform outermost so it covers the whole run).
+            if ((m_fontStyle & FontStyles.UpperCase) != 0) sb.Append("<uppercase>");
+            if ((m_fontStyle & FontStyles.LowerCase) != 0) sb.Append("<lowercase>");
             if ((m_fontStyle & FontStyles.Underline) != 0) sb.Append("<u>");
             if ((m_fontStyle & FontStyles.Strikethrough) != 0) sb.Append("<s>");
 
@@ -71,6 +74,8 @@ namespace OpenGlyph
             // Closing tags, innermost first (reverse order).
             if ((m_fontStyle & FontStyles.Strikethrough) != 0) sb.Append("</s>");
             if ((m_fontStyle & FontStyles.Underline) != 0) sb.Append("</u>");
+            if ((m_fontStyle & FontStyles.LowerCase) != 0) sb.Append("</lowercase>");
+            if ((m_fontStyle & FontStyles.UpperCase) != 0) sb.Append("</uppercase>");
 
             return sb.ToString();
         }
@@ -101,9 +106,11 @@ namespace OpenGlyph
                 RegisterModifier(new ModRegister { Modifier = new UnderlineModifier(), Rule = new UnderlineParseRule() });
             if (!HasRule<StrikethroughParseRule>())
                 RegisterModifier(new ModRegister { Modifier = new StrikethroughModifier(), Rule = new StrikethroughParseRule() });
-            // UpperCase/LowerCase/SmallCaps/Sup/Sub/Highlight need engine modifiers that do not exist
-            // yet (the `upper` parse rule has no transform modifier behind it). They are added as each
-            // engine modifier lands — tracked in the parity doc Round-2 gap list.
+            if (!HasRule<UppercaseAliasParseRule>() && !HasRule<UppercaseParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new UppercaseModifier(), Rule = new UppercaseAliasParseRule() });
+            if (!HasRule<LowercaseParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new LowercaseModifier(), Rule = new LowercaseParseRule() });
+            // SmallCaps/Sup/Sub/Highlight need engine modifiers added as each lands — parity-doc gaps.
         }
 
         private bool HasRule<T>() where T : IParseRule
