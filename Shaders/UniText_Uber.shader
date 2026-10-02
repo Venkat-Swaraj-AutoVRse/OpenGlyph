@@ -187,6 +187,24 @@ Shader "UniText/Uber"
                     float normOutEffect = (baseWeight + (faceDilate + outlineWidth) * 0.5) * normFactor;
                     float outlineBias = (0.5 - normOutEffect) * outScaleSoft - 0.5;
                     outAlpha = saturate(dist * outScaleSoft - outlineBias);
+
+                    // EXTERIOR-FLOOR GATE (fixes the unified "0.5 wall"): the Alpha8/MSDF atlas CLAMPS
+                    // the distance field at 0 outside the encoded spread, so where the glyph is fully
+                    // outside, `dist == 0`. A dilated bias (e.g. _OutlineDilate/_UnderlayDilate = 1 at
+                    // the 0.1 reference spread) makes (0.5 - normEffect) <= 0, so `saturate(0 - bias)`
+                    // FLOORS at a positive value — the layer paints solid half-coverage across the
+                    // whole padded cell. In the UNIFIED single merged mesh, adjacent glyph quads
+                    // (ink + 2*padding wide) overlap, so one glyph's floored layer composites over its
+                    // neighbour's ink and darkens it to a hard vertical band (the reported wall). The
+                    // field carries NO information below `dist==0`, so coverage there must be 0, not the
+                    // bias floor. Gate by field presence: kill only the dist==0 tail (fieldGate->0),
+                    // leaving the real ramp (dist>~1/255) and the glyph edge untouched. _AtlasSize*dist
+                    // is "sub-texel distance units"; a 0.5-texel knee removes the flat floor without
+                    // nibbling the AA edge. Face uses dilate 0 so it never floors, but gating it too
+                    // keeps the three layers consistent and costs nothing where dist>0.
+                    float fieldGate = saturate(dist * _AtlasSize * 2.0);
+                    alpha *= fieldGate;
+                    outAlpha *= fieldGate;
                 }
 
                 // Composite like legacy (SDF-Base outline, then SDF-Face over via BlendOver):
@@ -232,8 +250,13 @@ Shader "UniText/Uber"
                     half ud = uDist * layerScale;
                     // SDFLayer(ud, layerBias, underlayColor) with PREMULTIPLIED underlay colour, then
                     // BlendOver(dst=underlay, src=col): the underlay sits behind the face+outline.
+                    // Exterior-floor gate (see face layer): the underlay samples its OWN offset texel,
+                    // so gate by THAT sample (uDist). Where the shadow field is at its clamped-0 floor
+                    // the underlay must contribute 0, not the layerBias floor that otherwise paints a
+                    // solid half-coverage rectangle over the padded cell (the overlapping-neighbour wall).
+                    float uFieldGate = saturate(uDist * _AtlasSize * 2.0);
                     fixed4 uPremult = underlayColor; uPremult.rgb *= uPremult.a;
-                    fixed4 uResult = uPremult * saturate(ud - layerBias);
+                    fixed4 uResult = uPremult * (saturate(ud - layerBias) * uFieldGate);
                     fixed4 blended;
                     blended.rgb = uResult.rgb * (1 - col.a) + col.rgb;
                     blended.a = saturate(uResult.a + col.a);
