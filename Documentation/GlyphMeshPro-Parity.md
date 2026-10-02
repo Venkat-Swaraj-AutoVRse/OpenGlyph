@@ -1,6 +1,27 @@
 # GlyphMeshPro ↔ TextMeshPro Parity
 
-**Status: Round 1 (in progress).** This document maps the public API and rich-text
+**Status: Round 2 (in progress).** This document maps TextMeshPro's API and rich-text
+tag surface onto OpenGlyph's `GlyphMeshProUGUI` (Canvas) and `GlyphMeshPro` (world-space).
+Every row is kept in sync with ACTUAL behaviour; a non-"applied" status is a real gap.
+
+### Round 2 status summary
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| fontStyle Underline / Strikethrough | **done** | evidence/fontstyle_underline_strike.png |
+| fontStyle UpperCase / LowerCase (+ `<uppercase>`/`<lowercase>`) | **done** | evidence/fontstyle_upper_lower.png |
+| fontStyle Superscript / Subscript (+ `<sup>`/`<sub>`) | **done** | evidence/markup_sup_sub.png |
+| Justified / Flush alignment | **done** | evidence/alignment_justified_flush.png |
+| Tag `<voffset>` | **done** | evidence/markup_voffset.png |
+| fontStyle Highlight (`<mark>`) | **not started** | needs background-quad modifier behind glyphs |
+| fontStyle SmallCaps | **not started** | needs small-caps transform modifier |
+| Tags `<nobr> <font> <align> <indent> <mark> <sprite>` | **not started** | see tag table |
+| 3D GlyphMeshPro (world-space MeshRenderer) | **not started** (Round-1 stub) | headless host + mesh emission |
+| Overflow Page / Linked / ScrollRect | **not started** | see overflow table |
+
+Each "done" row: deterministic headless test + full suite BOTH modes (renderer-off 232 pass/0 fail;
+unified-on 246 pass/0 fail; 247 total) + GPU side-by-side PNG verified against real TextMeshPro.
+
 tag surface of Unity's TextMeshPro (`TMP_Text` / `TextMeshProUGUI`) onto the
 OpenGlyph components `GlyphMeshProUGUI` (Canvas, implemented in Round 1) and
 `GlyphMeshPro` (world-space `MeshRenderer`, design + stub in Round 1).
@@ -53,7 +74,7 @@ Where TMP exposes a concept the engine lacks (overflow modes, justification,
 | `TextMeshPro`                 | `OpenGlyph.GlyphMeshPro`              | World-space; design + stub (Round 1). |
 | `TMP_FontAsset`               | `LightSide.UniTextFont`               | Font asset. |
 | `TMP_Text`                    | `GlyphMeshProUGUI` base surface       | Abstract base in TMP; folded into the component here. |
-| `FontStyles` (flags)          | `OpenGlyph.FontStyles` (flags)        | Mirror of TMP flag names. Round 1 wires Bold/Italic (weight/axis); other flags are R2 gaps. |
+| `FontStyles` (flags)          | `OpenGlyph.FontStyles` (flags)        | Mirror of TMP flag names. R2 applies Bold/Italic/Underline/Strikethrough/Upper/LowerCase/Super/Subscript; SmallCaps/Highlight remain gaps. |
 | `TextAlignmentOptions`        | `OpenGlyph.TextAlignmentOptions`      | Mirror of TMP names; see Alignment section for gaps. |
 | `TextOverflowModes`           | `OpenGlyph.TextOverflowModes`         | Mirror of TMP names; Overflow/Ellipsis/Truncate/Masking live, rest stubbed. |
 | `TextWrappingModes`           | `OpenGlyph.TextWrappingModes`         | Mapped onto engine `WordWrap` bool. |
