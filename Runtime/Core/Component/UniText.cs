@@ -1191,6 +1191,15 @@ namespace LightSide
                 changed = true;
             }
 
+            // Keep an already-created provider in sync with the refilled references. Without this, a
+            // component whose Appearance was set to null after the provider existed (the migration
+            // tool's "clear legacy appearance" option does exactly that) got its field refilled here
+            // while the provider kept null, and every mesh build threw in GetMaterials.
+            if (changed && fontProvider != null)
+            {
+                if (fontProvider.Appearance != appearance) fontProvider.Appearance = appearance;
+            }
+
             if (changed) UnityEditor.EditorUtility.SetDirty(this);
 
             return fontStack != null && appearance != null;
