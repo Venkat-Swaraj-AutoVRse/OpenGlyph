@@ -153,10 +153,27 @@ namespace LightSide
 
         private static UniTextSettings instance;
 
+        /// <summary>True once the loud "missing settings asset" error has been emitted, so it fires exactly once.</summary>
+        private static bool loggedMissingInstance;
+
+        /// <summary>
+        /// True when <see cref="Instance"/> is serving a runtime-created default because no
+        /// <c>Resources/UniTextSettings.asset</c> was found. Exposed for diagnostics and tests.
+        /// </summary>
+        internal static bool IsUsingRuntimeDefault { get; private set; }
+
         /// <summary>Returns true if the instance is already loaded (without triggering load).</summary>
         internal static bool IsNull => instance == null;
 
         /// <summary>Gets the singleton settings instance, loading from Resources if needed.</summary>
+        /// <remarks>
+        /// Resolution order: (1) a project-authored <c>Resources/UniTextSettings.asset</c> — if present it
+        /// always wins; (2) otherwise a runtime-created default instance with safe built-in values, so that
+        /// every static accessor (Gradients, SharedAtlasPageBudget, UseUnifiedRenderer, …) keeps working
+        /// instead of throwing a NullReferenceException. A project that never created the asset therefore
+        /// still renders text with default configuration. A single, clear <see cref="Debug.LogError"/> names
+        /// the missing asset and how to create it — emitted once, never silently.
+        /// </remarks>
         public static UniTextSettings Instance
         {
             get
@@ -166,9 +183,27 @@ namespace LightSide
                     instance = Resources.Load<UniTextSettings>(ResourcePath);
 
                     if (instance == null)
-                        Debug.LogError(
-                            $"UniTextSettings not found at Resources/{ResourcePath}.asset. " +
-                            "Create it via Assets > Create > UniText > Settings and place in Resources folder.");
+                    {
+                        // No project-authored asset. Fall back to a runtime default so the engine stays
+                        // functional (default gradients/renderer/atlas config) rather than NRE-ing or,
+                        // worse, rendering nothing. Emit ONE loud error naming the asset and the remedy.
+                        if (!loggedMissingInstance)
+                        {
+                            loggedMissingInstance = true;
+                            Debug.LogError(
+                                $"[OpenGlyph] No UniTextSettings asset found at Resources/{ResourcePath}.asset. " +
+                                "Falling back to built-in default settings so text still renders. For project-" +
+                                "specific configuration (named gradients, atlas page budget, unified renderer " +
+                                "default), create one via Assets > Create > UniText > Settings and place it in a " +
+                                "Resources folder; the editor build check (UniTextBuildProcessor) also offers to " +
+                                "create it before a build ships.");
+                        }
+
+                        instance = CreateInstance<UniTextSettings>();
+                        instance.name = "UniTextSettings (runtime default)";
+                        instance.hideFlags = HideFlags.HideAndDontSave;
+                        IsUsingRuntimeDefault = true;
+                    }
                 }
 
                 return instance;
@@ -180,6 +215,7 @@ namespace LightSide
         public static void SetInstance(UniTextSettings settings)
         {
             instance = settings;
+            IsUsingRuntimeDefault = false;
             Changed?.Invoke();
         }
 
