@@ -1,16 +1,13 @@
 {
-    "name": "LightSide.UniText.Tests.Editor",
+    "name": "LightSide.UniText.Tests.Runtime",
     "rootNamespace": "LightSide.Tests",
     "references": [
         "LightSide.UniText",
-        "LightSide.UniText.Editor",
         "UnityEngine.UI",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
-    "includePlatforms": [
-        "Editor"
-    ],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,
     "overrideReferences": true,
