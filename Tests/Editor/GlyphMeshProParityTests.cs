@@ -426,6 +426,40 @@ namespace LightSide.Tests
             finally { DestroyComponent(comp); }
         }
 
+        [Test]
+        public void FontStyle_WiresBoldAndItalicOnly_OthersStoredNotApplied()
+        {
+            // Verified behaviour behind the parity doc's FontStyles table: Round 1 wires Bold -> weight
+            // and Italic -> style axis; the remaining flags are stored on the component but have no
+            // engine effect yet (R2 gaps). This test is the doc's proof.
+            var comp = NewComponent();
+            try
+            {
+                comp.fontStyle = OpenGlyph.FontStyles.Bold;
+                Assert.AreEqual(700, comp.FontWeight, "Bold must set engine FontWeight 700.");
+                Assert.AreEqual(StyleAxis.Normal, comp.FontStyleAxis);
+
+                comp.fontStyle = OpenGlyph.FontStyles.Italic;
+                Assert.AreEqual(400, comp.FontWeight, "Non-bold must reset weight to 400.");
+                Assert.AreEqual(StyleAxis.Italic, comp.FontStyleAxis, "Italic must set engine StyleAxis.Italic.");
+
+                comp.fontStyle = OpenGlyph.FontStyles.Bold | OpenGlyph.FontStyles.Italic;
+                Assert.AreEqual(700, comp.FontWeight);
+                Assert.AreEqual(StyleAxis.Italic, comp.FontStyleAxis);
+
+                // The other flags are STORED (round-trip) but do NOT change weight/axis (not applied).
+                comp.fontStyle = OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Underline
+                                 | OpenGlyph.FontStyles.Highlight | OpenGlyph.FontStyles.Subscript;
+                Assert.AreEqual(comp.fontStyle,
+                    OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Underline
+                    | OpenGlyph.FontStyles.Highlight | OpenGlyph.FontStyles.Subscript,
+                    "Flags must round-trip even when not applied.");
+                Assert.AreEqual(400, comp.FontWeight, "Non-bold flags must not change weight (not applied in R1).");
+                Assert.AreEqual(StyleAxis.Normal, comp.FontStyleAxis, "Non-italic flags must not change axis (not applied in R1).");
+            }
+            finally { DestroyComponent(comp); }
+        }
+
         private void RequireTmp()
         {
             // TMP's dynamic SDF atlas path is non-deterministic under the headless NullGfxDevice
