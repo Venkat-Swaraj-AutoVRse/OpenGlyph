@@ -221,11 +221,22 @@ verified: `GeometryFingerprint(text) == GeometryFingerprint(text + " ")` (identi
 So on every alternate iteration the engine re-uploads a mesh **identical** to what is already on the
 renderer — pure waste.
 
-**Fix (`UniTextMeshGenerator.GeometryFingerprint()` + `UniText.DoApplyMesh` gate, default ON via
-`UniTextSettings.SkipUnchangedGeometryUpload`):** after generating geometry, hash it and, if the hash
-equals what the renderers already display and they are populated, **skip `ApplyMeshesToUnity` + the
-Canvas upload entirely**. Behaviour-preserving by construction; the fingerprint is reset whenever
-renderers are cleared so a re-populate always uploads.
+**Fix (`UniTextMeshGenerator.GeometryFingerprint()` + `UniText.DoApplyMesh` gate, OPT-IN —
+default OFF — via `UniTextSettings.SkipUnchangedGeometryUpload`):** after generating geometry, hash
+it and, if the hash equals what the renderers already display and they are populated, **skip
+`ApplyMeshesToUnity` + the Canvas upload entirely**. Behaviour-preserving by construction; the
+fingerprint is reset whenever renderers are cleared so a re-populate always uploads.
+
+**Why opt-in (default OFF).** The exact-geometry fingerprint is NOT free: it costs **~25.5 ms per
+100 objects × 2,405 chars** on this Windows host, about **+17 % on every full rebuild** (148 ms
+baseline), and more on the Quest. The skip only pays that back when text changes *often without
+changing rendered output* — chiefly the benchmark's trailing-space alternation and app patterns like
+score/timer updates landing on the same string. For general text (every rebuild changes the glyphs)
+the fingerprint is pure overhead with nothing to skip, so making it the default would tax the common
+case to accelerate an uncommon one. It therefore ships **off**; enable
+`UniTextSettings.SkipUnchangedGeometryUpload` only on a workload dominated by no-op geometry
+rebuilds. Tests that need the skip enable it explicitly
+(`UniTextSettings.SetSkipUnchangedGeometryUploadForTests(true)`).
 
 **The fingerprint is EXACT (safety).** An early version hashed only *quantized* positions + UV0 +
 colour, which could wrongly skip a real change (a sub-quantum/smooth-animation move, a change in a
@@ -253,7 +264,8 @@ equal/equivalent text (score/timer updates landing on the same string, trailing-
 this host's desktop d3d11 player reports 0 for the same loop, and the headset is battery-restricted
 this session, so the on-device before/after must be re-run on Quest (open item). The fix's
 *mechanism* is proven in-editor: identical-geometry rebuilds now skip the upload (fingerprint test +
-output-preservation test), and the full suite stays green with the skip ON in both renderer modes.
+output-preservation test, which enables the opt-in skip explicitly), and the full suite stays green
+with the skip both OFF (default) and ON in both renderer modes.
 
 ## 7. Test plan
 
