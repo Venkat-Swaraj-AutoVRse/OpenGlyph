@@ -427,14 +427,19 @@ namespace LightSide.Tests
         }
 
         [Test]
-        public void FontStyle_WiresBoldAndItalicOnly_OthersStoredNotApplied()
+        public void FontStyle_WiresBoldItalic_AndComposesUnderlineStrikethrough()
         {
-            // Verified behaviour behind the parity doc's FontStyles table: Round 1 wires Bold -> weight
-            // and Italic -> style axis; the remaining flags are stored on the component but have no
-            // engine effect yet (R2 gaps). This test is the doc's proof.
+            // Round 2: Bold -> engine weight, Italic -> engine style axis (unchanged from R1).
+            // Underline/Strikethrough are now realised by composing the engine source with the
+            // engine's own <u>/<s> span tags (TMP composes fontStyle as whole-run markup the same
+            // way), and the component auto-registers the backing modifiers so it "just works".
+            // Flags with no engine modifier yet (case/sup/sub/highlight) still round-trip without
+            // being wrapped. This test is the parity doc's proof.
             var comp = NewComponent();
             try
             {
+                comp.text = "Hello";
+
                 comp.fontStyle = OpenGlyph.FontStyles.Bold;
                 Assert.AreEqual(700, comp.FontWeight, "Bold must set engine FontWeight 700.");
                 Assert.AreEqual(StyleAxis.Normal, comp.FontStyleAxis);
@@ -447,15 +452,34 @@ namespace LightSide.Tests
                 Assert.AreEqual(700, comp.FontWeight);
                 Assert.AreEqual(StyleAxis.Italic, comp.FontStyleAxis);
 
-                // The other flags are STORED (round-trip) but do NOT change weight/axis (not applied).
-                comp.fontStyle = OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Underline
-                                 | OpenGlyph.FontStyles.Highlight | OpenGlyph.FontStyles.Subscript;
-                Assert.AreEqual(comp.fontStyle,
-                    OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Underline
-                    | OpenGlyph.FontStyles.Highlight | OpenGlyph.FontStyles.Subscript,
-                    "Flags must round-trip even when not applied.");
-                Assert.AreEqual(400, comp.FontWeight, "Non-bold flags must not change weight (not applied in R1).");
-                Assert.AreEqual(StyleAxis.Normal, comp.FontStyleAxis, "Non-italic flags must not change axis (not applied in R1).");
+                // Underline composes <u>…</u> into the engine source; `text` still returns the RAW
+                // string (no tags leak to the user), and the engine `Text` carries the wrapper.
+                comp.fontStyle = OpenGlyph.FontStyles.Underline;
+                Assert.AreEqual("Hello", comp.text, "text getter must return the RAW user string.");
+                Assert.IsTrue(comp.Text.Contains("<u>") && comp.Text.Contains("</u>"),
+                    "Underline flag must compose <u>…</u> into the engine source. Engine Text=" + comp.Text);
+
+                comp.fontStyle = OpenGlyph.FontStyles.Strikethrough;
+                Assert.IsTrue(comp.Text.Contains("<s>") && comp.Text.Contains("</s>"),
+                    "Strikethrough flag must compose <s>…</s> into the engine source. Engine Text=" + comp.Text);
+
+                comp.fontStyle = OpenGlyph.FontStyles.Underline | OpenGlyph.FontStyles.Strikethrough;
+                Assert.IsTrue(comp.Text.Contains("<u>") && comp.Text.Contains("<s>"),
+                    "Both flags must compose both tags. Engine Text=" + comp.Text);
+
+                // Clearing the flags returns the engine source to the raw text (no stale tags).
+                comp.fontStyle = OpenGlyph.FontStyles.Normal;
+                Assert.AreEqual("Hello", comp.Text, "Clearing style flags must restore the raw engine source.");
+
+                // Flags with no engine modifier yet are stored (round-trip) but NOT wrapped — the
+                // engine source stays raw so no literal "<sup>" leaks into the rendered run.
+                comp.fontStyle = OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Subscript
+                                 | OpenGlyph.FontStyles.Highlight;
+                Assert.AreEqual(
+                    OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Subscript | OpenGlyph.FontStyles.Highlight,
+                    comp.fontStyle, "Not-yet-wired flags must still round-trip.");
+                Assert.AreEqual("Hello", comp.Text,
+                    "Not-yet-wired flags must NOT be wrapped (no literal tag leak). Engine Text=" + comp.Text);
             }
             finally { DestroyComponent(comp); }
         }
