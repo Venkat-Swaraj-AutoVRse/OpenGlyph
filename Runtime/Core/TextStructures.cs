@@ -165,6 +165,17 @@ namespace LightSide
         /// <summary>The font ID to use for shaping this run.</summary>
         public int fontId;
 
+        /// <summary>The resolved style request (weight/width/style) for this run (Phase 2).</summary>
+        public FontStyleSpec styleSpec;
+
+        /// <summary>The variable-font instance key for this run; <see cref="VariationKey.None"/> for a static face (Phase 2).</summary>
+        public VariationKey variationKey;
+
+        /// <summary>True when the face was resolved to a REAL styled face, so synthetic bold/italic must be suppressed (Phase 2).</summary>
+        public bool realBold;
+        /// <summary>True when a real italic/oblique face was resolved, suppressing synthetic italic (Phase 2).</summary>
+        public bool realItalic;
+
         /// <summary>Gets the text direction derived from the BiDi level.</summary>
         public TextDirection Direction => (bidiLevel & 1) == 0
             ? TextDirection.LeftToRight
@@ -197,6 +208,17 @@ namespace LightSide
 
         /// <summary>The font ID used for this run.</summary>
         public int fontId;
+
+        /// <summary>The variable-font instance key for this run; <see cref="VariationKey.None"/> for a static face (Phase 2).</summary>
+        public VariationKey variationKey;
+
+        /// <summary>The resolved style request (weight/width/style) for this run (Phase 2).</summary>
+        public FontStyleSpec styleSpec;
+
+        /// <summary>True when a real styled (bold) face was used, so synthetic bold must be suppressed (Phase 2).</summary>
+        public bool realBold;
+        /// <summary>True when a real italic/oblique face was used, so synthetic italic must be suppressed (Phase 2).</summary>
+        public bool realItalic;
     }
 
 
@@ -248,6 +270,18 @@ namespace LightSide
 
         /// <summary>The font ID used for this glyph.</summary>
         public int fontId;
+
+        /// <summary>
+        /// Index of this glyph's run in <see cref="UniTextBuffers.orderedRuns"/>, or -1 for a plain
+        /// run that carries no variation and no real-face styling (Phase 2). ONE blittable int so
+        /// <see cref="PositionedGlyph"/> stays a pure blittable value type AND stays within 4 bytes of
+        /// the pre-phase2 layout — the per-glyph array must hold no managed references (a
+        /// <see cref="VariationKey"/> by value does, via its two internal arrays), and every extra
+        /// per-glyph byte is memcpy on the layout/mesh hot path (worse for the many-glyph RTL/complex
+        /// scripts). The run's <see cref="VariationKey"/>, <c>realBold</c> and <c>realItalic</c> are
+        /// looked up by this index only when it is >= 0 (the styled/varied feature path).
+        /// </summary>
+        public int orderedRunIndex;
 
         /// <summary>Index into the shaped glyphs buffer.</summary>
         public int shapedGlyphIndex;

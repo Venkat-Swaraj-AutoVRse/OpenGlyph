@@ -1,4 +1,5 @@
 using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using UnityEngine;
@@ -226,6 +227,88 @@ namespace LightSide
 
             SharedFontCache.Set(codepoint, mainFontId, fontId);
             return fontId;
+        }
+
+        /// <summary>
+        /// Resolves the font id for a styled run (weight/width/style + <c>&lt;b&gt;</c>/<c>&lt;i&gt;</c>
+        /// markup) via the stack's <see cref="UniTextFontStack.ResolveStyledFont"/>. Registers the
+        /// resolved face so <see cref="GetFontAsset"/>/<see cref="GetMaterials"/> can find it, and
+        /// reports whether synthetic bold/italic is still required. Returns the main font id when no
+        /// stack/family is available (unchanged legacy behaviour).
+        /// </summary>
+        public int ResolveStyledFontId(FontStyleSpec spec, bool markupBold, bool markupItalic,
+            out bool realBold, out bool realItalic)
+        {
+            realBold = false;
+            realItalic = false;
+
+            if (fontStackAsset == null)
+                return mainFontId;
+
+            var face = fontStackAsset.ResolveStyledFont(spec, markupBold, markupItalic, out var how);
+            if (face == null)
+                return mainFontId;
+
+            // A real styled face was chosen when synthesis is NOT needed for the requested axis.
+            bool wantsBold = markupBold || spec.weight >= FontStyleSpec.BoldWeight;
+            bool wantsItalic = markupItalic || spec.style != StyleAxis.Normal;
+            realBold = wantsBold && !how.synthesizeBold;
+            realItalic = wantsItalic && !how.synthesizeItalic;
+
+            var fontId = GetFontId(face);
+            if (!fontAssets.ContainsKey(fontId))
+                RegisterFontAsset(fontId, face);
+            return fontId;
+        }
+
+        // Per-face variation mapper cache (fvar read once per face).
+        private readonly FastIntDictionary<VariationMapper> variationMappers = new();
+
+        private VariationMapper GetVariationMapper(int fontId)
+        {
+            if (variationMappers.TryGetValue(fontId, out var m))
+                return m;
+
+            var font = GetFontAsset(fontId);
+            m = null;
+            if (font != null && font.HasFontData && FT.IsInitialized)
+            {
+                var face = FT.LoadFace(font.FontData, 0);
+                if (face != IntPtr.Zero)
+                {
+                    try { m = VariationMapper.Read(face); }
+                    finally { FT.UnloadFace(face); }
+                }
+            }
+            variationMappers[fontId] = m;
+            return m;
+        }
+
+        /// <summary>
+        /// Computes the <see cref="VariationKey"/> for a styled run on <paramref name="fontId"/>.
+        /// Returns <see cref="VariationKey.None"/> for a static (non-variable) face. When
+        /// <paramref name="opticalSize"/> &gt; 0 the font's <c>opsz</c> axis is auto-driven from it.
+        /// </summary>
+        public VariationKey GetVariationKeyForFont(int fontId, FontStyleSpec spec, float opticalSize)
+        {
+            var m = GetVariationMapper(fontId);
+            if (m == null || !m.isVariable)
+                return VariationKey.None;
+            return m.Map(spec, opticalSize, out _, out _);
+        }
+
+        /// <summary>
+        /// Resolves the full variation coordinate vector (tags + design coords) for a styled run on a
+        /// variable face, for passing to the shaper / FreeType. Returns null tags for a static face.
+        /// </summary>
+        public VariationKey GetVariationCoords(int fontId, FontStyleSpec spec, float opticalSize,
+            out uint[] tags, out float[] coords)
+        {
+            tags = null; coords = null;
+            var m = GetVariationMapper(fontId);
+            if (m == null || !m.isVariable)
+                return VariationKey.None;
+            return m.Map(spec, opticalSize, out tags, out coords);
         }
 
         /// <summary>

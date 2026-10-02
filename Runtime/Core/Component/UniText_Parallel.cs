@@ -234,6 +234,7 @@ namespace LightSide
         private static Stack<HashSet<uint>> glyphSetPool;
         private static Stack<List<(uint, uint)>> charEntryPool;
         private static List<uint> tempGlyphList;
+        private static List<uint> variedGlyphList; // Phase 2: per-run varied glyph indices
 
         private static int CollectGlyphRequestsFromAllComponents(PooledBuffer<UniText> components, int count)
         {
@@ -269,6 +270,30 @@ namespace LightSide
                     ref readonly var run = ref shapedRuns[r];
                     var fontAsset = fontProvider.GetFontAsset(run.fontId);
                     if (fontAsset == null) continue;
+
+                    // Phase 2: a run bound to a variable-font instance rasterizes into the per-
+                    // VariationKey atlas store (coords applied before raster) rather than the shared
+                    // glyph set. Done here on the main thread, before the parallel render pass.
+                    if (!run.variationKey.IsNone)
+                    {
+                        variedGlyphList ??= new List<uint>(64);
+                        variedGlyphList.Clear();
+                        var vend = run.glyphStart + run.glyphCount;
+                        for (int g = run.glyphStart; g < vend; g++)
+                        {
+                            var gi = (uint)shapedGlyphs[g].glyphId;
+                            if (gi == 0) continue;
+                            if (fontAsset.HasGlyphInAtlas(gi, run.variationKey)) continue;
+                            variedGlyphList.Add(gi);
+                        }
+                        if (variedGlyphList.Count > 0)
+                        {
+                            fontProvider.GetVariationCoords(run.fontId, run.styleSpec,
+                                tp.buf.shapingFontSize, out var vtags, out var vcoords);
+                            fontAsset.EnsureGlyphsForVariation(variedGlyphList, run.variationKey, vtags, vcoords);
+                        }
+                        continue; // varied glyphs handled; do not add to the plain set
+                    }
 
                     var codepoints = tp.buf.codepoints;
                     var provider = UnicodeData.Provider;
@@ -577,7 +602,41 @@ namespace LightSide
                 fontSize = shapingFontSize,
                 baseDirection = baseDirection
             };
+
+            // Phase 2: feed the component's weight/style property to the style source so a FontFamily
+            // selects the matching real face (and variable fonts drive their axes). Active only when a
+            // non-default style is requested; markup <b>/<i> continues through the attribute parser and
+            // the synthetic modifiers, and the two inputs OR together in the Bold/Italic buffers.
+            if (fontWeight != FontStyleSpec.NormalWeight || fontStyleAxis != StyleAxis.Normal)
+                textProcessor.SetStyleSource(true,
+                    new FontStyleSpec(fontWeight, FontStyleSpec.NormalWidth, fontStyleAxis), null, null);
+            else
+                textProcessor.SetStyleSource(false, FontStyleSpec.Normal, null, null);
+
+            // Phase 2: a property-driven style has no markup span, so AttributeParser.Apply never
+            // Prepare()s the Bold/Italic modifiers -> their OnGlyph/OnShaped never subscribe and the
+            // flags SetStyleSource writes go unconsumed. Prepare the matching registered modifier(s)
+            // here so property-driven synthetic bold/italic renders exactly like <b>/<i> markup.
+            PrepareStyleModifiers();
+
             textProcessor.EnsureFirstPass(textSpan, settings);
+        }
+
+        // Ensures the registered BoldModifier/ItalicModifier are initialized (subscribed) when the
+        // component's weight/style property requests bold/italic but no markup span would trigger them.
+        private void PrepareStyleModifiers()
+        {
+            bool wantBold = fontWeight >= FontStyleSpec.BoldWeight;
+            bool wantItalic = fontStyleAxis != StyleAxis.Normal;
+            if (!wantBold && !wantItalic) return;
+
+            for (int i = 0; i < modRegisters.Count; i++)
+            {
+                var mod = modRegisters[i]?.Modifier;
+                if (mod == null || mod.IsInitialized) continue;
+                if ((wantBold && mod is BoldModifier) || (wantItalic && mod is ItalicModifier))
+                    mod.Prepare();
+            }
         }
 
         private void DoGenerateMeshData()
