@@ -38,6 +38,6 @@ MonoBehaviour:
     tabWidth: 256
   unitsPerEm: 512
   atlasSize: 1024
-  spreadStrength: 0.25
+  spreadStrength: 0.1
   atlasRenderMode: 0
   sourceFont: {fileID: 0}
