@@ -307,6 +307,10 @@ namespace LightSide.Tests
             ut.FontStack = stack;
             ut.Appearance = appearance;
 
+            // The geometry skip is OPT-IN (default OFF), so enable it explicitly to exercise the skip
+            // path; TearDown restores the saved settings instance.
+            UniTextSettings.SetSkipUnchangedGeometryUploadForTests(true);
+
             try
             {
                 ut.Text = "Hello World";

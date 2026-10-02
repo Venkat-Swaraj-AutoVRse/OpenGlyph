@@ -115,18 +115,21 @@ namespace LightSide
         public static long SharedAtlasByteBudgetGlobal => Instance != null ? Instance.sharedAtlasByteBudgetGlobal : 0;
 
         [SerializeField]
-        [Tooltip("When ON (default), a UniText component skips the Unity mesh re-upload on a rebuild " +
-                 "whose generated geometry is byte-identical to what its renderers already display " +
-                 "(same vertices/UVs/colours). The mesh upload is the dominant cost of a full rebuild, " +
-                 "so this zeroes the cost of a text change that does not change rendered output " +
-                 "(trailing-whitespace edits, reassigning equivalent text, score/timer updates landing " +
-                 "on the same string). Behaviour-preserving: identical geometry draws identically. Turn " +
-                 "OFF only to isolate a suspected skip bug.")]
-        private bool skipUnchangedGeometryUpload = true;
+        [Tooltip("OPT-IN (default OFF). When ON, a UniText component skips the Unity mesh re-upload on " +
+                 "a rebuild whose generated geometry is byte-identical to what its renderers already " +
+                 "display (same vertices/UVs/colours). Behaviour-preserving: identical geometry draws " +
+                 "identically. NOT free: the exact-geometry fingerprint costs ~25.5 ms per 100 objects " +
+                 "x 2,405 chars, about +17% on every Windows full rebuild (148 ms) and more on Quest. " +
+                 "It only pays off when text changes often WITHOUT changing rendered output (e.g. " +
+                 "trailing-whitespace alternation, reassigning equivalent text); for general text it is " +
+                 "a net cost. Leave OFF unless your workload is dominated by no-op geometry rebuilds.")]
+        private bool skipUnchangedGeometryUpload = false;
 
         /// <summary>
-        /// When true (default), a component skips the Unity mesh re-upload when a rebuild produces
-        /// geometry identical to what is already displayed. See UniText.DoApplyMesh. Behaviour-preserving.
+        /// Opt-in (default false). When true, a component skips the Unity mesh re-upload when a rebuild
+        /// produces geometry identical to what is already displayed. See UniText.DoApplyMesh.
+        /// Behaviour-preserving, but the exact fingerprint adds ~17% to a Windows full rebuild, so it
+        /// only pays off on workloads dominated by no-op geometry rebuilds.
         /// </summary>
         public static bool SkipUnchangedGeometryUpload => Instance != null && Instance.skipUnchangedGeometryUpload;
 
@@ -150,6 +153,13 @@ namespace LightSide
         internal static void SetUseUnifiedRendererForTests(bool value)
         {
             if (Instance != null) { Instance.useUnifiedRenderer = value; Changed?.Invoke(); }
+        }
+
+        /// <summary>TEST ONLY: forces the geometry-skip default on the current instance (it is OFF by
+        /// default, so a test that needs the skip to fire must enable it explicitly).</summary>
+        internal static void SetSkipUnchangedGeometryUploadForTests(bool value)
+        {
+            if (Instance != null) { Instance.skipUnchangedGeometryUpload = value; Changed?.Invoke(); }
         }
 
         public static event Action Changed;
