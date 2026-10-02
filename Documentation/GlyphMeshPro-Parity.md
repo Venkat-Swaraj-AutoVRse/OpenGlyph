@@ -119,17 +119,17 @@ OpenGlyph engine supports `HorizontalAlignment {Left,Center,Right}` ×
 | `TopLeft/Top/TopRight` | direct | H∈{L,C,R}, V=Top. |
 | `Left/Center/Right` | direct | H∈{L,C,R}, V=Middle. |
 | `BottomLeft/Bottom/BottomRight` | direct | H∈{L,C,R}, V=Bottom. |
-| `*Justified` | new (R2) | Engine has no inter-word justification. R1 maps to the row's Left and **records the gap**; R2 adds a justification pass in layout. |
-| `*Flush` | new (R2) | Flush (justify incl. last line) → same as Justified gap. |
+| `*Justified` | **applied (R2)** | The layout pass distributes inter-word slack so every line but the paragraph's last fills the box; last line stays ragged. Verified by test + GPU PNG vs TMP. |
+| `*Flush` | **applied (R2)** | Like Justified but the paragraph's last line is justified too. Verified by test + GPU PNG. |
 | `*GeoAligned` / H=`Geometry` | oos | Geometry-based alignment (align to rendered glyph bounds) — niche; mapped to Center + documented. |
 | `Baseline*` (V=Baseline) | adapter | mapped to `UnderEdge=Baseline` + V=Bottom approximation. |
 | `Capline*` (V=Capline) | adapter | mapped to `OverEdge=CapHeight` + V=Top approximation. |
 | `Midline*` (V=Geometry) | adapter | mapped to V=Middle. |
 
-**Intentional difference:** Justified/Flush are not visually justified in Round 1;
-GlyphMeshProUGUI exposes the enum values (so code compiles and migrates) but
-renders them as left-aligned until the R2 justification pass lands. Tests assert
-this explicitly rather than hiding it.
+**Round 2 (verified):** Justified/Flush are now really justified � the engine layout pass
+distributes inter-word slack. Justified fills every line but the paragraph's last (last line
+ragged, matching TMP); Flush justifies the last line too. GPU evidence:
+`scratch/gmp-round2/evidence/alignment_justified_flush.png` (lines fill the column, match TMP).
 
 ## Font-style parity (`FontStyles` flags)
 
@@ -239,7 +239,7 @@ Target: Quest / world-space text without a Canvas. Design:
 
 ## Round 2 gaps (tracked)
 
-- Inter-word **justification** (Justified/Flush alignment, `<align=justified>`).
+- Inter-word **justification** (Justified/Flush alignment) is **done** (R2). Remaining: inline `<align=justified>` tag.
 - Overflow **ScrollRect / Page / Linked**.
 - Wrapping **PreserveWhitespace / PreserveWhitespaceNoWrap**.
 - `GlyphMeshPro` headless engine host + world-space mesh emission.

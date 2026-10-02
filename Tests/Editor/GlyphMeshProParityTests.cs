@@ -265,8 +265,8 @@ namespace LightSide.Tests
             try
             {
                 comp.alignment = OpenGlyph.TextAlignmentOptions.Justified;
-                Assert.AreEqual(HorizontalAlignment.Left, comp.HorizontalAlignment,
-                    "Round 1: Justified maps to engine Left (documented gap — see parity doc).");
+                Assert.AreEqual(HorizontalAlignment.Justified, comp.HorizontalAlignment,
+                    "Round 2: Justified maps to engine Justified (real inter-word justification).");
                 Assert.AreEqual(VerticalAlignment.Middle, comp.VerticalAlignment);
             }
             finally { DestroyComponent(comp); }
@@ -482,6 +482,85 @@ namespace LightSide.Tests
                     "Not-yet-wired flags must NOT be wrapped (no literal tag leak). Engine Text=" + comp.Text);
             }
             finally { DestroyComponent(comp); }
+        }
+
+        [Test]
+        public void Alignment_Justified_FillsNonLastLines_LastStaysRagged()
+        {
+            // Round 2: Justified distributes inter-word slack so every line EXCEPT the paragraph's last
+            // fills the box width; the last line stays at its natural (shorter) width. Flush justifies
+            // the last line too. Measured from POSITIONED glyphs (justification moves glyph x in the
+            // layout pass), driven through the real engine (deterministic headless).
+            const float boxW = 420f;
+
+            var leftW = PositionedLineWidths(Paragraph, boxW, wrap: true, HorizontalAlignment.Left);
+            Assert.GreaterOrEqual(leftW.Count, 3, "Need a multi-line wrap for the test.");
+
+            var justW = PositionedLineWidths(Paragraph, boxW, wrap: true, HorizontalAlignment.Justified);
+            Assert.AreEqual(leftW.Count, justW.Count, "Justification must not change the line count/breaks.");
+
+            int last = justW.Count - 1;
+            for (int i = 0; i < last; i++)
+            {
+                Assert.Greater(justW[i], leftW[i] + 0.5f,
+                    $"Justified line {i} ({justW[i]:F1}) must be wider than ragged ({leftW[i]:F1}).");
+                Assert.GreaterOrEqual(justW[i], boxW * 0.90f,
+                    $"Justified line {i} ({justW[i]:F1}) should fill ~box width ({boxW}).");
+                Assert.LessOrEqual(justW[i], boxW * 1.02f,
+                    $"Justified line {i} ({justW[i]:F1}) must not overflow the box ({boxW}).");
+            }
+            Assert.AreEqual(leftW[last], justW[last], 1.5f,
+                "Justified must leave the paragraph's LAST line un-justified (ragged).");
+
+            // Flush: non-last lines still fill; the last line is justified too when it had slack.
+            var flushW = PositionedLineWidths(Paragraph, boxW, wrap: true, HorizontalAlignment.Flush);
+            for (int i = 0; i < flushW.Count - 1; i++)
+                Assert.GreaterOrEqual(flushW[i], boxW * 0.90f, $"Flush line {i} should fill the box.");
+        }
+
+        /// <summary>Per-line widths computed from POSITIONED glyphs (max right − min left per baseline),
+        /// which is where the layout justification pass has moved the glyphs. Uses the same engine path
+        /// the component runs.</summary>
+        private System.Collections.Generic.List<float> PositionedLineWidths(
+            string text, float width, bool wrap, HorizontalAlignment halign)
+        {
+            var (tp, buffers) = RealLayoutFixtures.BuildProcessor(_stack, _appearance);
+            try
+            {
+                var settings = new TextProcessSettings
+                {
+                    fontSize = FontSize,
+                    baseDirection = TextDirection.LeftToRight,
+                    enableWordWrap = wrap,
+                };
+                settings.HorizontalAlignment = halign;
+                settings.MaxWidth = width <= 0 ? TextProcessSettings.FloatMax : width;
+                settings.MaxHeight = TextProcessSettings.FloatMax;
+
+                tp.EnsureFirstPass(text, settings);
+                Assert.IsTrue(tp.HasValidFirstPassData, "OpenGlyph first pass produced no data.");
+                float measureWidth = width <= 0 ? TextProcessSettings.FloatMax : width;
+                tp.EnsureLines(measureWidth, FontSize, wrap);
+                tp.EnsurePositions(settings);
+
+                var glyphs = tp.PositionedGlyphs;
+                var widths = new System.Collections.Generic.List<float>();
+                float lastBaseline = float.NaN;
+                float minL = 0, maxR = 0; bool open = false;
+                for (int i = 0; i < glyphs.Length; i++)
+                {
+                    ref readonly var g = ref glyphs[i];
+                    if (float.IsNaN(lastBaseline) || !Mathf.Approximately(g.y, lastBaseline))
+                    {
+                        if (open) widths.Add(maxR - minL);
+                        lastBaseline = g.y; minL = g.left; maxR = g.right; open = true;
+                    }
+                    else { if (g.left < minL) minL = g.left; if (g.right > maxR) maxR = g.right; }
+                }
+                if (open) widths.Add(maxR - minL);
+                return widths;
+            }
+            finally { buffers.EnsureReturnBuffers(); }
         }
 
         private void RequireTmp()
