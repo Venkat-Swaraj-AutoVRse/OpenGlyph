@@ -53,7 +53,7 @@ Where TMP exposes a concept the engine lacks (overflow modes, justification,
 | `TextMeshPro`                 | `OpenGlyph.GlyphMeshPro`              | World-space; design + stub (Round 1). |
 | `TMP_FontAsset`               | `LightSide.UniTextFont`               | Font asset. |
 | `TMP_Text`                    | `GlyphMeshProUGUI` base surface       | Abstract base in TMP; folded into the component here. |
-| `FontStyles` (flags)          | `OpenGlyph.FontStyles` (flags)        | Mirror of TMP flag names; mapped to engine `StyleAxis` + span tags. |
+| `FontStyles` (flags)          | `OpenGlyph.FontStyles` (flags)        | Mirror of TMP flag names. Round 1 wires Bold/Italic (weight/axis); other flags are R2 gaps. |
 | `TextAlignmentOptions`        | `OpenGlyph.TextAlignmentOptions`      | Mirror of TMP names; see Alignment section for gaps. |
 | `TextOverflowModes`           | `OpenGlyph.TextOverflowModes`         | Mirror of TMP names; Overflow/Ellipsis/Truncate/Masking live, rest stubbed. |
 | `TextWrappingModes`           | `OpenGlyph.TextWrappingModes`         | Mapped onto engine `WordWrap` bool. |
@@ -81,7 +81,7 @@ parity · **stub** = present with TMP signature, TODO body (documented) ·
 | `float fontSize` | direct | → `UniText.FontSize`. |
 | `bool enableAutoSizing` | direct | → `UniText.AutoSize`. |
 | `float fontSizeMin` / `fontSizeMax` | direct | → `UniText.MinFontSize` / `MaxFontSize`. |
-| `FontStyles fontStyle` | adapter | Bold/Italic → `StyleAxis`+`FontWeight`; Underline/Strikethrough/Sub/Super/LowerCase/UpperCase/SmallCaps → span-style injection. Highlight → `<mark>`. |
+| `FontStyles fontStyle` | adapter | Round 1 wires **Bold** → `FontWeight` and **Italic** → `StyleAxis`. Underline/Strikethrough/Sub/Super/LowerCase/UpperCase/SmallCaps/Highlight are stored but **not applied** in R1 (R2 gaps; see font-style section). |
 | `Color color` | direct | → `UniText.color` (override). |
 | `bool enableVertexGradient` + `VertexGradient colorGradient` | adapter | 4-corner gradient applied as a per-span vertex-color modifier over the engine's gradient system. Feasible; see Gradient section. |
 | `TextAlignmentOptions alignment` | adapter | split into `HorizontalAlignment`+`VerticalAlignment`; Justified/Flush/Geometry/Baseline/Capline/Midline gaps documented below. |
@@ -136,13 +136,18 @@ this explicitly rather than hiding it.
 | TMP flag | Status | Mapping |
 |----------|--------|---------|
 | `Normal` | direct | default. |
-| `Bold` | adapter | engine `FontWeight` → 700 (synthetic bold fallback if no bold face). |
-| `Italic` | adapter | engine `FontStyleAxis = Italic` (synthetic oblique fallback). |
-| `Underline` | adapter | span style `<u>`. |
-| `Strikethrough` | adapter | span style `<s>`. |
-| `LowerCase` / `UpperCase` / `SmallCaps` | adapter | span text transform `<lowercase>`/`<uppercase>`/`<smallcaps>`. |
-| `Subscript` / `Superscript` | adapter | span `<sub>`/`<sup>`. |
-| `Highlight` | adapter | span `<mark>`. |
+| `Bold` | adapter | engine `FontWeight` → 700 (synthetic bold fallback if no bold face). **Wired.** |
+| `Italic` | adapter | engine `FontStyleAxis = Italic` (synthetic oblique fallback). **Wired.** |
+| `Underline` | **gap (R2)** | engine has a `<u>` rule, but the `fontStyle` setter does not yet inject it; set via `<u>` markup for now. |
+| `Strikethrough` | **gap (R2)** | engine has a `<s>` rule, but `fontStyle` does not yet inject it; use `<s>` markup. |
+| `LowerCase` / `UpperCase` / `SmallCaps` | **gap (R2)** | no engine text-transform rule (`upper` tag exists but is not wired to `fontStyle`); TODO. |
+| `Subscript` / `Superscript` | **gap (R2)** | no engine sub/sup rule; TODO. |
+| `Highlight` | **gap (R2)** | no engine highlight rule; the component-level `TextHighlighter` is separate; TODO. |
+
+**Round 1 reality (verified by test):** `fontStyle` applies **Bold and Italic only**; the other
+flags are stored on the component but have no visible effect in Round 1 (they are kept so bitmasks
+migrate from TMP unchanged, and are wired in Round 2). Use the corresponding markup where the
+engine already has a rule (`<u>`, `<s>`).
 
 ## Overflow parity (`TextOverflowModes`)
 
@@ -236,3 +241,11 @@ Target: Quest / world-space text without a Canvas. Design:
 - `GlyphMeshPro` headless engine host + world-space mesh emission.
 - `<sprite>` / `<pos>` / `<rotate>` / `<page>` tags.
 - `GetTextInfo(string)` full fidelity (sprite/link/word info arrays).
+- **`fontStyle` flags not yet wired:** Underline, Strikethrough, LowerCase,
+  UpperCase, SmallCaps, Subscript, Superscript, Highlight (only Bold/Italic apply
+  in Round 1). Underline/Strikethrough need wiring to the existing `<u>`/`<s>` rules;
+  the rest need new engine rules.
+- **Rich-text tags with no engine rule (apply via markup is impossible until added):**
+  `<lowercase>`, `<smallcaps>`, `<mark>`, `<sup>`, `<sub>`, `<voffset>`, `<nobr>`,
+  `<mspace>`, `<space>`, `<width>`, `<indent>`, `<margin>` (inline), `<align>` (inline),
+  `<alpha>`, `<font>` (inline). `<uppercase>` is the engine's `upper` (needs a name alias).
