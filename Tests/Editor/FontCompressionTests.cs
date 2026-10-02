@@ -132,6 +132,60 @@ namespace LightSide.Tests
             Assert.Less(packed.Length, raw.Length, "large font still compresses below raw");
         }
 
+        [Test]
+        public void DefaultCodec_IsDeflate_DecodableEverywhere()
+        {
+            // The DEFAULT (no preferBrotli) must emit a Deflate container (codec 0), because Deflate
+            // is in the BCL on every Unity backend — a shipped asset must decode on every target.
+            var raw = new byte[8192];
+            for (int i = 0; i < raw.Length; i++) raw[i] = (byte)(i % 11);
+            var packed = FontCompression.Compress(raw); // default: preferBrotli = false
+            Assert.IsTrue(FontCompression.IsCompressed(packed), "default compression still produces a container");
+            Assert.AreEqual(0, FontCompression.CodecId(packed), "default codec is Deflate (0), decodable on every platform");
+            Assert.AreEqual(raw, FontCompression.Decompress(packed), "default round-trips byte-exact");
+        }
+
+        [Test]
+        public void BrotliOptIn_RoundTrips_WhenAvailable_ElseFallsBackToDeflate()
+        {
+            var raw = new byte[16384];
+            var rnd = new System.Random(99);
+            for (int i = 0; i < raw.Length; i++) raw[i] = (byte)((i % 64 < 40) ? (i % 7) : rnd.Next(256));
+
+            var packed = FontCompression.Compress(raw, System.IO.Compression.CompressionLevel.Optimal, preferBrotli: true);
+            Assert.IsTrue(FontCompression.IsCompressed(packed), "opt-in Brotli still produces a container");
+            int codec = FontCompression.CodecId(packed);
+            if (FontCompression.BrotliAvailable)
+                Assert.AreEqual(1, codec, "when Brotli round-trips on this runtime, the opt-in container is Brotli (1)");
+            else
+                Assert.AreEqual(0, codec, "when Brotli is unavailable, Compress NEVER emits a Brotli container — it falls back to Deflate (0)");
+            Assert.AreEqual(raw, FontCompression.Decompress(packed), "opt-in path round-trips byte-exact regardless of codec");
+        }
+
+        [Test]
+        public void Decompress_NeverCrashes_OnUnknownCodec()
+        {
+            // Hand-craft a UTFZ container with a bogus codec id: decode must throw a controlled
+            // InvalidDataException, not an unhandled native/type fault.
+            var raw = new byte[256];
+            new System.Random(3).NextBytes(raw);
+            var packed = (byte[])FontCompression.Compress(raw, preferBrotli: false).Clone();
+            Assume.That(FontCompression.IsCompressed(packed), "need a real container to corrupt");
+            packed[6] = 0x7F; // unknown codec id
+            Assert.Throws<System.IO.InvalidDataException>(() => FontCompression.Decompress(packed),
+                "an unknown codec id is rejected cleanly, never crashing the player");
+        }
+
+        [Test]
+        public void BrotliAvailable_ProbeIsStableAndReportsCapability()
+        {
+            // The probe must be deterministic across calls (cached) and must gate codec choice.
+            bool a = FontCompression.BrotliAvailable;
+            bool b = FontCompression.BrotliAvailable;
+            Assert.AreEqual(a, b, "BrotliAvailable is a stable, cached capability probe");
+            UnityEngine.Debug.Log($"[FontCompress] BrotliAvailable (editor runtime) = {a}");
+        }
+
         private static string FindBigFont()
         {
             foreach (var root in new[]
