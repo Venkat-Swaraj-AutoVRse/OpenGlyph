@@ -50,7 +50,24 @@ frame time, managed alloc, GC gen0/1/2. The OpenGlyph build adds per-system **va
 expected vs observed characters and observed vertices (quad mesh ⇒ 4 verts/char), rendered **N/A**
 when a system exposes no readable vertex buffer (never faked as 0).
 
-## 3. Same-text vs different-text — the cache question, resolved
+## 3. Correction — every earlier OpenGlyph number in this file was invalid
+
+The previous revision (`9febd7d`) reported OpenGlyph at ~1 ms (Windows) / ~11 ms (Quest) for a
+100×2,405-char full rebuild and called the cache suspicion "disproved". **That was wrong.** The
+benchmark project had no `Resources/UniTextSettings.asset`, so in player builds OpenGlyph could
+not load its Unicode data and **generated no text at all**; the timings only measured assigning
+the string. The old validity check compared the *assigned* string length, so it passed anyway.
+
+Fix: the settings asset was added to the scratch project's `Resources/`, and validity now counts
+work done **inside the timed frame** (`inFrameGenMeshCalls`, `inFrameGlyphs`, `inFrameVerts`).
+Every OpenGlyph row below shows **100/100 mesh generations and ~220k–245k glyphs per timed frame**.
+Sanity check: OpenGlyph single-thread is now **2.0–2.2× slower on Quest than Windows**, matching
+OpenGlyph's own benchmark (~2×); the invalid numbers had a 10–20× gap.
+
+Product issue raised by this: OpenGlyph fails **silently** (log line, no text) when the settings
+asset is missing from a player build. Tracked as open issue #1.
+
+## 3a. Same-text vs different-text (verified runs)
 
 **Suspicion going in:** OpenGlyph looked "too fast" because every iteration re-assigned the *same*
 text, so a text-content fast path (the `UniText.Text` setter's `text == value` no-op, or
@@ -65,60 +82,49 @@ content fast path can fire, while total length stays within ~1 char of the share
 
 | System | win **same** | win **different** | quest **same** | quest **different** |
 |---|--:|--:|--:|--:|
-| **OpenGlyph (single-thread)** | **1.01** | **1.13** | **11.09** | **11.20** |
-| **OpenGlyph (parallel)** | **1.01** | **1.23** | **11.09** | **11.15** |
-| TextMeshPro | 220.29 | 241.22 | 516.79 | 574.90 |
-| UI Toolkit | 298.66 | N/A¹ | 1066.32 | N/A¹ |
+| **OpenGlyph (single-thread)** | **148.0** | **160.9** | **304.0** | **328.6** |
+| **OpenGlyph (parallel)** | **46.8** | **46.7** | **134.6** | **146.5** |
+| TextMeshPro | 228.9 | 250.2 | 501.0 | 542.0 |
+| UI Toolkit | 371.5 | N/A¹ | 980.3 | N/A¹ |
 
 ¹ UI Toolkit is not re-run in the unique-text pass and is unverified either way (see §5).
 
-**Verdict: the "too fast" suspicion is disproved, not confirmed.** OpenGlyph's same-vs-different
-gap is tiny (**win +0.1–0.2 ms, quest +0.1 ms**). It is **not** masking cost with a text-content
-cache — the full-rebuild path re-shapes and re-lays-out even when text repeats. The named caches
-that *could* have fired (setter no-op; shaper/layout result reuse) contribute only that ~0.1 ms.
-TMP, by contrast, shows a real content penalty (win 220→241, **quest 517→575 ms**), consistent
-with regenerating a per-string mesh each time. OpenGlyph is genuinely ≈1 ms (Win) / ≈11 ms (Quest)
-for a 100×2,405-char full rebuild.
+**Verdict:** different text costs OpenGlyph **+8–9 %** single-threaded (shaping/glyph reuse is
+lost) and ~0–9 % in parallel; TMP pays a similar **+8–9 %**. So repeated text gives OpenGlyph
+only a modest advantage in this harness, and the comparison against TMP holds in both modes.
 
-## 4. Full results — median of run-medians (ms)
+## 4. Full results — median of the 3 run-medians (ms, lower = faster)
 
-### Windows IL2CPP — Acer Nitro ANV15-51, i5-13420H, 3 clean runs
-(`gfx=Null` — headless `-nographics` batch player; CPU-side layout/mesh work is what's timed.)
+Workload on both platforms: 100 objects × 2,405 chars, 10 timed iterations after 3 warmups.
 
-| System | creation | fullRebuild (same) | fullRebuild (diff) | meshRebuild | Validity |
-|---|--:|--:|--:|--:|---|
-| **OpenGlyph (ST)** | 8.5 | **1.01** | **1.13** | 1.00 | **VALID** 240500/240500 chars |
-| **OpenGlyph (Par)** | 8.3 | **1.01** | **1.23** | 0.98 | **VALID** |
-| TextMeshPro | 330 | 220.29 | 241.22 | 232 | **VALID** |
-| UI Toolkit | 401 | 298.66 | N/A | 46 | **UNVERIFIED** (no vert readout) |
+### Windows IL2CPP — Acer Nitro ANV15-51, i5-13420H, RTX 4050, Direct3D11, 3 runs
 
-### Quest 3S — Oculus Quest 3S, Android 14 / API-34, **Vulkan**, IL2CPP, 3 runs
+| System | creation | fullRebuild | fullRebuild (diff text) | layout wrap+auto | meshRebuild |
+|---|--:|--:|--:|--:|--:|
+| **OpenGlyph (single-thread)** | 172.2 | 148.0 | 160.9 | 61.0 | 28.4 |
+| **OpenGlyph (parallel)** | 58.7 | 46.8 | 46.7 | 49.5 | 15.3 |
+| TextMeshPro | 322.2 | 228.9 | 250.2 | 735.5 | 236.9 |
+| UI Toolkit (unverified) | 411.1 | 371.5 | N/A | 78.4 | 47.9 |
 
-| System | creation | fullRebuild (same) | fullRebuild (diff) | meshRebuild | Validity |
-|---|--:|--:|--:|--:|---|
-| **OpenGlyph (ST)** | — | **11.09** | **11.20** | — | **VALID** 240500/240500 chars, verts N/A² |
-| **OpenGlyph (Par)** | — | **11.09** | **11.15** | — | **VALID** |
-| **TextMeshPro** | — | **516.79** | **574.90** | — | **VALID** 238500/240500 chars, **791,600 verts** |
-| UI Toolkit | — | 1066.32 | N/A | — | **UNVERIFIED** (flag true, 0 verts readable) |
+### Quest 3S — Android, Vulkan, IL2CPP, 3 runs (battery 36 % → 24 %, USB-powered)
 
-² OpenGlyph hands its mesh to the GPU and clears the generator's transient vertex buffer, and
-`CanvasRenderer.GetMesh()` readback is null in IL2CPP players — so vertices are unreadable
-(**N/A**, not 0). Validity rests on the **exact 240,500/240,500 character-layout match**, which is
-the authoritative "it rendered" signal; a broken render drops characters (as the old TMP build did).
+| System | creation | fullRebuild | fullRebuild (diff text) | layout wrap+auto | meshRebuild |
+|---|--:|--:|--:|--:|--:|
+| **OpenGlyph (single-thread)** | 375.9 | 304.0 | 328.6 | 144.1 | 49.6 |
+| **OpenGlyph (parallel)** | 192.7 | 134.6 | 146.5 | 124.4 | 33.3 |
+| TextMeshPro | 743.0 | 501.0 | 542.0 | 1,374.2 | 514.5 |
+| UI Toolkit (unverified) | 1,064.5 | 980.3 | N/A | 297.6 | 183.4 |
 
-**Which numbers are trustworthy, and why**
-- **OpenGlyph (both platforms, both text modes): trustworthy.** Exact char-layout match (240,500/240,500) every run; stable across 3 runs.
-- **TMP: trustworthy on both platforms now.** On Quest it lays out 238,500/240,500 chars (the ~2,000 shortfall is wrapping/segmentation, within the 2% validity tolerance) and submits **791,600 vertices** (≈ 4 × observed chars) — i.e. it genuinely renders. This is the fix described in §6.
-- **UI Toolkit: NOT trustworthy — shown N/A / unverified on both platforms.** The harness cannot read UITK's internal vertex buffer, so its validity flag is set by exception with no vertex evidence; its "times" reflect unmeasured work. Reported, never trusted.
+**Read-out:** on Quest 3S, single-threaded OpenGlyph rebuilds ~1.6× faster than TMP, parallel
+~3.7×; auto-size layout is ~9.5× (ST) / ~11× (parallel) faster; colour-only mesh rebuild ~10×.
 
-## 5. Render check (per-system evidence)
+## 5. Render / work check (per-system evidence)
 
-Validity capture puts a known text on every object, forces a full canvas rebuild, then counts
-characters laid out and vertices submitted per CanvasRenderer in the **player** build:
-
-- **OpenGlyph** — chars 240500/240500 exact (Win + Quest, same + unique). Verts: Windows base
-  child-walk / Quest N/A sentinel (buffer cleared post-GPU-handoff). **Rendered: yes.**
-- **TMP (Quest)** — chars 238500, **verts 791,600**. **Rendered: yes** (was 0/0 before the fix).
+- **OpenGlyph** — every timed frame: `inFrameGenMeshCalls = 100/100`, `inFrameGlyphs` 220,100
+  (Win) / 219,800 (Quest) for shared text and ~244–245k for unique text, `inFrameVerts`
+  760–845k; chars 240,500/240,500. **Did the work: yes.**
+- **TMP** — chars 238,500 (wrapping/segmentation, within 2 %), **791,600 verts** on Quest.
+  In-frame counters are not exposed by TMP. **Rendered: yes.**
 - **UI Toolkit** — no readable vertex buffer → **N/A / unverified** (not 0).
 - Windows OpenGlyph render frame (Latin/Arabic/Hebrew/markup): `./win_render_d3d11.png`.
 
@@ -147,18 +153,24 @@ The 09:54Z APK therefore still shipped an empty atlas. Rewrote the lookup to fin
 `TryAddCharacters ok=True missing='' (params=3)`, and the on-device run confirms **238,500 chars /
 791,600 verts** for TMP. **This is why the Quest TMP column is now populated and VALID.**
 
-## 7. Allocation / GC (Windows, creation phase)
+## 7. Allocation / GC (creation phase, median run)
 
-| System | managed alloc (creation) | GC gen0 |
+`managedAlloc` reads 0 for every system in IL2CPP players, so `totalAlloc` is shown. Windows and
+Quest agree to within 1 %.
+
+| System | total alloc (creation) | GC collections |
 |---|--:|--:|
-| OpenGlyph (ST) | ~10.6 MB | 6 |
-| OpenGlyph (Par) | ~10.6 MB | 4 |
-| TextMeshPro | ~557 MB | 63 |
+| OpenGlyph (single-thread) | ~429 MB | 1 |
+| OpenGlyph (parallel) | ~430 MB | 1 |
+| TextMeshPro | ~557 MB | 31 |
 | UI Toolkit | ~67 MB | 0 |
+
+The earlier ~10.6 MB OpenGlyph figure was from the invalid runs (§3).
 
 ## 8. Every change made to the author's scene/scripts (scratch project only — NOT committed here)
 
 - Removed the two empty UniText submodules + `.gitmodules`; added OpenGlyph as a `file:` UPM package.
+- Added `Assets/Resources/UniTextSettings.asset` (copied from OpenGlyph) — without it OpenGlyph generates nothing in a player (§3).
 - `Assets/Scripts/Editor/LseBenchBuild.cs` — **new** build driver (Win64/Android IL2CPP Release) + `PrewarmTmpAtlas` (see §6).
 - `BenchmarkWorkshop/TextBenchmarkBase.cs` — added `uniqueText` + `MakeUniqueText` (different-text mode, §3) and per-system `ValidityInfo` capture.
 - `BenchmarkWorkshop/BenchmarkRunner.cs` — added the second (unique-text) pass writing `*_unique` keys; guarded the UniText glyph-rasterization phase behind `#if UNITEXT_2X_SDF` (OpenGlyph lacks the 2.0 SDF `GlyphAtlas`/`PrimaryFont` API) and records that in `errors[]`.
@@ -179,12 +191,15 @@ hardware, UniText **2.0** not OpenGlyph). Shape-only sanity check (text engine �
 | mesh rebuild | 33 | 167 | 50 |
 
 ## 10. Evidence
-- Raw per-run JSON (copied here): `./raw/win_run1..3.json`, `./raw/quest_run1..3.json` (post-fix Quest runs).
+- Raw per-run JSON: `./raw/win_run1..3.json` (Windows, 2026-10-02 12:27–12:31Z) and
+  `./raw/quest_run1..3.json` (Quest 3S, 12:51–13:00Z), all with the settings asset present and
+  in-frame work counters.
 - Windows render frame: `./win_render_d3d11.png`.
 - Build/run logs (scratch): `D:\OpenGlyphWork\scratch\lse-bench\logs\`, `...\build\android_build.log`.
 
 ## 11. Open issues
-1. **Benchmark package is `0123788`, below the `6537bf9`+ floor** (§1). Timing is representative; SDF pixels are not current-main. Re-run on `afdc733` for pixel-exact currency.
-2. UI Toolkit vertex output is unreadable by this harness → its numbers are **unverified on both platforms**; needs a UITK-aware mesh probe.
-3. The harness's UniText **glyph-rasterization** phase is 2.0-SDF-specific and was disabled for OpenGlyph; a 1.0-compatible rasterization benchmark would be needed to cover it.
-4. OpenGlyph vertex count is **N/A on IL2CPP** (generator buffer cleared post-GPU-handoff; `GetMesh()` null); validity rests on the exact character-layout match. A player-safe vertex probe would add geometry corroboration.
+1. **OpenGlyph fails silently without `Resources/UniTextSettings.asset` in a player.** Ship a default, or raise an obvious error, so a misconfigured project cannot render nothing unnoticed.
+2. **Benchmark package is `0123788`, below current main** (§1). Timing is representative; SDF pixels are not current-main.
+3. UI Toolkit vertex output is unreadable by this harness → its numbers are **unverified on both platforms**; needs a UITK-aware mesh probe.
+4. The harness's UniText **glyph-rasterization** phase is 2.0-SDF-specific and was disabled for OpenGlyph.
+5. OpenGlyph creation allocates ~429 MB total for 100×2,405 chars (1 GC) — worth profiling for the memory-budget work.
