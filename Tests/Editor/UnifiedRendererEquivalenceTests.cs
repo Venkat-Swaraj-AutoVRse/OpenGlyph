@@ -97,6 +97,35 @@ namespace LightSide.Tests
             Assert.AreEqual(0, mism, $"{mism}/{a.Count} vertices differ beyond {tol} between legacy and unified geometry");
         }
 
+        [TestCase(UniText.UnifiedRendererMode.ForceOff)]
+        [TestCase(UniText.UnifiedRendererMode.ForceOn)]
+        public void NullAppearance_RendersWithoutException(UniText.UnifiedRendererMode mode)
+        {
+            // Regression: the migration tool's "Clear the legacy appearance reference" option sets
+            // Appearance = null on an already-rendered component, and UniTextFontProvider.GetMaterials
+            // dereferenced it on every mesh build (NullReferenceException at UniTextFontProvider.cs:326),
+            // in both render paths. Any exception logged during the canvas update fails this test.
+            if (!FT.IsInitialized) FT.Initialize();
+            if (!FT.IsInitialized) Assert.Ignore("FreeType native unavailable.");
+            SharedGlyphAtlas.Clear();
+
+            string noto = MsdfTestUtil.FindNotoSansPath();
+            if (noto == null) Assert.Ignore("NotoSans-Regular.ttf not found.");
+            var font = UniTextFont.CreateFontAsset(File.ReadAllBytes(noto), 48);
+            if (font == null) Assert.Ignore("font asset creation failed.");
+            _junk.Add(font);
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>(); _junk.Add(stack);
+            stack.fonts.Add(font);
+            var app = ScriptableObject.CreateInstance<UniTextAppearance>(); _junk.Add(app);
+
+            var t = MakeText(mode, stack, app);
+            // What the migration tool does to an existing, already-rendered component.
+            t.Appearance = null;
+            t.Text = "Reading 1234";
+            Canvas.ForceUpdateCanvases();
+            Assert.Greater(t.GetDrawnVerticesForTests().Count, 0, "text still produces geometry after its appearance is cleared");
+        }
+
         [Test]
         public void UnifiedPath_MsdfFont_SameGeometry_AndUberGroups()
         {
