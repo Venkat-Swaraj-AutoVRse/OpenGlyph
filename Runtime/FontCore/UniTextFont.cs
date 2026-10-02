@@ -34,6 +34,11 @@ namespace LightSide
         [Tooltip("Raw font file data (TTF/OTF bytes).")]
         protected byte[] fontData;
 
+        // Decompress-on-load cache: when fontData is a UTFZ-compressed container (FontCompression),
+        // the raw TTF/OTF bytes are decoded once on first FontData access and cached here. Not
+        // serialized — it is rebuilt from the stored (possibly compressed) fontData on demand.
+        [NonSerialized] private byte[] rawFontDataCache;
+
         [SerializeField]
         [Tooltip("Hash of font data for identification.")]
         protected int fontDataHash;
@@ -176,8 +181,62 @@ namespace LightSide
 
         #region Properties
 
-        /// <summary>Gets the raw font file data (TTF/OTF bytes).</summary>
-        public virtual byte[] FontData => fontData;
+        /// <summary>
+        /// Gets the raw font file data (TTF/OTF bytes). When the stored bytes are a UTFZ-compressed
+        /// container (see <see cref="FontCompression"/>), they are decompressed once on first access
+        /// and cached, so callers (FreeType/HarfBuzz) always receive raw bytes. Transparent: a font
+        /// whose data was never compressed returns its bytes directly.
+        /// </summary>
+        public virtual byte[] FontData
+        {
+            get
+            {
+                if (fontData == null || fontData.Length == 0) return fontData;
+                if (!FontCompression.IsCompressed(fontData)) return fontData;
+                return rawFontDataCache ??= FontCompression.Decompress(fontData);
+            }
+        }
+
+        /// <summary>True when the stored <see cref="fontData"/> is a UTFZ-compressed container.</summary>
+        public bool IsFontDataCompressed => FontCompression.IsCompressed(fontData);
+
+        /// <summary>Bytes currently held at rest for this font's data (compressed size if compressed).</summary>
+        public int StoredFontDataLength => fontData?.Length ?? 0;
+
+        /// <summary>
+        /// Compresses this font's stored data in place (UTFZ/Deflate) to shrink its resident and
+        /// on-disk footprint, decompressing transparently on later <see cref="FontData"/> access. The
+        /// <see cref="FontDataHash"/> is preserved (it is the hash of the RAW bytes), so the shaper
+        /// cache and font identity are unaffected. Idempotent and never grows the data (keeps raw when
+        /// compression would not help). Returns true if the stored bytes are compressed afterwards.
+        /// </summary>
+        public bool CompressStoredFontData(System.IO.Compression.CompressionLevel level =
+            System.IO.Compression.CompressionLevel.Optimal)
+        {
+            if (fontData == null || fontData.Length == 0) return false;
+            if (FontCompression.IsCompressed(fontData)) return true;
+
+            byte[] raw = fontData;                 // currently raw
+            var compressed = FontCompression.Compress(raw, level);
+            if (ReferenceEquals(compressed, raw)) return false; // compression did not help
+            rawFontDataCache = raw;                // keep raw available without re-decoding
+            fontData = compressed;
+            // fontDataHash stays the raw-byte hash — do NOT recompute from the compressed container.
+            return true;
+        }
+
+        /// <summary>
+        /// Decompresses this font's stored data in place back to raw TTF/OTF bytes (inverse of
+        /// <see cref="CompressStoredFontData"/>). No-op when already raw. Returns true if raw afterwards.
+        /// </summary>
+        public bool DecompressStoredFontData()
+        {
+            if (fontData == null || fontData.Length == 0) return false;
+            if (!FontCompression.IsCompressed(fontData)) return true;
+            fontData = FontCompression.Decompress(fontData);
+            rawFontDataCache = null;
+            return true;
+        }
 
         /// <summary>Gets the italic slant angle in degrees.</summary>
         public float ItalicStyle => italicStyle;
@@ -1769,6 +1828,7 @@ namespace LightSide
         {
             ReleaseFTFace();
             fontData = data;
+            rawFontDataCache = null;
             fontDataHash = ComputeFontDataHash(data);
 
             if (data != null && data.Length > 0)

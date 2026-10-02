@@ -144,6 +144,8 @@ native output, so the `.github/workflows/native.yml` reference results are untou
   first access and caches the raw bytes (so FreeType/HarfBuzz still get a contiguous `byte[]`).
 - TTF/OTF compress to roughly **55–65 %** of raw with Deflate (glyf/CFF tables are compressible),
   so build size + at-rest asset size drop materially; measured before/after in the test + reported.
+  **Measured (this session):** NotoSans-Regular **629,024 B → 296,411 B = 47.1 % of raw** (a 53 %
+  reduction) at `CompressionLevel.Optimal`; **compress 19 ms, decompress 4 ms** (one-time on load).
 - Opt-in per font (default off) so no existing asset changes on import.
 
 Subsetting (editor `FontSubsetter`) remains the complementary tool for projects that know their
