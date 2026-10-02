@@ -461,6 +461,79 @@ namespace LightSide.Tests
             }
         }
 
+        [Test]
+        public void Markup_VOffset_SideBySide()
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+                Assert.Ignore("No real graphics device; voffset render evidence skipped.");
+            string notoPath = FindNoto();
+            if (notoPath == null) Assert.Ignore("NotoSans-Regular.ttf fixture not found.");
+            var ogFont = UniTextFont.CreateFontAsset(File.ReadAllBytes(notoPath));
+            if (ogFont == null) Assert.Ignore("UniTextFont build failed.");
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>();
+            stack.fonts.Add(ogFont);
+
+            TMP_FontAsset tmpFont = null; Font unityFont = null;
+#if UNITY_EDITOR
+            unityFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/ParityFonts/NotoSans-Regular.ttf");
+#endif
+            if (unityFont == null) unityFont = Font.CreateDynamicFontFromOSFont("Noto Sans", (int)FontSize);
+            if (unityFont != null)
+                try { tmpFont = TMP_FontAsset.CreateFontAsset(unityFont, 90, 9,
+                    UnityEngine.TextCore.LowLevel.GlyphRenderMode.SDFAA, 1024, 1024, AtlasPopulationMode.Dynamic, true); }
+                catch (System.Exception ex) { Debug.LogWarning($"[VOffsetEvidence] TMP build failed: {ex.Message}"); }
+
+            var rt = new RenderTexture(Width, Height, 24, RenderTextureFormat.ARGB32) { antiAliasing = 1 };
+            rt.Create();
+            var bg = new Color(0.10f, 0.10f, 0.12f, 1f);
+            var gos = new System.Collections.Generic.List<GameObject>();
+            try
+            {
+                var canvasGo = new GameObject("VCanvas", typeof(Canvas)); gos.Add(canvasGo);
+                var canvas = canvasGo.GetComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace;
+                ((RectTransform)canvasGo.transform).sizeDelta = new Vector2(Width, Height);
+                var camGo = new GameObject("VCam", typeof(Camera)); gos.Add(camGo);
+                var cam = camGo.GetComponent<Camera>();
+                cam.orthographic = true; cam.orthographicSize = Height / 2f; cam.aspect = (float)Width / Height;
+                cam.transform.position = new Vector3(0, 0, -10);
+                cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = bg; cam.targetTexture = rt;
+                canvas.worldCamera = cam;
+
+                const string sample = "base <voffset=0.4em>UP</voffset> mid <voffset=-0.3em>DOWN</voffset> end";
+                System.Action<float, bool> row = (cx, tmp) =>
+                {
+                    var go = new GameObject((tmp ? "tmp" : "og"), typeof(RectTransform)); go.transform.SetParent(canvasGo.transform, false);
+                    var r = (RectTransform)go.transform; r.sizeDelta = new Vector2(Width/2f-40, 200); r.anchoredPosition = new Vector2(cx, 40);
+                    if (tmp) { var t = go.AddComponent<TextMeshProUGUI>(); t.font = tmpFont; t.fontSize = FontSize; t.color = Color.white; t.richText = true; t.alignment = TMPro.TextAlignmentOptions.Left; t.text = "TMP\n" + sample; t.ForceMeshUpdate(); }
+                    else { var c = go.AddComponent<GlyphMeshProUGUI>(); c.FontStack = stack; c.fontSize = FontSize; c.color = Color.white; c.richText = true; c.alignment = OpenGlyph.TextAlignmentOptions.Left; c.text = "GMP\n" + sample; c.ForceMeshUpdate(ignoreActiveState: true); }
+                    gos.Add(go);
+                };
+                row(-Width/4f, false);
+                if (tmpFont != null) row(Width/4f, true);
+
+                Canvas.ForceUpdateCanvases(); cam.Render();
+                var prev = RenderTexture.active; RenderTexture.active = rt;
+                var tex = new Texture2D(Width, Height, TextureFormat.RGBA32, false);
+                tex.ReadPixels(new Rect(0,0,Width,Height),0,0); tex.Apply(); RenderTexture.active = prev;
+                string path = Path.Combine(EvidenceDir(), "markup_voffset.png");
+                File.WriteAllBytes(path, tex.EncodeToPNG()); Object.DestroyImmediate(tex);
+                Debug.Log($"[RenderEvidence] voffset -> {path}");
+                Assert.IsTrue(File.Exists(path) && new FileInfo(path).Length > 1000, "Evidence PNG not written.");
+            }
+            finally
+            {
+                foreach (var g in gos) { if (g != null) { var c = g.GetComponent<Camera>(); if (c != null) c.targetTexture = null; } }
+                rt.Release(); Object.DestroyImmediate(rt);
+                foreach (var g in gos) if (g != null) Object.DestroyImmediate(g);
+                if (stack != null) Object.DestroyImmediate(stack);
+                if (ogFont != null) Object.DestroyImmediate(ogFont);
+                if (tmpFont != null) Object.DestroyImmediate(tmpFont);
+#if UNITY_EDITOR
+                if (unityFont != null && !UnityEditor.AssetDatabase.Contains(unityFont)) Object.DestroyImmediate(unityFont);
+#endif
+            }
+        }
+
         private static string FindNoto()
         {
             string[] candidates =
