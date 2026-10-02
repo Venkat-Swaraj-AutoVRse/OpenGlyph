@@ -135,18 +135,34 @@ sets a byte budget; the engine then holds the atlas under that ceiling by evicti
 `UniTextFont.fontData` is a raw `byte[]` (0.6 MB for NotoSans) serialized into the asset and the
 build, and held in memory for the font's lifetime (plus a native `AllocHGlobal` copy in HarfBuzz).
 
-**Approach: compressed storage with decompress-on-load**, pure managed C# (`System.IO.Compression`
-Deflate/GZip), **no native code touched** → **no CI cross-platform reference change** (called out
-explicitly here because step 3 of the task asks for it: *this compression path does not alter any
-native output, so the `.github/workflows/native.yml` reference results are untouched*).
+**Approach: compressed storage with decompress-on-load**, pure managed C# (`System.IO.Compression`),
+**no native code touched** → **no CI cross-platform reference change** (step 3 asks for it: this
+compression path does not alter any native output, so `.github/workflows/native.yml` references are
+untouched).
 
-- A compressed companion field stores Deflate-compressed font bytes; `FontData` decompresses on
-  first access and caches the raw bytes (so FreeType/HarfBuzz still get a contiguous `byte[]`).
-- TTF/OTF compress to roughly **55–65 %** of raw with Deflate (glyf/CFF tables are compressible),
-  so build size + at-rest asset size drop materially; measured before/after in the test + reported.
-  **Measured (this session):** NotoSans-Regular **629,024 B → 296,411 B = 47.1 % of raw** (a 53 %
-  reduction) at `CompressionLevel.Optimal`; **compress 19 ms, decompress 4 ms** (one-time on load).
-- Opt-in per font (default off) so no existing asset changes on import.
+- The stored bytes become a small **UTFZ container**; `FontData` decompresses on first access and
+  caches the raw bytes (so FreeType/HarfBuzz still get a contiguous `byte[]`). `FontDataHash` (the
+  raw-byte hash) is preserved, so shaper-cache identity is unchanged. Opt-in per font (default off).
+
+- **Codec policy (cross-platform safety).** Edit-time compression must never emit a container the
+  fleet cannot decode. **Default = Deflate** (codec 0) — in the BCL on every Unity backend, decodes
+  everywhere. **Brotli (codec 1) is opt-in** (`Compress(.., preferBrotli:true)`) **and self-guarded**
+  by `BrotliAvailable` (a cached encode+decode round-trip probe): a Brotli container is emitted only
+  when this runtime provably round-trips Brotli, else it falls back to Deflate. `Decompress` never
+  crashes — a Brotli container on a runtime without Brotli, an unknown codec id, or a corrupt body
+  all raise a caught `InvalidDataException` (the font-load path keeps the stored bytes).
+
+- **Measured ratios (NotoSans-Regular 629,024 B):** Deflate **→ 296,411 B (47.1 %)**; Brotli opt-in
+  **→ 228,486 B (36.3 %)**, both byte-exact.
+
+- **Verified in real IL2CPP player builds** (Unity 6000.3.19f1, .NET Standard 2.1): Windows IL2CPP
+  (built **and run**) — `BrotliAvailable=True`, both codecs round-trip byte-exact, a font built from
+  the **decompressed** bytes renders (glyph count > 0). Android IL2CPP ARM64 (**built only** — device
+  install forbidden this session) — succeeds with 0 errors; the il2cpp C++ output links both
+  `BrotliStream` and `DeflateStream` (incl. the Brotli interop + the Deflate native wrapper), so
+  neither codec is stripped. **Decision:** ship Deflate by default (proven to *run* on both targets);
+  Brotli stays opt-in because the Android APK was built but not executed, so Brotli is proven to
+  *link* on Android but not to *run* on-device.
 
 Subsetting (editor `FontSubsetter`) remains the complementary tool for projects that know their
 character set; compression is the zero-config runtime win.
@@ -206,18 +222,32 @@ So on every alternate iteration the engine re-uploads a mesh **identical** to wh
 renderer — pure waste.
 
 **Fix (`UniTextMeshGenerator.GeometryFingerprint()` + `UniText.DoApplyMesh` gate, default ON via
-`UniTextSettings.SkipUnchangedGeometryUpload`):** after generating geometry, hash it (FNV-1a over
-vertex count + quantized positions + UV0 + colours — allocation-free, reads pooled buffers). If the
-hash equals what the renderers already display and they are populated, **skip `ApplyMeshesToUnity`
-+ the Canvas upload entirely**. Behaviour-preserving by construction (identical geometry ⇒ identical
-pixels); the fingerprint is reset whenever renderers are cleared so a re-populate always uploads.
+`UniTextSettings.SkipUnchangedGeometryUpload`):** after generating geometry, hash it and, if the hash
+equals what the renderers already display and they are populated, **skip `ApplyMeshesToUnity` + the
+Canvas upload entirely**. Behaviour-preserving by construction; the fingerprint is reset whenever
+renderers are cleared so a re-populate always uploads.
 
-**Effect on the benchmark pattern:** `text ↔ text+" "` hash identical, so after the first upload
-**every** subsequent fullRebuild iteration hits the skip — the redundant mesh re-upload (the entire
-`totalAlloc` driver) is eliminated. Expected `fullRebuild.totalAlloc` **~39 MB → ~the cost of the
-first upload only** (≈1/10 on a 10-iteration run), approaching the unique-text path's ~0. Real apps
-benefit identically when reassigning equal/equivalent text (score/timer updates landing on the same
-string, trailing-whitespace edits).
+**The fingerprint is EXACT (safety).** An early version hashed only *quantized* positions + UV0 +
+colour, which could wrongly skip a real change (a sub-quantum/smooth-animation move, a change in a
+non-UV0 channel such as UV1 — the effect/line channel the unified renderer + its outline/underlay
+read — a different index/submesh/material assignment, or a renderer-count change). It now hashes
+**every channel the generator writes, at full IEEE-754 precision (no quantization, NaN-canonical)**:
+positions xyz, UV0 xyzw, UV1 xyzw, vertex colours, the **full index buffer**, and the **per-segment
+structure** (segment/renderer count, fontId, atlasIndex, vertex/triangle ranges, submesh/material
+count + each material's instance id, atlas texture instance id). Two rebuilds hash equal **iff** they
+would upload byte-identical meshes to byte-identical renderers, so the skip can never drop a visible
+change. Still FNV-1a and **allocation-free** (reads pooled buffers only). **Cost:** ~25.5 ms per 100
+objects (507,600 verts + 761,400 indices), ~50 ns/vertex — a small fraction of the mesh rebuild +
+upload it gates, and it eliminates a ~39 MB GPU re-upload whenever the skip fires. Safety tests
+(`RebuildAllocationProbeTests → GeometrySkipTests`) each demonstrate a case the old fingerprint
+collapsed and the exact one distinguishes, plus `IdenticalGeometry_StillSkips` for no false re-upload.
+
+**Effect on the benchmark pattern:** `text ↔ text+" "` hash identical (a trailing space adds no
+glyph), so after the first upload **every** subsequent fullRebuild iteration hits the skip — the
+redundant mesh re-upload (the entire `totalAlloc` driver) is eliminated. Expected
+`fullRebuild.totalAlloc` **~39 MB → ~the cost of the first upload only** (≈1/10 on a 10-iteration
+run), approaching the unique-text path's ~0. Real apps benefit identically when reassigning
+equal/equivalent text (score/timer updates landing on the same string, trailing-whitespace edits).
 
 **Before/after number caveat:** the headline 39 MB is a Quest-Vulkan-IL2CPP `totalAlloc` figure;
 this host's desktop d3d11 player reports 0 for the same loop, and the headset is battery-restricted
