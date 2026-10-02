@@ -52,7 +52,7 @@ namespace LightSide
             var key = new ArrayKey(format, size);
             if (!Arrays.TryGetValue(key, out var arr))
             {
-                arr = new GlyphAtlasArray(size, format, SafeBudget());
+                arr = new GlyphAtlasArray(size, format, SafeBudget(), SafeByteBudget());
                 Arrays[key] = arr;
             }
             return arr;
@@ -64,11 +64,81 @@ namespace LightSide
             return UniTextSettings.IsNull ? 0 : UniTextSettings.SharedAtlasPageBudget;
         }
 
-        /// <summary>Propagates the current <see cref="UniTextSettings.SharedAtlasPageBudget"/> to every live array.</summary>
+        private static long SafeByteBudget()
+        {
+            return UniTextSettings.IsNull ? 0 : UniTextSettings.SharedAtlasByteBudgetPerArray;
+        }
+
+        private static long SafeGlobalByteBudget()
+        {
+            return UniTextSettings.IsNull ? 0 : UniTextSettings.SharedAtlasByteBudgetGlobal;
+        }
+
+        /// <summary>Propagates the current <see cref="UniTextSettings"/> budgets to every live array.</summary>
         public static void ApplyBudgetFromSettings()
         {
             int b = SafeBudget();
-            foreach (var a in Arrays.Values) a.PageBudget = b;
+            long bb = SafeByteBudget();
+            foreach (var a in Arrays.Values) { a.PageBudget = b; a.ByteBudget = bb; }
+        }
+
+        /// <summary>Current total resident bytes across every live shared array.</summary>
+        public static long TotalResidentBytes
+        {
+            get
+            {
+                long t = 0;
+                foreach (var a in Arrays.Values) t += a.ResidentBytes;
+                return t;
+            }
+        }
+
+        /// <summary>
+        /// Enforces the process-wide <see cref="UniTextSettings.SharedAtlasByteBudgetGlobal"/>: while
+        /// the combined resident bytes of all arrays exceed the budget, evicts the single globally
+        /// least-recently-used, unreferenced glyph (oldest <c>lastUsedFrame</c> across arrays) and
+        /// releases any page that becomes empty. No-op when the budget is <c>&lt;= 0</c> or no
+        /// unreferenced glyph can be evicted (so a fully-pinned working set is never corrupted).
+        /// Returns the number of glyphs evicted. Call once per frame after atlas growth. Main-thread only.
+        /// </summary>
+        public static int EnforceGlobalByteBudget()
+        {
+            long budget = SafeGlobalByteBudget();
+            if (budget <= 0) return 0;
+
+            int evicted = 0;
+            // Bounded loop: each pass evicts at most one glyph; cap iterations to total cells to avoid
+            // any pathological spin if nothing more is evictable.
+            int guard = 0, maxGuard = 0;
+            foreach (var a in Arrays.Values) maxGuard += a.CellCount;
+            maxGuard = Mathf.Max(maxGuard, 1);
+
+            while (TotalResidentBytes > budget && guard++ < maxGuard)
+            {
+                if (!EvictOneGloballyOldest()) break; // nothing unreferenced left to evict
+                evicted++;
+                // Reclaim any page emptied by that eviction so resident bytes actually drop.
+                foreach (var a in Arrays.Values) a.ReleaseEmptyPages();
+            }
+            return evicted;
+        }
+
+        private static bool EvictOneGloballyOldest()
+        {
+            GlyphAtlasArray victimArray = null;
+            long oldest = long.MaxValue;
+            GlyphAtlasArray.GlyphCellKey victimKey = default;
+            foreach (var a in Arrays.Values)
+            {
+                if (a.TryGetOldestUnreferenced(out long frame, out var key) && frame < oldest)
+                {
+                    oldest = frame;
+                    victimArray = a;
+                    victimKey = key;
+                }
+            }
+            if (victimArray == null) return false; // nothing unreferenced anywhere
+            return victimArray.Evict(victimKey);
         }
 
         /// <summary>Number of live shared arrays (at most two per size under decision §5.1).</summary>

@@ -83,6 +83,38 @@ namespace LightSide
         public static int SharedAtlasPageBudget => Instance != null ? Instance.sharedAtlasPageBudget : 0;
 
         [SerializeField]
+        [Tooltip("Max RESIDENT bytes PER shared glyph-atlas array before LRU eviction begins " +
+                 "(pages x size^2 x bytesPerPixel). 0 (default) = unbounded. This is the " +
+                 "mobile-relevant knob: a 1024x1024 Alpha8 page is 1 MB and an RGBA32 page is 4 MB, " +
+                 "so e.g. 8388608 (8 MB) caps an Alpha8 array at 8 pages. Least-recently-used, " +
+                 "unreferenced glyphs are evicted and re-rasterized on demand. Enforced together " +
+                 "with the page budget (whichever is hit first).")]
+        [Min(0)]
+        private long sharedAtlasByteBudgetPerArray = 0;
+
+        /// <summary>
+        /// Max resident bytes per shared glyph-atlas array before eviction. 0 = unbounded. The byte
+        /// equivalent of <see cref="SharedAtlasPageBudget"/>; see <see cref="GlyphAtlasArray.ByteBudget"/>.
+        /// </summary>
+        public static long SharedAtlasByteBudgetPerArray => Instance != null ? Instance.sharedAtlasByteBudgetPerArray : 0;
+
+        [SerializeField]
+        [Tooltip("Max RESIDENT bytes across ALL shared glyph-atlas arrays combined before global " +
+                 "LRU eviction. 0 (default) = unbounded. A process-wide ceiling on glyph memory, " +
+                 "evaluated after each frame's atlas growth; when exceeded, the globally " +
+                 "least-recently-used unreferenced glyphs are evicted across every array until the " +
+                 "total is back under budget. Use this to bound total glyph memory on devices with a " +
+                 "hard budget (Quest 3S), independent of how many fonts/variations are in play.")]
+        [Min(0)]
+        private long sharedAtlasByteBudgetGlobal = 0;
+
+        /// <summary>
+        /// Max resident bytes across all shared glyph-atlas arrays before global eviction. 0 =
+        /// unbounded. See <see cref="SharedGlyphAtlas.EnforceGlobalByteBudget"/>.
+        /// </summary>
+        public static long SharedAtlasByteBudgetGlobal => Instance != null ? Instance.sharedAtlasByteBudgetGlobal : 0;
+
+        [SerializeField]
         [Tooltip("Render Architecture R2: when ON, each UniText component draws through a SINGLE " +
                  "CanvasRenderer per draw group (at most two: SDF/coverage + MSDF/color) using the " +
                  "UniText/Uber shader, a shared Texture2DArray atlas and a float-texture style table, " +
