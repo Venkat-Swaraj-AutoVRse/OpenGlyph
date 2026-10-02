@@ -1,0 +1,859 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-10-02T06:13:48.2962067Z",
+  "systemInfo": {
+    "deviceModel": "Nitro ANV15-51 (Acer)",
+    "deviceName": "PLATFORMTEAMSRE",
+    "operatingSystem": "Windows 11  (10.0.26200)",
+    "processorType": "13th Gen Intel(R) Core(TM) i5-13420H",
+    "processorCount": 12,
+    "processorFrequency": 2611,
+    "systemMemorySize": 32471,
+    "graphicsDeviceName": "NVIDIA GeForce RTX 4050 Laptop GPU",
+    "graphicsDeviceType": "Direct3D11",
+    "graphicsMemorySize": 5920,
+    "graphicsDeviceVersion": "Direct3D 11.0 [level 11.1]",
+    "screenWidth": 1280,
+    "screenHeight": 720,
+    "screenDpi": 96.0,
+    "unityVersion": "6000.3.19f1",
+    "scriptingBackend": "IL2CPP",
+    "platform": "WindowsPlayer"
+  },
+  "config": {
+    "objectCount": 100,
+    "iterations": 10,
+    "warmupIterations": 3
+  },
+  "textBenchmarks": {
+    "unitextSingleThreaded": {
+      "creation": {
+        "totalMs": 84.6614,
+        "frameTimes": [
+          7.8156,
+          8.8405,
+          8.4542,
+          9.5361,
+          7.8189,
+          9.1724,
+          7.9506,
+          8.5319,
+          8.6147,
+          7.9265
+        ],
+        "median": 8.5319,
+        "min": 7.8156,
+        "max": 9.5361,
+        "totalAlloc": 11078951,
+        "managedAlloc": 0,
+        "gc": [
+          6,
+          6,
+          6
+        ]
+      },
+      "destruction": {
+        "totalMs": 20.6353,
+        "frameTimes": [
+          2.1462,
+          2.121,
+          2.1779,
+          2.1057,
+          1.9551,
+          1.9312,
+          2.0462,
+          1.9058,
+          2.0453,
+          2.2009
+        ],
+        "median": 2.1057,
+        "min": 1.9058,
+        "max": 2.2009,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 10.9866,
+        "frameTimes": [
+          1.0663,
+          1.3548,
+          1.1891,
+          1.1022,
+          1.0225,
+          0.9586,
+          1.1978,
+          1.0661,
+          1.0173,
+          1.0119
+        ],
+        "median": 1.0663,
+        "min": 0.9586,
+        "max": 1.3548,
+        "totalAlloc": 5851,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 26.2717,
+        "frameTimes": [
+          2.7593,
+          2.5886,
+          2.5484,
+          2.5691,
+          2.7535,
+          2.5493,
+          2.5867,
+          2.6807,
+          2.4536,
+          2.7825
+        ],
+        "median": 2.5886,
+        "min": 2.4536,
+        "max": 2.7825,
+        "totalAlloc": 678,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 25.5562019,
+        "frameTimes": [
+          2.3695,
+          2.7172,
+          2.5384,
+          2.6007,
+          2.513,
+          2.4969,
+          2.4867,
+          2.4998,
+          2.5587,
+          2.7753
+        ],
+        "median": 2.5384,
+        "min": 2.3695,
+        "max": 2.7753,
+        "totalAlloc": 2740,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 26.9322014,
+        "frameTimes": [
+          2.6488,
+          2.6771,
+          2.6183,
+          2.6506,
+          2.7396,
+          2.7316,
+          2.4832,
+          2.8264,
+          2.849,
+          2.7076
+        ],
+        "median": 2.7076,
+        "min": 2.4832,
+        "max": 2.849,
+        "totalAlloc": 670,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 27.5509987,
+        "frameTimes": [
+          2.68,
+          2.9552,
+          2.7423,
+          2.7156,
+          2.6658,
+          2.6662,
+          2.6834,
+          2.8231,
+          2.9892,
+          2.6302
+        ],
+        "median": 2.7156,
+        "min": 2.6302,
+        "max": 2.9892,
+        "totalAlloc": 3819,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 9.2169,
+        "frameTimes": [
+          0.6218,
+          0.8164,
+          0.9623,
+          1.0655,
+          0.8597,
+          1.016,
+          0.9212,
+          1.0026,
+          0.9623,
+          0.9891
+        ],
+        "median": 0.9623,
+        "min": 0.6218,
+        "max": 1.0655,
+        "totalAlloc": 4899,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "unitextParallel": {
+      "creation": {
+        "totalMs": 84.5404,
+        "frameTimes": [
+          7.8337,
+          8.0249,
+          9.4755,
+          7.6499,
+          8.8165,
+          8.319,
+          8.0477,
+          8.4262,
+          7.5385,
+          10.4085
+        ],
+        "median": 8.319,
+        "min": 7.5385,
+        "max": 10.4085,
+        "totalAlloc": 11085707,
+        "managedAlloc": 0,
+        "gc": [
+          4,
+          4,
+          4
+        ]
+      },
+      "destruction": {
+        "totalMs": 21.5500011,
+        "frameTimes": [
+          2.0346,
+          2.2704,
+          2.1431,
+          2.0203,
+          2.3224,
+          2.0568,
+          2.1745,
+          2.0447,
+          2.295,
+          2.1882
+        ],
+        "median": 2.1745,
+        "min": 2.0203,
+        "max": 2.3224,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 12.6636992,
+        "frameTimes": [
+          0.9836,
+          1.4288,
+          1.0886,
+          1.2621,
+          1.4344,
+          1.1183,
+          1.1524,
+          2.0967,
+          1.0799,
+          1.0189
+        ],
+        "median": 1.1524,
+        "min": 0.9836,
+        "max": 2.0967,
+        "totalAlloc": 111,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 26.3749,
+        "frameTimes": [
+          2.7228,
+          2.8119,
+          2.5911,
+          2.6284,
+          2.5571,
+          2.7021,
+          2.852,
+          2.5236,
+          2.5454,
+          2.4405
+        ],
+        "median": 2.6284,
+        "min": 2.4405,
+        "max": 2.852,
+        "totalAlloc": 3180,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 25.9115,
+        "frameTimes": [
+          2.4917,
+          2.5826,
+          2.57,
+          2.5531,
+          2.6575,
+          2.5244,
+          2.517,
+          2.5884,
+          2.7219,
+          2.7049
+        ],
+        "median": 2.5826,
+        "min": 2.4917,
+        "max": 2.7219,
+        "totalAlloc": 5082,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 25.968998,
+        "frameTimes": [
+          2.59,
+          2.7295,
+          2.7348,
+          2.5306,
+          2.5597,
+          2.5701,
+          2.5137,
+          2.5022,
+          2.6415,
+          2.5969
+        ],
+        "median": 2.59,
+        "min": 2.5022,
+        "max": 2.7348,
+        "totalAlloc": 2972,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 26.2681,
+        "frameTimes": [
+          2.6264,
+          2.7707,
+          2.6667,
+          2.5076,
+          2.4979,
+          2.737,
+          2.5268,
+          2.787,
+          2.6345,
+          2.5135
+        ],
+        "median": 2.6345,
+        "min": 2.4979,
+        "max": 2.787,
+        "totalAlloc": 782,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 10.051301,
+        "frameTimes": [
+          0.3905,
+          1.0339,
+          0.949,
+          2.2288,
+          0.6233,
+          0.8739,
+          0.9318,
+          0.9694,
+          0.9879,
+          1.0628
+        ],
+        "median": 0.9694,
+        "min": 0.3905,
+        "max": 2.2288,
+        "totalAlloc": 4875,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "tmp": {
+      "creation": {
+        "totalMs": 3287.219,
+        "frameTimes": [
+          310.9174,
+          347.7296,
+          330.6224,
+          318.9646,
+          312.4564,
+          345.2506,
+          332.8228,
+          312.2084,
+          347.3261,
+          328.9205
+        ],
+        "median": 330.6224,
+        "min": 310.9174,
+        "max": 347.7296,
+        "totalAlloc": 584323839,
+        "managedAlloc": 0,
+        "gc": [
+          60,
+          60,
+          60
+        ]
+      },
+      "destruction": {
+        "totalMs": 112.242,
+        "frameTimes": [
+          12.2482,
+          10.6236,
+          10.822,
+          11.9634,
+          10.506,
+          11.5126,
+          11.2342,
+          10.8234,
+          11.9358,
+          10.5728
+        ],
+        "median": 11.2342,
+        "min": 10.506,
+        "max": 12.2482,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 2301.211,
+        "frameTimes": [
+          220.908,
+          208.009,
+          179.8807,
+          220.4206,
+          199.6291,
+          225.5711,
+          195.6096,
+          312.2888,
+          310.8279,
+          228.0662
+        ],
+        "median": 220.908,
+        "min": 179.8807,
+        "max": 312.2888,
+        "totalAlloc": 14851275,
+        "managedAlloc": 0,
+        "gc": [
+          5,
+          5,
+          5
+        ]
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 2496.61841,
+        "frameTimes": [
+          285.5655,
+          247.9274,
+          236.0736,
+          248.4915,
+          247.9455,
+          242.9736,
+          247.4452,
+          246.6583,
+          245.4381,
+          248.0995
+        ],
+        "median": 247.9274,
+        "min": 236.0736,
+        "max": 285.5655,
+        "totalAlloc": 26009,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 57374.71,
+        "frameTimes": [
+          268.5852,
+          316.274,
+          426.9394,
+          501.4752,
+          600.9748,
+          714.3405,
+          816.5615,
+          970.5099,
+          947.6285,
+          51811.42
+        ],
+        "median": 714.3405,
+        "min": 268.5852,
+        "max": 51811.42,
+        "totalAlloc": 99564,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 7856.834,
+        "frameTimes": [
+          229.586,
+          231.6594,
+          228.1719,
+          227.7231,
+          230.0589,
+          250.4813,
+          238.2332,
+          5769.76,
+          226.3923,
+          224.7688
+        ],
+        "median": 230.0589,
+        "min": 224.7688,
+        "max": 5769.76,
+        "totalAlloc": 85037,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 5758.338,
+        "frameTimes": [
+          233.2301,
+          289.691,
+          394.8077,
+          466.7282,
+          558.392,
+          664.6172,
+          729.0706,
+          810.5213,
+          821.4423,
+          789.8376
+        ],
+        "median": 664.6172,
+        "min": 233.2301,
+        "max": 821.4423,
+        "totalAlloc": 12257,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 2297.683,
+        "frameTimes": [
+          229.7896,
+          229.3827,
+          229.3093,
+          229.0593,
+          229.6143,
+          227.9768,
+          229.6313,
+          230.2501,
+          232.1146,
+          230.5552
+        ],
+        "median": 229.6313,
+        "min": 227.9768,
+        "max": 232.1146,
+        "totalAlloc": 16882,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "uiToolkit": {
+      "creation": {
+        "totalMs": 4030.49927,
+        "frameTimes": [
+          398.346,
+          403.6408,
+          408.795,
+          403.0558,
+          425.9049,
+          397.5526,
+          395.464,
+          401.1978,
+          398.7213,
+          397.8211
+        ],
+        "median": 401.1978,
+        "min": 395.464,
+        "max": 425.9049,
+        "totalAlloc": 70413237,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "destruction": {
+        "totalMs": 13.872901,
+        "frameTimes": [
+          1.2178,
+          1.1221,
+          0.9817,
+          0.9747,
+          4.6539,
+          0.9963,
+          0.97,
+          0.9882,
+          0.9863,
+          0.9819
+        ],
+        "median": 0.9882,
+        "min": 0.97,
+        "max": 4.6539,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 3561.539,
+        "frameTimes": [
+          361.7347,
+          333.6604,
+          282.2689,
+          368.8487,
+          305.672,
+          364.8671,
+          310.0231,
+          419.5057,
+          463.1711,
+          351.7873
+        ],
+        "median": 361.7347,
+        "min": 282.2689,
+        "max": 463.1711,
+        "totalAlloc": 491903988,
+        "managedAlloc": 0,
+        "gc": [
+          1,
+          1,
+          1
+        ]
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 457.881927,
+        "frameTimes": [
+          53.3903,
+          47.8107,
+          45.3137,
+          43.6185,
+          45.0742,
+          44.3181,
+          44.2123,
+          44.745,
+          43.9446,
+          45.4545
+        ],
+        "median": 45.0742,
+        "min": 43.6185,
+        "max": 53.3903,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 689.911133,
+        "frameTimes": [
+          70.7237,
+          69.2134,
+          67.0603,
+          68.2217,
+          68.7347,
+          67.7736,
+          67.7945,
+          70.1024,
+          72.8058,
+          67.481
+        ],
+        "median": 68.7347,
+        "min": 67.0603,
+        "max": 72.8058,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 453.8388,
+        "frameTimes": [
+          44.4417,
+          45.6516,
+          45.3033,
+          45.7688,
+          45.4798,
+          45.7634,
+          44.4822,
+          44.8714,
+          47.2852,
+          44.7914
+        ],
+        "median": 45.4798,
+        "min": 44.4417,
+        "max": 47.2852,
+        "totalAlloc": 79,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 711.06134,
+        "frameTimes": [
+          67.8065,
+          70.6526,
+          69.8958,
+          70.0814,
+          68.0995,
+          70.98,
+          72.5968,
+          75.9742,
+          73.6797,
+          71.2948
+        ],
+        "median": 70.98,
+        "min": 67.8065,
+        "max": 75.9742,
+        "totalAlloc": 79,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 463.6341,
+        "frameTimes": [
+          44.4814,
+          45.7822,
+          47.6438,
+          50.9098,
+          47.4468,
+          45.7482,
+          46.8163,
+          45.6112,
+          45.1123,
+          44.0821
+        ],
+        "median": 45.7822,
+        "min": 44.0821,
+        "max": 50.9098,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "glyphRasterization": {
+    "tmp": {
+      "frameTimes": [
+        1740.43542,
+        1774.14771,
+        1859.19873,
+        1744.47156,
+        2068.283
+      ],
+      "median": 1774.14771,
+      "min": 1740.43542,
+      "max": 2068.283,
+      "average": 1837.30725,
+      "uniqueGlyphs": 3091,
+      "perGlyphMedianUs": 573.97208187580884,
+      "managedAlloc": 0
+    }
+  },
+  "errors": [
+    "UniText glyph-rasterization phase DISABLED (OpenGlyph lacks UniText 2.0 SDF GlyphAtlas/PrimaryFont API)"
+  ]
+}

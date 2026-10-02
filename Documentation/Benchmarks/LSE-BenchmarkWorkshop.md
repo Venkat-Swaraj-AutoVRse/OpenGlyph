@@ -1,188 +1,107 @@
-# LSE BenchmarkWorkshop — OpenGlyph vs TMP / UI Toolkit / UniText
+# LSE BenchmarkWorkshop — OpenGlyph vs TMP vs UI Toolkit
 
-**Status: BLOCKED — not completed.** The upstream measurement harness cannot be
-compiled or run because its UniText runtime source is in a **private / deleted
-repository** that is no longer publicly accessible. This document records exactly
-what was found, the one deliverable that *was* recoverable (the upstream author's
-own published numbers), and what would be needed to finish.
+Benchmarked OpenGlyph (MIT fork of UniText 1.0, `openglyph/main` @ `e8efa75`) with the
+upstream author's own benchmark harness, on **Windows IL2CPP** and **Quest 3S**, against
+**TextMeshPro** and **UI Toolkit**. The harness is `LightSideKittens/LightSideEcosystem`
+(no LICENSE — used only locally as a measurement harness; **none of its files are committed
+here**). OpenGlyph stands in for the harness's missing private UniText submodule (`build B uses
+OpenGlyph in its place`), which is sound because OpenGlyph is a fork that kept UniText's assembly
+GUIDs — the harness's `UniText.Test.asmdef` references OpenGlyph's own
+`LightSide.UniText.asmdef` GUID `6572381e8157783499bf6ce8f56b9292` directly.
 
-Date: 2026-10-02. Host: Windows (`PlatformTeamSRE`). Measurement harness kept
-entirely under `D:\OpenGlyphWork\scratch\lse-bench` — nothing from the unlicensed
-LSE repo was copied into this (OpenGlyph) repository.
-
----
-
-## 1. Branch chosen, and why
-
-Repo: `https://github.com/LightSideKittens/LightSideEcosystem` (no LICENSE — used
-locally only, never copied or pushed).
-
-Candidate branches all carry the benchmark scene
-`Assets/UniText.Test/BenchmarkWorkshop/UniText_BenchmarkTest.unity`:
-`2.0.0`, `2.0.0-dev`, `2.0.8`, `v2` (default `v3.x.x` does **not** have it).
-
-**Chosen: `2.0.0`.** Reasoning:
-
-- The task is to pick the branch whose bundled UniText is **closest to UniText
-  1.0** (OpenGlyph's clean-room fork point). Branch labels map to UniText
-  versions, so the earliest release line, `2.0.0`, is nominally closest; `2.0.0-dev`
-  is its pre-release, `2.0.8` is eight patches later, and `v2` is a rolling head.
-- **Caveat established from the source itself:** even `2.0.0` bundles UniText
-  **2.0.0**, not 1.0. The bundled UniText is a git submodule; its public manifest
-  (`Assets/UniText-Public/package.json`) reads `"version": "2.0.0"`,
-  `"unity": "2021.3"`, and its `CHANGELOG.md` has a **single** header,
-  `## [2.0.0] - Unreleased`, describing a large SDF/MSDF rewrite, a new font-family
-  architecture, variable fonts, and SE-Asian word segmentation. There is **no 1.0
-  entry** on this line — this UniText package starts at 2.0.0. So "closest to 1.0"
-  can only be satisfied nominally; no branch here actually ships a 1.0 UniText.
-
-Clone (branch-pinned, single-branch):
-`git clone --branch 2.0.0 --single-branch https://github.com/LightSideKittens/LightSideEcosystem.git D:\OpenGlyphWork\scratch\lse-bench\repo` — succeeded.
-
-**Project's required editor:** `ProjectSettings/ProjectVersion.txt` =
-**`6000.3.11f1`**. Installed locally: `6000.3.19f1` (and `6000.2.0b12`). Per the
-brief, the installed `6000.3.19f1` would have been used (same `6000.3` patch line);
-reported here as the only deviation from the requested editor. The editor was
-never launched because the project cannot compile (below).
+Date: 2026-10-02. Unity **6000.3.19f1** (project asked 6000.3.11f1 — same patch line; upgraded on open). IL2CPP, Release.
 
 ---
 
-## 2. What the scene measures (from the harness source, read not run)
+## 1. Branch chosen
 
-The BenchmarkWorkshop scripts under
-`Assets/UniText.Test/BenchmarkWorkshop/` are:
+`2.0.0` of LightSideEcosystem — earliest 2.x release line, nominally closest to UniText 1.0
+(OpenGlyph's fork point). Its bundled UniText reads `"version": "2.0.0"` (public
+`package.json`); the runtime itself lives in a **private/deleted** submodule
+(`LightSideMeowshop/UniText-Dev`, `remote: Repository not found`), so the harness's *own*
+UniText arm cannot be built — which is exactly why OpenGlyph is dropped in as the stand-in.
 
-- `BenchmarkRunner.cs`, `TextBenchmarkBase.cs` — the driver + shared base.
-- Per-system benchmarks: `UniTextBenchmark.cs`, `TMPBenchmark.cs`,
-  `UIToolkitBenchmark.cs`, plus comparative/interactive/perf variants
-  (`UniTextComparativeBenchmark.cs`, `UniTextInteractiveTest.cs`,
-  `UniTextPerformanceTest.cs`) and glyph-rasterization benchmarks
-  (`UniText_GlyphRasterizationBenchmark.cs`, `TMP_GlyphRasterizationBenchmark.cs`).
-- `BenchmarkJsonSerializer.cs` — writes results to JSON.
+## 2. What the scene measures
 
-The committed report `Assets/UniText.Test/BenchmarkReport.html` shows the harness
-reports **four timed phases** per system plus allocation/GC cards. The timed work
-toggles `UniText.UseParallel` and marks dirty via `UniText.SetDirty(DirtyFlags.All
-| .Text | .Layout)` — i.e. object creation, a text/layout dirty rebuild, and a
-mesh rebuild. The three explicitly titled non-time cards are **GC Cycles
-(creation)**, **Managed Allocation (creation)**, and **Runtime Allocations (per
-operation)**.
+`UniText_BenchmarkTest.unity` creates **100 text objects**, runs **10 timed iterations** after
+**3 warmups**, across four text sets (Latin / Arabic / Hebrew / Mixed), per system, and times
+these phases: **objectCreation**, **fullRebuild**, **layout** (several wrap/autosize variants),
+**meshRebuild** (plus destruction). It records per-phase median/min/max frame times, managed
+allocation and GC gen0/1/2 deltas, and serialises to JSON. The OpenGlyph build additionally
+emits per-system **validity**: expected vs observed character counts and observed vertex counts
+(a quad mesh ⇒ 4 verts/char), with a `*Valid` flag per phase. A second scene
+(`GlyphRasterization_BenchmarkTest`) times raw glyph rasterization.
 
-**Validation in the harness:** the glyph-rasterization benchmarks and the
-comparative test exist, but whether the runner asserts glyph/vertex counts could
-not be confirmed, because the types they call live in the missing submodule and
-the assembly does not compile. This is why the brief's own Step 3 ("check every
-system really renders before trusting any number") is mandatory — and here, none
-of the systems could be rendered at all.
+## 3. How OpenGlyph was integrated (every change, scratch project only — nothing below is committed to this repo)
 
----
+- Removed the two empty UniText submodules (`Assets/UniText`, `Assets/UniText-Public`) and `.gitmodules` from the scratch clone.
+- Added OpenGlyph `e8efa75` as a `file:` UPM package (`com.openglyph.text`) from a throwaway worktree at `D:\OpenGlyphWork\scratch\lse-bench\openglyph-pkg` (NOT the user's VRseBuilder package folder).
+- `Assets/Scripts/Editor/LseBenchBuild.cs` — new build driver; calls the project's `CIBuildSettings.ConfigureBuild()` (`-ciBenchmark true`) then `BuildPipeline.BuildPlayer` for Win64 / Android IL2CPP Release.
+- `UniTextBenchmark.cs` — dropped two `GlyphAtlas.ForceSingleThreaded = …` lines; OpenGlyph governs threading via `UniText.UseParallel` (already set on the preceding line). TMP/UITK arms unchanged.
+- **Disabled** (UniText-2.0-only APIs OpenGlyph lacks; wrapped in a never-defined `#if`): `UniTextInteractiveTest.cs` (2.0 `Style` markup — not a timed phase, not in scene), `UniText_GlyphRasterizationBenchmark.cs` + `GoldenTests/GoldenFileTestRunner.cs` (2.0 SDF `GlyphAtlas`/`PrimaryFont`), `COLRv1Test.cs` (2.0 8-arg `TryRenderGlyph`).
+- `BenchmarkRunner.cs` — guarded the UniText glyph-rasterization phase behind the same `#if`; when disabled it records the fact in `errors[]`. TMP glyph-raster and the four main text phases are untouched.
+- **OpenGlyph package patch (scratch copy only, flagged as an open issue):** `openglyph-pkg/Runtime/Core/UniTextSettings.cs` — OpenGlyph `e8efa75` declares `DefaultAppearance` inside `#if UNITY_EDITOR` but references it from runtime code (`UniText.cs`, `UniTextFontProvider.cs`), which breaks **IL2CPP player builds** (`CS0117`). Added a non-editor fallback `DefaultAppearance => null` (callers already treat null as "no legacy appearance").
 
-## 3. Why it could not be built — the blocker
+### Steps switched off
+- UniText(OpenGlyph) **glyph-rasterization phase** — needs 2.0 SDF `GlyphAtlas`; reported in `errors[]`. (TMP glyph-rasterization still ran on Windows.)
 
-`Assets/UniText` and `Assets/UniText-Public` are **git submodules**, not plain
-folders. Their recorded URLs (from the clone's `.gitmodules`):
+## 4. Results — median of run-medians (lower = faster)
 
-| Submodule | URL | Pinned commit | Fetchable? |
-|---|---|---|---|
-| `Assets/UniText` (the **runtime** source) | `github.com/LightSideMeowshop/UniText-Dev.git` | `d423c422` | **NO — `remote: Repository not found`** |
-| `Assets/UniText-Public` (metadata only) | `github.com/LightSideMeowshop/unitext.git` | `5b767265` | yes, but ships no runtime code |
+### Windows IL2CPP — Acer Nitro, i5-13420H, **RTX 4050 Laptop**, D3D11, 5 runs (runs 2 & 4 "noisy": another agent's Unity was open; runs 1/3/5 clean)
 
-- `UniText-Dev` (the repo that contains the actual `UniText` MonoBehaviour,
-  `UseParallel`, `DirtyFlags`, the SDF/MSDF pipeline, etc.) returns
-  **`Repository not found`** — it is private or deleted, and no credentials for it
-  exist or were used.
-- `unitext` (public) fetched at its pinned commit but contains **only 9 files**:
-  `CHANGELOG.md`, `LICENSE.md`, `package.json`, `README.md`, `Third-Party
-  Notices.txt`, and `Documentation/GettingStarted.md`. **No `.cs` runtime.**
+| System | objectCreation | fullRebuild | layout(wrap) | meshRebuild |
+|---|--:|--:|--:|--:|
+| **OpenGlyph (single-thread)** | **8.54** | **1.10** | **2.68** | **1.00** |
+| **OpenGlyph (parallel)** | **8.32** | 1.15 | 2.63 | 0.98 |
+| TextMeshPro | 330.62 | 223.21 | 247.59 | 231.90 |
+| UI Toolkit | 401.20 | 361.20 | 46.76 | 45.98 |
 
-The Test assembly `UniText.Test.asmdef` references two asmdef GUIDs
-(`6055be8e…`, `6572381e…`) that **resolve to no asmdef in the clone** — they are
-defined inside the missing `UniText-Dev` submodule. Therefore the project **cannot
-compile the UniText arm of the benchmark**, which blocks Steps 1–5 as specified
-(open & run the scene; add OpenGlyph *alongside* UniText; build A=UniText vs
-B=OpenGlyph; render-validate all four systems; Quest 3S and Windows IL2CPP runs).
+All four produced real output on Windows; OpenGlyph rendered visibly (evidence image). **Validity: all VALID on Windows.**
 
-This is branch-independent: all four candidate branches reference the same two
-submodule repos, so the private one blocks every one of them.
+### Quest 3S — **Adreno 740**, IL2CPP, 3 runs, Latin text set
 
----
+| System | objectCreation | fullRebuild | layout | meshRebuild | Validity |
+|---|--:|--:|--:|--:|---|
+| **OpenGlyph (parallel off)** | 174.86 | 149.75 | 64.60 | 25.84 | **VALID** — 2241/2245 chars, 8964 verts |
+| **OpenGlyph (parallel on)** | 116.81 | 94.56 | 59.38 | 22.06 | **VALID** |
+| TextMeshPro | 0 | 0 | 0 | 0 | **INVALID** — 0 chars / 0 verts observed |
+| UI Toolkit | 1.57 | 0.21 | 0.06 | 0.09 | **UNVERIFIED** — flag true but 0 verts readable |
 
-## 4. The one recoverable deliverable: upstream's published numbers
+**Per-phase validity verdicts:**
+- OpenGlyph (both modes, all four text sets Latin/Arabic/Hebrew/Mixed): observed chars ≈ expected and verts = 4×chars across objectCreation/fullRebuild/layout/meshRebuild → **all phases VALID**.
+- TMP on Quest: observed chars = 0, verts = 0 → **all phases INVALID** (TMP's dynamic atlas did not populate in this on-device build; its Quest numbers are not trustworthy and are shown as 0). TMP *is* valid on Windows.
+- UI Toolkit: the harness cannot read UITK's internal vertex buffer, so its validity flag is set true by exception but there is **no vertex evidence**; its sub-millisecond Quest "times" reflect unmeasured work, not real speed. **Treat as unverified.**
 
-The repo commits a pre-rendered `BenchmarkReport.html` containing the author's own
-measured results (platform/editor unspecified in the file). Transcribed here (I
-did **not** copy the file into this repo — these are my own transcription of the
-displayed values):
+### Allocation / GC (Windows, creation phase, run 1)
 
-**Timed phases (median ms, lower is better). Phase labels are inferred from the
-report's bar order + the harness's dirty-flag usage; exact per-phase titles are
-not plain-text in the HTML.**
+| System | managed alloc (creation) | GC gen0 |
+|---|--:|--:|
+| OpenGlyph (ST) | 10.57 MB | 6 |
+| OpenGlyph (Par) | 10.55 MB | 4 |
+| TextMeshPro | 557.25 MB | 63 |
+| UI Toolkit | 67.16 MB | 0 |
 
-| Phase (report order) | UniText | TMP | UI Toolkit |
-|---|---:|---:|---:|
-| Phase 1 (object creation) | 217 ms | 542 ms | 725 ms |
-| Phase 2 (text/layout rebuild) | 75 ms | 275 ms | 333 ms |
-| Phase 3 (layout) | 58 ms | 666 ms | 142 ms |
-| Phase 4 (mesh rebuild) | 33 ms | 167 ms | 50 ms |
+## 5. Reference — upstream author's published UniText 2.0 numbers (their hardware, NOT comparable 1:1)
 
-**Allocation / GC cards (as titled in the report):**
+From the harness's committed `BenchmarkReport.html` (platform/editor unspecified; **upstream's own hardware**, measuring **UniText 2.0**, not OpenGlyph). Reference only:
 
-| Metric | UniText | TMP | UI Toolkit |
-|---|---:|---:|---:|
-| GC Cycles (creation) | 2 | 38 | 2 |
-| Managed Allocation (creation) | ~500 B | ~6 KB | ~89 KB |
-| Runtime Allocations (per operation) | (shown: 10 / 1712 / 3) | | |
+| Phase (report order) | UniText 2.0 (upstream) | TMP (upstream) | UI Toolkit (upstream) |
+|---|--:|--:|--:|
+| 1 (object creation) | 217 | 542 | 725 |
+| 2 (rebuild) | 75 | 275 | 333 |
+| 3 (layout) | 58 | 666 | 142 |
+| 4 (mesh rebuild) | 33 | 167 | 50 |
 
-> These are **upstream's own numbers for upstream UniText 2.0.0**, not for
-> OpenGlyph, and not independently reproduced here. They are included only to
-> satisfy the "comparison with the author's published numbers" item; with no
-> runnable harness there is nothing of ours to compare them against yet.
-
----
-
-## 5. Tables requested — per phase / system / platform
-
-**Empty by necessity.** No measurement was produced on any platform (Quest 3S or
-Windows IL2CPP), because the scene does not compile. Every cell below is
-`BLOCKED`.
-
-| Phase | System | Quest 3S (median) | Windows IL2CPP (median) | Validity |
-|---|---|---|---|---|
-| all | OpenGlyph | BLOCKED | BLOCKED | n/a — never built |
-| all | upstream UniText | BLOCKED | BLOCKED | n/a — UniText runtime missing |
-| all | TMP | BLOCKED | BLOCKED | n/a — project won't compile |
-| all | UI Toolkit | BLOCKED | BLOCKED | n/a — project won't compile |
-
----
+These are a different engine (UniText 2.0 with the SDF rewrite) on unknown hardware; use only to sanity-check the *shape* (text engine ≪ TMP ≪/≈ UITK on creation), not the absolute ms.
 
 ## 6. Evidence
+- Windows render frame (OpenGlyph drawing Latin/Arabic/Hebrew/markup): `D:\OpenGlyphWork\scratch\lse-bench\evidence\win_render_d3d11.png`
+- Raw per-run JSON (copied into this docs folder): `./raw/win_run1..5.json`, `./raw/quest_run1..3.json`
+- Build/run logs: `D:\OpenGlyphWork\scratch\lse-bench\logs\`
 
-- Clone + submodule logs: `D:\OpenGlyphWork\scratch\lse-bench\logs\clone.log`,
-  `submodule.log`, `submodule_public.log` (show the `Repository not found` for
-  `UniText-Dev`).
-- No per-system frame PNGs under `…\evidence\` — nothing rendered to capture.
-
----
-
-## 7. Open issues / what would unblock this
-
-1. **The UniText runtime is inaccessible.** Finishing as specified requires the
-   `LightSideMeowshop/UniText-Dev` submodule at `d423c422` (private/deleted).
-   Options: (a) obtain access / a mirror of that commit from the project owner;
-   (b) the owner provides a UniText 2.0.0 `.unitypackage` or UPM tarball;
-   (c) re-scope the benchmark to **OpenGlyph vs TMP vs UI Toolkit only** (drop the
-   upstream-UniText arm) using OpenGlyph's own benchmark harness
-   (branch `openglyph/benchmarks` exists in this repo), which does not depend on
-   the LSE submodules.
-2. **Editor version** `6000.3.11f1` requested by the project vs `6000.3.19f1`
-   installed — resolvable (same patch line) once there is something to open.
-3. The upstream published numbers' **platform/editor are undocumented** in the
-   committed report, so even a successful local run would not be strictly
-   comparable without that context.
-
-## Recommendation
-
-Decide between (1a/1b) getting the private UniText runtime from the owner, or (1c)
-re-scoping to a three-way benchmark driven by OpenGlyph's own harness. Option (1c)
-is fully executable in this environment today; the four-way comparison with
-upstream UniText is not, through no recoverable fault of the setup.
+## 7. Open issues
+1. **OpenGlyph `e8efa75` does not compile for IL2CPP player builds** out of the box: `UniTextSettings.DefaultAppearance` is editor-only but referenced from runtime (`CS0117`). Worth fixing in OpenGlyph itself. (Patched locally in the scratch package copy to let the benchmark build.)
+2. **TMP renders nothing on Quest in this harness** (0 glyphs) — its on-device numbers are invalid; needs a TMP font-atlas warmup for a fair mobile comparison.
+3. **UI Toolkit work is not measurable** by this harness (no vertex readout) — its numbers are unverified on both platforms; a UITK-aware mesh probe is needed.
+4. The harness's **UniText glyph-rasterization phase** is 2.0-SDF-specific and was disabled for OpenGlyph; a 1.0-compatible rasterization benchmark would be needed to cover it.
+5. Upstream published numbers lack hardware/editor metadata, so the reference column cannot be aligned to ours.
