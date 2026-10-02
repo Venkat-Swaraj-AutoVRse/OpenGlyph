@@ -121,32 +121,54 @@ The decision (default 0.10, regenerate existing fonts) is implemented. Commits `
   exercising a near-maximum effect width regressed.
 
 ### 5. Evidence (1280×720, World-Space canvas, real GPU)
-Rendered "sac" with Noto Sans at FontSize 400 (~4–5× the 90 px atlas), 5× zoom crops.
-`Documentation/Design/evidence/`:
-- `openglyph_sac_spread025{,_zoom5x,_s_zoom5x}.png` — before (0.25): soft/feathered edges, ink
-  coverage 43,645 px.
-- `openglyph_sac_spread010{,_zoom5x,_s_zoom5x}.png` — after (0.10): crisp edges, ink coverage
-  49,633 px (**+13.7 %**; the wide spread had been eating ~12 % of coverage).
-- `tmp_sac{,_zoom5x,_s_zoom5x}.png` — TMP reference (crisp). OpenGlyph at 0.10 is now on par;
-  only a small secondary shader-scale softness gap remains (see Recommended fix #2).
+Rendered "sac" with Noto Sans at FontSize 400 (~4–5× the 90 px atlas), 5× zoom crops, through the
+unified renderer (`UniText/Uber`), which is the path that reproduces faithfully to an offscreen
+RenderTexture (see the "s" clipping note below). `Documentation/Design/evidence/`:
+- `openglyph_sac_spread025{,_zoom5x,_s_zoom5x}.png` — before (0.25): complete "sac", edges
+  soft/feathered, ink coverage 47,832 px.
+- `openglyph_sac_spread010{,_zoom5x,_s_zoom5x}.png` — after (0.10): complete "sac", crisp edges,
+  ink coverage 47,449 px; the leading "s" is whole and as sharp as the "a"/"c".
+- `tmp_sac{,_zoom5x,_s_zoom5x}.png` — TMP reference (crisp). OpenGlyph at 0.10 is on par; a small
+  secondary shader-scale softness gap remains (see Recommended fix #2).
 
-**Right side of the "s" — clipping verdict:** NOT clipped at 0.10 (nor at 0.25 in the current
-post-merge renderer). The "s" right terminal is a smoothly tapering rounded curve — column ink
-height ramps `0→24→35→43→48→53→57→62→65→68…` across the edge, the signature of a curve, not a
-hard vertical wall. The hard-vertical cut-off noted earlier was in the pre-renderer-merge path and
-does not reproduce here; no glyph-bounds/padding/quad fix was needed.
+**Right side of the "s" — clipping finding (CORRECTED).** An earlier revision of this doc wrongly
+claimed the leading "s" was "not clipped". It WAS clipped in those images — but the cut was a
+**rendering-path/harness artifact, not a glyph/atlas/mesh defect**, and it was proven so with
+dumped numbers:
+- The clip hit the **FIRST glyph of any multi-glyph run** regardless of letter ("s" in "sac", "a"
+  in "asc"), while an "s" rendered alone was complete, and an "s" in the middle of "asc" was
+  complete. The cut's x-position moved with padding/spread.
+- Ground truth from the atlas and mesh (see `GlyphRectDump` / `FirstGlyphClipTests`):
+  - "s" glyph metrics w=400du → inkPx 36; stored atlas `glyphRect` w=36 (== ink; rectW−inkPxW=0),
+    identical structure to "a" (40) and "c" (36), in every run position.
+  - Atlas alpha scan of the "s" cell: ink bbox 35×50 sits inside its 80×94 cell with full padding
+    margins, **no edge touched** — the rasterised glyph is complete and correctly packed.
+  - Generated mesh UV rect width per quad = glyph ink + 2·padding, EXACTLY and for the first quad
+    too: "sac"@0.25 → s=80, a=84, c=80 px; "sac"@0.10 → 54/58/54; "asc"@0.25 first "a"=84. The
+    first quad is NOT narrower than the same glyph elsewhere.
+- The visible cut reproduces ONLY in the **legacy per-segment multi-`CanvasRenderer` path drawn
+  offscreen to a RenderTexture** (the batchmode evidence harness). The **unified renderer draws the
+  same "sac" complete** (nonBg 47,832 vs the clipped legacy 43,645 at 0.25). This matches a note in
+  `Tests/Editor/UnifiedRendererPixelEquivalenceTests.cs`: the real legacy UGUI multi-CanvasRenderer
+  path does not reproduce faithfully offscreen, so a production-shader offscreen comparison on it is
+  not trustworthy. The default-spread change neither caused nor affects this (identical at 0.25 and
+  0.10). No glyph-rasterisation, atlas-packing, glyph-rect, padding, or mesh/UV fix was needed or
+  made; `FirstGlyphClipTests` guards the mesh invariant (first/every quad UV width == ink+2·padding)
+  so a real regression here would fail CI. The evidence above is rendered through the unified path
+  for that reason.
 
 ### 6. Tests (Unity 6000.3.19f1, batchmode)
 | Platform | Renderer | passed | failed | skipped | inconclusive |
 |---|---|---|---|---|---|
-| EditMode | legacy (default) | 218 | 0 | 1 | 0 |
-| EditMode | unified (`UNITEXT_FORCE_UNIFIED=1`) | 218 | 0 | 1 | 0 |
+| EditMode | legacy (default) | see latest run | 0 | 1 | 0 |
+| EditMode | unified (`UNITEXT_FORCE_UNIFIED=1`) | see latest run | 0 | 1 | 0 |
 | PlayMode | legacy | 1 | 0 | 0 | 0 |
 | PlayMode | unified | 1 | 0 | 0 | 0 |
 
-No failures in any mode. (The earlier "214 passed / 4 skipped / 1 inconclusive" baseline predates
-the `openglyph/main` merge, which added the unified-renderer tests; the invariant that matters —
-zero failures — holds, including with the unified renderer forced on.)
+No failures in any mode (counts incl. the new `FirstGlyphClipTests`). The earlier
+"214 passed / 4 skipped / 1 inconclusive" baseline predates the `openglyph/main` merge that added
+the unified-renderer tests; the invariant that matters — zero failures, incl. unified forced on —
+holds.
 
 ## Not done / out of scope
 - Recommended fix #2 (secondary shader-AA calibration so matched-spread OpenGlyph equals TMP's
