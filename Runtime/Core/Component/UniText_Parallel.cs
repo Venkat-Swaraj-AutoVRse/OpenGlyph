@@ -684,10 +684,34 @@ namespace LightSide
                 return;
             }
 
+            // Geometry-identity skip: if the freshly generated geometry is byte-identical to what the
+            // renderers already display (same fingerprint) AND they are already populated, the Unity
+            // mesh re-upload — the dominant cost/alloc of a full rebuild — is pure waste. Skipping it
+            // is behaviour-preserving: identical geometry draws identically. This zeroes the cost of a
+            // text change that does not change rendered output (trailing-whitespace edits, reassigning
+            // equivalent text, score/timer updates landing on the same string). Opt-out via settings.
+            if (UniTextSettings.SkipUnchangedGeometryUpload && hasAppliedGeometry && subMeshRenderers.Count > 0)
+            {
+                ulong fp = meshGenerator.GeometryFingerprint();
+                if (fp != 0 && fp == lastAppliedGeometryFingerprint)
+                {
+                    meshGenerator.ReturnInstanceBuffers();
+                    if (textProcessor != null)
+                    {
+                        resultWidth = textProcessor.ResultWidth;
+                        resultHeight = textProcessor.ResultHeight;
+                    }
+                    dirtyFlags = DirtyFlags.None;
+                    return;
+                }
+            }
+
             renderData = meshGenerator.ApplyMeshesToUnity();
     #if UNITEXT_TESTS
             CopyMeshesForTests();
     #endif
+            lastAppliedGeometryFingerprint = meshGenerator.GeometryFingerprint();
+            hasAppliedGeometry = true;
             meshGenerator.ReturnInstanceBuffers();
 
             if (textProcessor != null)

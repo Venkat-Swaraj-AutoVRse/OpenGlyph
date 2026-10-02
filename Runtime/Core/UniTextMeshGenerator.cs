@@ -315,6 +315,46 @@ namespace LightSide
         /// <summary>Gets the list of generated mesh segments, one per font/atlas combination.</summary>
         internal PooledList<GeneratedMeshSegment> GeneratedSegments => generatedSegments;
 
+        /// <summary>
+        /// A cheap order-sensitive fingerprint (64-bit FNV-1a) of the CURRENTLY GENERATED geometry —
+        /// vertex count, positions, UV0 and vertex colours. Two rebuilds whose rendered output is
+        /// identical hash equal, so the component can skip the Unity mesh re-upload (the dominant
+        /// cost of a full rebuild) when a text change produces the same geometry (e.g. a
+        /// trailing-whitespace-only edit, or reassigning equivalent text). Zero when no data is
+        /// generated. Reads only pooled buffers — allocation-free.
+        /// </summary>
+        public ulong GeometryFingerprint()
+        {
+            if (!hasGeneratedData || vertexCount <= 0) return 0;
+            const ulong fnvOffset = 14695981039346656037UL;
+            const ulong fnvPrime = 1099511628211UL;
+            ulong h = fnvOffset;
+
+            unchecked
+            {
+                h = (h ^ (uint)vertexCount) * fnvPrime;
+                h = (h ^ (uint)triangleCount) * fnvPrime;
+
+                var v = vertices.data;
+                var u = uvs0.data;
+                var c = colors.data;
+                int n = vertexCount;
+                // Hash every vertex: position (quantized to avoid float-noise flapping), UV0, colour.
+                for (int i = 0; i < n; i++)
+                {
+                    var p = v[i];
+                    h = (h ^ (uint)Mathf.RoundToInt(p.x * 16f)) * fnvPrime;
+                    h = (h ^ (uint)Mathf.RoundToInt(p.y * 16f)) * fnvPrime;
+                    var uv = u[i];
+                    h = (h ^ (uint)Mathf.RoundToInt(uv.x * 4096f)) * fnvPrime;
+                    h = (h ^ (uint)Mathf.RoundToInt(uv.y * 4096f)) * fnvPrime;
+                    var col = c[i];
+                    h = (h ^ (uint)(col.r | (col.g << 8) | (col.b << 16) | (col.a << 24))) * fnvPrime;
+                }
+            }
+            return h;
+        }
+
         /// <summary>Gets the secondary UV buffer containing effect normalization data.</summary>
         /// <remarks>
         /// Layout: xy = line position (LineRenderHelper), z = effectNormFactor, w = reserved.

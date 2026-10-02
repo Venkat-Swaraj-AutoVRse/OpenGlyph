@@ -115,6 +115,22 @@ namespace LightSide
         public static long SharedAtlasByteBudgetGlobal => Instance != null ? Instance.sharedAtlasByteBudgetGlobal : 0;
 
         [SerializeField]
+        [Tooltip("When ON (default), a UniText component skips the Unity mesh re-upload on a rebuild " +
+                 "whose generated geometry is byte-identical to what its renderers already display " +
+                 "(same vertices/UVs/colours). The mesh upload is the dominant cost of a full rebuild, " +
+                 "so this zeroes the cost of a text change that does not change rendered output " +
+                 "(trailing-whitespace edits, reassigning equivalent text, score/timer updates landing " +
+                 "on the same string). Behaviour-preserving: identical geometry draws identically. Turn " +
+                 "OFF only to isolate a suspected skip bug.")]
+        private bool skipUnchangedGeometryUpload = true;
+
+        /// <summary>
+        /// When true (default), a component skips the Unity mesh re-upload when a rebuild produces
+        /// geometry identical to what is already displayed. See UniText.DoApplyMesh. Behaviour-preserving.
+        /// </summary>
+        public static bool SkipUnchangedGeometryUpload => Instance != null && Instance.skipUnchangedGeometryUpload;
+
+        [SerializeField]
         [Tooltip("Render Architecture R2: when ON, each UniText component draws through a SINGLE " +
                  "CanvasRenderer per draw group (at most two: SDF/coverage + MSDF/color) using the " +
                  "UniText/Uber shader, a shared Texture2DArray atlas and a float-texture style table, " +
