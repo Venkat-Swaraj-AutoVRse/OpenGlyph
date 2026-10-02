@@ -38,11 +38,44 @@ namespace LightSide
             Cat.Meow($"[UniText] OnPreprocessBuild, platform: {report.summary.platformGroup}");
 
             EnsureUberShaderIncluded();
+            CheckSettingsAssetPresent();
 
             if (report.summary.platformGroup == BuildTargetGroup.WebGL)
             {
                 ValidateWebGLSettings();
             }
+        }
+
+        // A project that never created Resources/UniTextSettings.asset still works at runtime — the
+        // package ships its own Resources/UnicodeData.bytes and UniTextSettings.Instance falls back to a
+        // built-in default (see Runtime/Core/UniTextSettings.cs). This check surfaces the condition at
+        // BUILD time so it is noticed deliberately rather than discovered as "default configuration in
+        // production": it is a loud, single Debug.LogWarning naming the asset and the remedy, not a hard
+        // build failure (failing the build would break every project that legitimately relies on the
+        // default). A project WITH its own asset (anywhere under a Resources folder) passes silently.
+        private static void CheckSettingsAssetPresent()
+        {
+            // Match any Resources/UniTextSettings.asset in the project (the exact path Resources.Load uses).
+            var guids = AssetDatabase.FindAssets("t:UniTextSettings");
+            foreach (var guid in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid).Replace('\\', '/');
+                // Must be inside a /Resources/ folder and named UniTextSettings.asset to be loadable at runtime.
+                if (path.Contains("/Resources/") && path.EndsWith("/Resources/UniTextSettings.asset"))
+                {
+                    Cat.Meow($"[UniText] Found project UniTextSettings at {path}; it will be used in the build.");
+                    return;
+                }
+            }
+
+            // Use Debug.LogWarning directly (NOT Cat.*, which is [Conditional("UNITEXT_DEBUG")] and would be
+            // compiled out of ordinary projects): the whole point of this check is to be visible by default.
+            Debug.LogWarning(
+                "[OpenGlyph] This build contains no Resources/UniTextSettings.asset. Text WILL still render " +
+                "(OpenGlyph falls back to built-in default settings), but project-specific configuration " +
+                "(named gradients, shared-atlas page budget, unified-renderer default) will be ignored. To " +
+                "configure it, create the asset via Assets > Create > UniText > Settings and place it in a " +
+                "Resources folder, or open Edit > Project Settings > UniText.");
         }
 
         // The UniText/Uber shader is instantiated at runtime via Shader.Find (no material asset
