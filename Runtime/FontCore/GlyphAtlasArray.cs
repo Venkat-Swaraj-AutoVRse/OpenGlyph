@@ -110,6 +110,9 @@ namespace LightSide
             // without a GPU, and the GPU upload is a single well-defined call per dirty slice.
             public byte[] cpu;
             public bool dirty;
+            // Number of resident (not-evicted) cells currently packed on this page. When it reaches 0
+            // the page is fully free and ReleaseEmptyPages() can reclaim it.
+            public int residentCount;
             // Free rects available for reuse after eviction, bucketed loosely by appending; a simple
             // first-fit scan keeps fragmentation bounded for the glyph size distribution.
             public readonly List<GlyphRect> freeRects = new();
@@ -127,6 +130,7 @@ namespace LightSide
 
         private long _frame;
         private int _pageBudget; // <= 0 => unbounded (no eviction), unchanged legacy behaviour
+        private long _byteBudget; // <= 0 => unbounded; resident-byte cap (pages * bytesPerPage)
 
         /// <summary>Atlas page (and slice) size in pixels (square).</summary>
         public int Size => _size;
@@ -149,16 +153,59 @@ namespace LightSide
             set => _pageBudget = value;
         }
 
+        /// <summary>
+        /// Maximum RESIDENT bytes (pages × <see cref="BytesPerPage"/>) before eviction. <c>&lt;= 0</c>
+        /// means unbounded. Combined with <see cref="PageBudget"/> via <see cref="EffectivePageBudget"/>:
+        /// whichever cap is lower wins. The byte budget is the mobile-relevant knob — a page is
+        /// <c>size² × channels</c> bytes (1 MB for 1024² Alpha8, 4 MB for RGBA32).
+        /// </summary>
+        public long ByteBudget
+        {
+            get => _byteBudget;
+            set => _byteBudget = value;
+        }
+
+        /// <summary>Bytes a single page occupies (<c>size × size × channels</c>).</summary>
+        public long BytesPerPage => (long)_size * _size * _channels;
+
+        /// <summary>Current resident bytes = <see cref="PageCount"/> × <see cref="BytesPerPage"/>.</summary>
+        public long ResidentBytes => (long)_pages.Count * BytesPerPage;
+
+        /// <summary>
+        /// The page cap actually enforced, derived from both <see cref="PageBudget"/> and
+        /// <see cref="ByteBudget"/>: the byte budget is floored to a whole page count
+        /// (<c>byteBudget / bytesPerPage</c>, at least 1 when a positive budget is set), and the
+        /// smaller of the two positive caps wins. Returns <c>&lt;= 0</c> (unbounded) only when BOTH
+        /// are unset — so behaviour is unchanged from the page-only path when no byte budget is set.
+        /// </summary>
+        public int EffectivePageBudget
+        {
+            get
+            {
+                int byteCapPages = 0;
+                if (_byteBudget > 0)
+                {
+                    long bpp = BytesPerPage;
+                    byteCapPages = bpp > 0 ? (int)Math.Max(1, _byteBudget / bpp) : 0;
+                }
+                int pageCap = _pageBudget > 0 ? _pageBudget : 0;
+                if (pageCap > 0 && byteCapPages > 0) return Math.Min(pageCap, byteCapPages);
+                return pageCap > 0 ? pageCap : byteCapPages; // 0 => unbounded
+            }
+        }
+
         /// <param name="size">Page/slice size in pixels (square), e.g. 1024.</param>
         /// <param name="format">Alpha8 (SDF/coverage) or RGBA32 (MSDF/emoji).</param>
         /// <param name="pageBudget">Max pages before eviction; &lt;= 0 = unbounded (default).</param>
-        public GlyphAtlasArray(int size, TextureFormat format, int pageBudget = 0)
+        /// <param name="byteBudget">Max resident bytes before eviction; &lt;= 0 = unbounded (default).</param>
+        public GlyphAtlasArray(int size, TextureFormat format, int pageBudget = 0, long byteBudget = 0)
         {
             if (size <= 0) throw new ArgumentOutOfRangeException(nameof(size));
             _size = size;
             _format = format;
             _channels = format == TextureFormat.RGBA32 ? 4 : format == TextureFormat.RGB24 ? 3 : 1;
             _pageBudget = pageBudget;
+            _byteBudget = byteBudget;
         }
 
         /// <summary>Advances the LRU clock. Call once per frame before touching cells for that frame.</summary>
@@ -251,6 +298,7 @@ namespace LightSide
                 channels = channels,
             };
             _cells[key] = rec;
+            _pages[slice].residentCount++;
             cell = ToCell(rec);
             return true;
         }
@@ -313,7 +361,8 @@ namespace LightSide
             }
 
             // 3) Grow by a page if under budget (or unbounded).
-            if (_pageBudget <= 0 || _pages.Count < _pageBudget)
+            int effectiveBudget = EffectivePageBudget;
+            if (effectiveBudget <= 0 || _pages.Count < effectiveBudget)
             {
                 var page = GrowPage();
                 if (TryShelfPack(page, w, h, out glyphRect, out packedRect))
@@ -462,8 +511,83 @@ namespace LightSide
             _cells.Remove(rec.key);
             var page = _pages[rec.slice];
             page.freeRects.Add(rec.packedRect);
+            if (page.residentCount > 0) page.residentCount--;
             // Note: pixels are left in place; they are overwritten when the rect is reused, and the
             // glyph re-rasterizes on demand (the lookup now misses). No GPU clear needed.
+        }
+
+        /// <summary>
+        /// Reclaims every page that has no resident cells left (fully evicted), shrinking the backing
+        /// <see cref="Texture2DArray"/> accordingly and remapping the surviving pages' slice indices
+        /// (and their cells' <c>slice</c>). This is what makes a BYTE budget actually REDUCE resident
+        /// memory: eviction alone frees rects within a page, but only page release lowers
+        /// <see cref="ResidentBytes"/>. Returns the number of pages reclaimed. Main-thread only
+        /// (rebuilds the GPU array). No-op when no page is empty, so a working set that keeps every
+        /// page partially populated is never churned.
+        /// </summary>
+        public int ReleaseEmptyPages()
+        {
+            // The published-page facet (AddPage/_pageSlices) addresses pages by an external key and is
+            // not glyph-cell managed; remapping slices under it would break that mapping. Byte-budget
+            // page release only applies to the glyph-cell path, so skip when published pages exist.
+            if (_pageSlices.Count > 0) return 0;
+
+            int emptyCount = 0;
+            for (int i = 0; i < _pages.Count; i++)
+                if (_pages[i].residentCount == 0) emptyCount++;
+            if (emptyCount == 0) return 0;
+
+            // Build the surviving page list, assigning new slice indices in order.
+            var survivors = new List<Page>(_pages.Count - emptyCount);
+            var remap = new Dictionary<int, int>(); // oldSlice -> newSlice
+            for (int i = 0; i < _pages.Count; i++)
+            {
+                var p = _pages[i];
+                if (p.residentCount == 0) continue;
+                int oldSlice = p.sliceIndex;
+                int newSlice = survivors.Count;
+                remap[oldSlice] = newSlice;
+                p.sliceIndex = newSlice;
+                p.dirty = true; // force re-upload into the rebuilt array
+                survivors.Add(p);
+            }
+
+            _pages.Clear();
+            _pages.AddRange(survivors);
+
+            // Remap every surviving cell's slice.
+            foreach (var rec in _cells.Values)
+                if (remap.TryGetValue(rec.slice, out int ns))
+                    rec.slice = ns;
+
+            RebuildArrayForCurrentPages();
+            return emptyCount;
+        }
+
+        /// <summary>
+        /// Rebuilds the backing <see cref="Texture2DArray"/> to exactly <see cref="PageCount"/> slices
+        /// and re-uploads every page's CPU buffer. Used after <see cref="ReleaseEmptyPages"/> shrinks
+        /// the page set. When no pages remain the array is destroyed (next add recreates it).
+        /// </summary>
+        private void RebuildArrayForCurrentPages()
+        {
+            if (_array != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_array);
+                _array = null;
+            }
+            if (_pages.Count == 0) return;
+
+            _array = new Texture2DArray(_size, _size, _pages.Count, _format, false, true)
+            {
+                name = $"UniText SharedAtlas[{_format}] x{_pages.Count}",
+                hideFlags = HideFlags.DontSave,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            for (int i = 0; i < _pages.Count; i++)
+                _pages[i].dirty = true;
+            Apply();
         }
 
         /// <summary>
@@ -476,6 +600,41 @@ namespace LightSide
             if (rec.refCount > 0 && !force) return false;
             EvictCell(rec);
             return true;
+        }
+
+        /// <summary>
+        /// Reports this array's single least-recently-used UNREFERENCED (refcount 0) cell: its
+        /// <paramref name="frame"/> (LRU timestamp) and <paramref name="key"/>. Returns false when the
+        /// array has no evictable cell (every resident cell is pinned). Used by
+        /// <see cref="SharedGlyphAtlas.EnforceGlobalByteBudget"/> to pick the globally oldest victim
+        /// across arrays. Does not mutate anything.
+        /// </summary>
+        internal bool TryGetOldestUnreferenced(out long frame, out GlyphCellKey key)
+        {
+            frame = long.MaxValue; key = default;
+            bool found = false;
+            foreach (var rec in _cells.Values)
+            {
+                if (rec.refCount != 0) continue;
+                if (rec.lastUsedFrame < frame)
+                {
+                    frame = rec.lastUsedFrame;
+                    key = rec.key;
+                    found = true;
+                }
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// Evicts this array's own least-recently-used unreferenced cell (if any), releasing a page
+        /// that becomes fully free. Returns true if a cell was evicted. Used as the per-array step of
+        /// global byte-budget enforcement.
+        /// </summary>
+        internal bool TryEvictGloballyOldestUnreferenced()
+        {
+            if (!TryGetOldestUnreferenced(out _, out var key)) return false;
+            return Evict(key);
         }
 
         private GlyphCell ToCell(CellRecord rec)
