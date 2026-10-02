@@ -1636,7 +1636,8 @@ namespace LightSide
                 buf.perLineAdvances.Span,
                 cachedRawHeight,
                 buf.positionedGlyphs.data, ref glyphCnt,
-                out resultWidth, out resultHeight);
+                out resultWidth, out resultHeight,
+                buf.codepoints.Span);
             buf.positionedGlyphs.count = glyphCnt;
 
             UniTextDebug.EndSample();

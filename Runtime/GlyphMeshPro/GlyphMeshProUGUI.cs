@@ -331,7 +331,11 @@ namespace OpenGlyph
                 HorizontalAlignment = HorizontalAlignment.Right;
             else if ((bits & (int)HorizontalAlignmentOptions.Center) != 0)
                 HorizontalAlignment = HorizontalAlignment.Center;
-            else // Left, Justified, Flush, Geometry → Left in R1 (justification is an R2 gap)
+            else if ((bits & (int)HorizontalAlignmentOptions.Flush) != 0)
+                HorizontalAlignment = HorizontalAlignment.Flush;      // Round 2: real flush justification
+            else if ((bits & (int)HorizontalAlignmentOptions.Justified) != 0)
+                HorizontalAlignment = HorizontalAlignment.Justified;  // Round 2: real inter-word justification
+            else // Left, Geometry → Left
                 HorizontalAlignment = HorizontalAlignment.Left;
 
             // Vertical

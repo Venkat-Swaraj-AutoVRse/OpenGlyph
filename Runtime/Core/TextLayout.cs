@@ -177,7 +177,8 @@ namespace LightSide
             PositionedGlyph[] result,
             ref int glyphCount,
             out float width,
-            out float height)
+            out float height,
+            ReadOnlySpan<int> codepoints = default)
         {
             glyphCount = 0;
             width = 0;
@@ -260,6 +261,27 @@ namespace LightSide
                     }
                 }
 
+                // ---- Justification (Justified/Flush) --------------------------------------------
+                // Distribute the leftover horizontal slack across inter-word whitespace so the line
+                // fills the available width. Justified skips the LAST line of a paragraph (a line that
+                // ends the text or ends at a hard newline); Flush justifies every line. Only when the
+                // line is narrower than the box (never squeeze), width is finite, and there is at least
+                // one whitespace gap to absorb the slack.
+                float justifyExtraPerGap = 0f;
+                if ((hAlign == HorizontalAlignment.Justified || hAlign == HorizontalAlignment.Flush)
+                    && hasFiniteWidth && !isRtlLine && lineWidth < availableWidth)
+                {
+                    bool isLastLineOfParagraph =
+                        i == lineCount - 1 || EndsAtHardBreak(in line, codepoints);
+                    bool justifyThisLine = hAlign == HorizontalAlignment.Flush || !isLastLineOfParagraph;
+                    if (justifyThisLine)
+                    {
+                        int gaps = CountWhitespaceGaps(in line, runs, glyphs, codepoints);
+                        if (gaps > 0)
+                            justifyExtraPerGap = (availableWidth - lineWidth) / gaps;
+                    }
+                }
+
                 for (var r = runStart; r < runEnd; r++)
                 {
                     ref readonly var run = ref runs[r];
@@ -299,6 +321,9 @@ namespace LightSide
                             bottom = boundsBottom
                         };
                         x += advanceScaled;
+                        // Justification: widen whitespace gaps so the line fills the box.
+                        if (justifyExtraPerGap != 0f && IsWhitespaceCluster(glyph.cluster, codepoints))
+                            x += justifyExtraPerGap;
                     }
                 }
 
@@ -375,8 +400,76 @@ namespace LightSide
             {
                 HorizontalAlignment.Left => isRtlLine ? availableWidth - lineWidth : 0,
                 HorizontalAlignment.Right => isRtlLine ? 0 : availableWidth - lineWidth,
+                // Justified/Flush start flush with the leading edge; inter-word slack is distributed
+                // in the glyph loop so the line fills the width (handled there, not here).
+                HorizontalAlignment.Justified => isRtlLine ? availableWidth - lineWidth : 0,
+                HorizontalAlignment.Flush => isRtlLine ? availableWidth - lineWidth : 0,
                 _ => (availableWidth - lineWidth) * 0.5f
             };
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsWhitespaceCluster(int cluster, ReadOnlySpan<int> codepoints)
+        {
+            if (codepoints.IsEmpty || (uint)cluster >= (uint)codepoints.Length) return false;
+            int cp = codepoints[cluster];
+            // Breaking spaces that absorb justification slack. Deliberately excludes NBSP (U+00A0)
+            // and newline/tab (not inter-word gaps on a laid-out line).
+            return cp == ' ' || cp == 0x2000 || cp == 0x2001 || cp == 0x2002 || cp == 0x2003
+                || cp == 0x2004 || cp == 0x2005 || cp == 0x2006 || cp == 0x2008 || cp == 0x2009
+                || cp == 0x205F || cp == 0x3000;
+        }
+
+        /// <summary>Counts the inter-word whitespace gaps on a line (one per whitespace glyph). This is
+        /// the number of gaps the leftover slack is spread across for justification.</summary>
+        private static int CountWhitespaceGaps(in TextLine line, ReadOnlySpan<ShapedRun> runs,
+            ReadOnlySpan<ShapedGlyph> glyphs, ReadOnlySpan<int> codepoints)
+        {
+            if (codepoints.IsEmpty) return 0;
+            int gaps = 0;
+            int runEnd = line.runStart + line.runCount;
+            for (int r = line.runStart; r < runEnd; r++)
+            {
+                ref readonly var run = ref runs[r];
+                int gEnd = run.glyphStart + run.glyphCount;
+                for (int g = run.glyphStart; g < gEnd; g++)
+                    if (IsWhitespaceCluster(glyphs[g].cluster, codepoints))
+                        gaps++;
+            }
+            // A trailing space at the line's wrap point should not stretch the visible line end; drop
+            // one gap when the line's last glyph is whitespace so the last word still lands at the edge.
+            if (gaps > 0 && runEnd > line.runStart)
+            {
+                ref readonly var lastRun = ref runs[runEnd - 1];
+                if (lastRun.glyphCount > 0)
+                {
+                    int lastG = lastRun.glyphStart + lastRun.glyphCount - 1;
+                    if (IsWhitespaceCluster(glyphs[lastG].cluster, codepoints)) gaps--;
+                }
+            }
+            return gaps;
+        }
+
+        /// <summary>True when the line ends at a hard line break (newline) — i.e. it is the last line
+        /// of its paragraph, which Justified (but not Flush) leaves un-justified.</summary>
+        private static bool EndsAtHardBreak(in TextLine line, ReadOnlySpan<int> codepoints)
+        {
+            if (codepoints.IsEmpty) return true;
+            int end = line.range.End;
+            // Scan the codepoint just before the line's end (and the end position itself) for a newline.
+            int idx = end - 1;
+            if ((uint)idx < (uint)codepoints.Length)
+            {
+                int cp = codepoints[idx];
+                if (cp == '\n' || cp == '\r' || cp == 0x2028 || cp == 0x2029) return true;
+            }
+            if ((uint)end < (uint)codepoints.Length)
+            {
+                int cp = codepoints[end];
+                if (cp == '\n' || cp == '\r' || cp == 0x2028 || cp == 0x2029) return true;
+            }
+            // No newline at/after the line end means a soft wrap — not a paragraph end.
+            return end >= codepoints.Length;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
