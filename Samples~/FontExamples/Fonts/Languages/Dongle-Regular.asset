@@ -39,6 +39,6 @@ MonoBehaviour:
   unitsPerEm: 1000
   fontScale: 2
   atlasSize: 1024
-  spreadStrength: 0.25
+  spreadStrength: 0.1
   atlasRenderMode: 0
   sourceFont: {fileID: 0}

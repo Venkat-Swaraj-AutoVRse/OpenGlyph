@@ -73,9 +73,15 @@ namespace LightSide
         internal int atlasSize = 1024;
 
         [SerializeField]
-        [Tooltip("SDF spread as a fraction of point size (0-1). Padding = PointSize * SpreadStrength.")]
+        [Tooltip("SDF spread as a fraction of point size (0-1). Padding = PointSize * SpreadStrength. " +
+                 "Default 0.10 matches the display shader's REFERENCE_SPREAD_RATIO (and TMP's ratio) for " +
+                 "crisp edges under magnification; raise it only when very wide outline/underlay/glow " +
+                 "effects need more encoded distance (a wider spread softens edges and costs atlas space).")]
         [Range(0.1f, 1f)]
-        internal float spreadStrength = 0.25f;
+        // 0.10 (was 0.25): a spread ratio of 0.256 is 2.5x the shader's reference ratio and TMP's,
+        // which widens the edge AA band ~73% and reads soft/wavy at 4-5x magnification on an 8-bit
+        // Alpha8 atlas. See Documentation/Design/SDF-EdgeQuality-Investigation.md.
+        internal float spreadStrength = 0.1f;
 
         [SerializeField]
         [Tooltip("Glyph rendering mode (SDF, bitmap, etc.).")]
@@ -1543,7 +1549,7 @@ namespace LightSide
         /// <param name="renderMode">Glyph rendering mode (SDF, bitmap, etc.).</param>
         /// <param name="atlasSize">Atlas texture size (square).</param>
         /// <returns>New font asset, or null if creation failed.</returns>
-        public static UniTextFont CreateFontAsset(byte[] fontBytes, int samplingPointSize = 90, float spreadStrength = 0.25f,
+        public static UniTextFont CreateFontAsset(byte[] fontBytes, int samplingPointSize = 90, float spreadStrength = 0.1f,
             UniTextRenderMode renderMode = UniTextRenderMode.SDF, int atlasSize = 1024)
         {
             if (fontBytes == null || fontBytes.Length == 0)
