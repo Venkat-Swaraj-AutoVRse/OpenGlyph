@@ -326,7 +326,11 @@ namespace LightSide
             // "Clear the legacy appearance reference" option) has Appearance == null. Fall back to
             // the project default appearance; with none, return null, which the mesh generator
             // already treats as "no materials" (the unified path never reads these).
-            var appearance = Appearance != null ? Appearance : UniTextSettings.DefaultAppearance;
+            // UniTextSettings.DefaultAppearance is editor-only, so players get no fallback.
+            var appearance = Appearance;
+#if UNITY_EDITOR
+            if (appearance == null) appearance = UniTextSettings.DefaultAppearance;
+#endif
             if (appearance == null) return null;
             return appearance.GetMaterials(GetFontAsset(fontId));
         }
