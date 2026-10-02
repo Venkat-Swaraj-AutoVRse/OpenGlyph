@@ -454,17 +454,47 @@ namespace OpenGlyph
             return GetPreferredValues(rect.width, rect.height);
         }
 
-        /// <summary>Mirrors <c>TMP_Text.GetPreferredValues(width, height)</c>.</summary>
+        /// <summary>Mirrors <c>TMP_Text.GetPreferredValues(width, height)</c>. Drives the engine's
+        /// first pass synchronously if it has not run yet (so the value is correct in EditMode /
+        /// headless without waiting for a canvas update — matching TMP's force-generate behaviour).</summary>
         public Vector2 GetPreferredValues(float width, float height)
         {
-            if (TextProcessor == null || !TextProcessor.HasValidFirstPassData)
-                return Vector2.zero;
+            if (TextProcessor == null) return Vector2.zero;
+            EnsureEngineFirstPass(width, height);
+            if (!TextProcessor.HasValidFirstPassData) return Vector2.zero;
+
             float fs = AutoSize ? MaxFontSize : FontSize;
             float w = TextProcessor.GetPreferredWidth(fs);
-            float measureWidth = width > 0 ? width : (float.IsNaN(width) ? TextProcessSettings.FloatMax : width);
-            TextProcessor.EnsureLines(measureWidth <= 0 ? TextProcessSettings.FloatMax : measureWidth, fs, WordWrap);
+            float measureWidth = width > 0 ? width : TextProcessSettings.FloatMax;
+            TextProcessor.EnsureLines(measureWidth, fs, WordWrap);
             float h = TextProcessor.GetPreferredHeight(fs, 0f, OverEdge, UnderEdge, LeadingDistribution);
             return new Vector2(w, h);
+        }
+
+        /// <summary>Runs the engine's first pass over the current text + settings if it is not already
+        /// valid. Lets layout queries (preferredWidth/Height, textInfo) work before the canvas tick.</summary>
+        private void EnsureEngineFirstPass(float width, float height)
+        {
+            if (TextProcessor == null) return;
+            if (TextProcessor.HasValidFirstPassData) return;
+            var src = Text;
+            if (string.IsNullOrEmpty(src)) return;
+
+            float fs = AutoSize ? MaxFontSize : FontSize;
+            var settings = new TextProcessSettings
+            {
+                MaxWidth = width > 0 ? width : TextProcessSettings.FloatMax,
+                MaxHeight = height > 0 ? height : TextProcessSettings.FloatMax,
+                HorizontalAlignment = HorizontalAlignment,
+                VerticalAlignment = VerticalAlignment,
+                OverEdge = OverEdge,
+                UnderEdge = UnderEdge,
+                LeadingDistribution = LeadingDistribution,
+                fontSize = fs,
+                baseDirection = BaseDirection,
+                enableWordWrap = WordWrap,
+            };
+            TextProcessor.EnsureFirstPass(src.AsSpan(), settings);
         }
 
         /// <summary>Mirrors <c>TMP_Text.GetPreferredValues(string)</c>.</summary>
@@ -505,12 +535,17 @@ namespace OpenGlyph
         public virtual void ForceMeshUpdate(bool ignoreActiveState = false, bool forceTextReparsing = false)
         {
             SetDirty(DirtyFlags.Text); // Text flag = full rebuild per engine DirtyFlags
-            if ((ignoreActiveState || isActiveAndEnabled) && TextProcessor != null)
+            if (TextProcessor == null) return;
+            var rect = rectTransform.rect;
+            float measureW = rect.width > 0 ? rect.width : TextProcessSettings.FloatMax;
+            float measureH = rect.height > 0 ? rect.height : TextProcessSettings.FloatMax;
+            // Drive the engine synchronously so queries right after this call see fresh values,
+            // without waiting for the canvas update loop (which does not tick in batchmode/EditMode).
+            EnsureEngineFirstPass(measureW, measureH);
+            if (TextProcessor.HasValidFirstPassData)
             {
-                var rect = rectTransform.rect;
                 float fs = AutoSize ? MaxFontSize : FontSize;
-                if (rect.width > 0)
-                    TextProcessor.EnsureLines(rect.width, fs, WordWrap);
+                TextProcessor.EnsureLines(measureW, fs, WordWrap);
             }
         }
 
