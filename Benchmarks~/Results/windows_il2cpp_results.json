@@ -1,0 +1,1401 @@
+{
+    "environment": {
+        "unityVersion": "6000.3.19f1",
+        "scriptingBackend": "IL2CPP",
+        "buildType": "StandaloneWindows64-IL2CPP-Release",
+        "os": "Windows 11  (10.0.26200)",
+        "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+        "cpuCount": 12,
+        "systemMemoryMB": 32471,
+        "graphicsDevice": "NVIDIA GeForce RTX 4050 Laptop GPU",
+        "timestampUtc": "2026-10-01T18:56:07.7541890Z",
+        "representative": true,
+        "incrementalGCEnabled": true,
+        "randomSeed": 12345
+    },
+    "objectCount": 100,
+    "iterations": 5,
+    "warmups": 2,
+    "perSystemText": [
+        {
+            "system": "OpenGlyph-ParallelOff",
+            "textSet": "Latin",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 92.1926,
+                "p95Ms": 96.53042,
+                "minMs": 84.86410000000001,
+                "maxMs": 96.8253,
+                "samplesMs": [
+                    84.86410000000001,
+                    91.2801,
+                    92.1926,
+                    95.35090000000001,
+                    96.8253
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 79.3143,
+                "p95Ms": 82.17524,
+                "minMs": 78.8538,
+                "maxMs": 82.32560000000001,
+                "samplesMs": [
+                    78.8538,
+                    79.1913,
+                    79.3143,
+                    81.5738,
+                    82.32560000000001
+                ]
+            },
+            "layout": {
+                "medianMs": 27.384900000000003,
+                "p95Ms": 28.01136,
+                "minMs": 25.752000000000004,
+                "maxMs": 28.1278,
+                "samplesMs": [
+                    25.752000000000004,
+                    26.384,
+                    27.384900000000003,
+                    27.5456,
+                    28.1278
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 17.5961,
+                "p95Ms": 19.00446,
+                "minMs": 16.592000000000004,
+                "maxMs": 19.206400000000003,
+                "samplesMs": [
+                    16.592000000000004,
+                    17.172800000000004,
+                    17.5961,
+                    18.1967,
+                    19.206400000000003
+                ]
+            },
+            "gcCollectionsDuringCreation": 49,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 2245,
+            "observedCharsMin": 2241,
+            "observedVerticesMin": 8964,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 49,
+            "gcGen1Delta": 49,
+            "gcGen2Delta": 49,
+            "totalMemoryDeltaKB": 156236.0
+        },
+        {
+            "system": "OpenGlyph-ParallelOff",
+            "textSet": "Arabic",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 145.8538,
+                "p95Ms": 152.51974,
+                "minMs": 140.5157,
+                "maxMs": 154.1301,
+                "samplesMs": [
+                    140.5157,
+                    142.5128,
+                    145.8538,
+                    146.0783,
+                    154.1301
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 142.1423,
+                "p95Ms": 147.32426,
+                "minMs": 138.9743,
+                "maxMs": 148.2553,
+                "samplesMs": [
+                    138.9743,
+                    142.0499,
+                    142.1423,
+                    143.6001,
+                    148.2553
+                ]
+            },
+            "layout": {
+                "medianMs": 29.0748,
+                "p95Ms": 31.55976,
+                "minMs": 28.5759,
+                "maxMs": 31.867,
+                "samplesMs": [
+                    28.5759,
+                    28.84,
+                    29.0748,
+                    30.3308,
+                    31.867
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 21.497600000000003,
+                "p95Ms": 21.772440000000004,
+                "minMs": 20.1116,
+                "maxMs": 21.805500000000003,
+                "samplesMs": [
+                    20.1116,
+                    20.4357,
+                    21.497600000000003,
+                    21.6402,
+                    21.805500000000003
+                ]
+            },
+            "gcCollectionsDuringCreation": 5,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 1868,
+            "observedCharsMin": 2185,
+            "observedVerticesMin": 8740,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 5,
+            "gcGen1Delta": 5,
+            "gcGen2Delta": 5,
+            "totalMemoryDeltaKB": 31128.0
+        },
+        {
+            "system": "OpenGlyph-ParallelOff",
+            "textSet": "Hebrew",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 108.2266,
+                "p95Ms": 109.99278000000001,
+                "minMs": 100.8904,
+                "maxMs": 110.23010000000001,
+                "samplesMs": [
+                    100.8904,
+                    100.9316,
+                    108.2266,
+                    109.04350000000001,
+                    110.23010000000001
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 92.5655,
+                "p95Ms": 92.59526,
+                "minMs": 90.476,
+                "maxMs": 92.5959,
+                "samplesMs": [
+                    90.476,
+                    92.1421,
+                    92.5655,
+                    92.59270000000001,
+                    92.5959
+                ]
+            },
+            "layout": {
+                "medianMs": 19.025100000000003,
+                "p95Ms": 19.6404,
+                "minMs": 18.401400000000004,
+                "maxMs": 19.7915,
+                "samplesMs": [
+                    18.401400000000004,
+                    18.4081,
+                    19.025100000000003,
+                    19.036,
+                    19.7915
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 15.1758,
+                "p95Ms": 16.610120000000003,
+                "minMs": 14.2668,
+                "maxMs": 16.9585,
+                "samplesMs": [
+                    14.2668,
+                    14.528500000000001,
+                    15.1758,
+                    15.216600000000002,
+                    16.9585
+                ]
+            },
+            "gcCollectionsDuringCreation": 5,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 1744,
+            "observedCharsMin": 1744,
+            "observedVerticesMin": 6976,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 5,
+            "gcGen1Delta": 5,
+            "gcGen2Delta": 5,
+            "totalMemoryDeltaKB": 41980.0
+        },
+        {
+            "system": "OpenGlyph-ParallelOff",
+            "textSet": "Mixed",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 101.0276,
+                "p95Ms": 104.36112000000002,
+                "minMs": 97.2779,
+                "maxMs": 104.64320000000001,
+                "samplesMs": [
+                    97.2779,
+                    100.80120000000001,
+                    101.0276,
+                    103.23280000000001,
+                    104.64320000000001
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 90.4645,
+                "p95Ms": 95.54876,
+                "minMs": 88.4256,
+                "maxMs": 96.55080000000001,
+                "samplesMs": [
+                    88.4256,
+                    90.0372,
+                    90.4645,
+                    91.5406,
+                    96.55080000000001
+                ]
+            },
+            "layout": {
+                "medianMs": 27.0014,
+                "p95Ms": 28.149540000000003,
+                "minMs": 25.532300000000004,
+                "maxMs": 28.387900000000003,
+                "samplesMs": [
+                    25.532300000000004,
+                    26.6306,
+                    27.0014,
+                    27.1961,
+                    28.387900000000003
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 21.7761,
+                "p95Ms": 22.05306,
+                "minMs": 20.3853,
+                "maxMs": 22.0978,
+                "samplesMs": [
+                    20.3853,
+                    20.4189,
+                    21.7761,
+                    21.874100000000003,
+                    22.0978
+                ]
+            },
+            "gcCollectionsDuringCreation": 1,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 2300,
+            "observedCharsMin": 2361,
+            "observedVerticesMin": 9444,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 1,
+            "gcGen1Delta": 1,
+            "gcGen2Delta": 1,
+            "totalMemoryDeltaKB": 568.0
+        },
+        {
+            "system": "OpenGlyph-ParallelOn",
+            "textSet": "Latin",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 38.1944,
+                "p95Ms": 39.06394,
+                "minMs": 37.0952,
+                "maxMs": 39.1727,
+                "samplesMs": [
+                    37.0952,
+                    37.180800000000008,
+                    38.1944,
+                    38.6289,
+                    39.1727
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 31.369100000000004,
+                "p95Ms": 32.891360000000009,
+                "minMs": 30.215200000000004,
+                "maxMs": 33.114000000000007,
+                "samplesMs": [
+                    30.215200000000004,
+                    31.0241,
+                    31.369100000000004,
+                    32.0008,
+                    33.114000000000007
+                ]
+            },
+            "layout": {
+                "medianMs": 21.716900000000004,
+                "p95Ms": 23.16628,
+                "minMs": 20.8471,
+                "maxMs": 23.2713,
+                "samplesMs": [
+                    20.8471,
+                    21.361700000000004,
+                    21.716900000000004,
+                    22.7462,
+                    23.2713
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 11.4075,
+                "p95Ms": 12.258460000000002,
+                "minMs": 11.3225,
+                "maxMs": 12.4143,
+                "samplesMs": [
+                    11.3225,
+                    11.3551,
+                    11.4075,
+                    11.635100000000002,
+                    12.4143
+                ]
+            },
+            "gcCollectionsDuringCreation": 1,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 2245,
+            "observedCharsMin": 2241,
+            "observedVerticesMin": 8964,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 1,
+            "gcGen1Delta": 1,
+            "gcGen2Delta": 1,
+            "totalMemoryDeltaKB": 6272.0
+        },
+        {
+            "system": "OpenGlyph-ParallelOn",
+            "textSet": "Arabic",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 49.255300000000008,
+                "p95Ms": 49.4686,
+                "minMs": 46.791000000000007,
+                "maxMs": 49.4957,
+                "samplesMs": [
+                    46.791000000000007,
+                    49.1623,
+                    49.255300000000008,
+                    49.3602,
+                    49.4957
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 43.3525,
+                "p95Ms": 45.66674,
+                "minMs": 42.4259,
+                "maxMs": 45.8872,
+                "samplesMs": [
+                    42.4259,
+                    43.345800000000007,
+                    43.3525,
+                    44.7849,
+                    45.8872
+                ]
+            },
+            "layout": {
+                "medianMs": 19.913,
+                "p95Ms": 22.49466,
+                "minMs": 19.6739,
+                "maxMs": 23.1245,
+                "samplesMs": [
+                    19.6739,
+                    19.6977,
+                    19.913,
+                    19.9753,
+                    23.1245
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 16.5502,
+                "p95Ms": 17.07506,
+                "minMs": 16.1587,
+                "maxMs": 17.1954,
+                "samplesMs": [
+                    16.1587,
+                    16.3289,
+                    16.5502,
+                    16.593700000000003,
+                    17.1954
+                ]
+            },
+            "gcCollectionsDuringCreation": 0,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 1868,
+            "observedCharsMin": 2185,
+            "observedVerticesMin": 8740,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 0,
+            "gcGen1Delta": 0,
+            "gcGen2Delta": 0,
+            "totalMemoryDeltaKB": 8204.0
+        },
+        {
+            "system": "OpenGlyph-ParallelOn",
+            "textSet": "Hebrew",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 37.9626,
+                "p95Ms": 38.08016,
+                "minMs": 36.5266,
+                "maxMs": 38.0936,
+                "samplesMs": [
+                    36.5266,
+                    37.577000000000008,
+                    37.9626,
+                    38.0264,
+                    38.0936
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 32.737700000000007,
+                "p95Ms": 33.58652,
+                "minMs": 30.5001,
+                "maxMs": 33.7456,
+                "samplesMs": [
+                    30.5001,
+                    30.6143,
+                    32.737700000000007,
+                    32.9502,
+                    33.7456
+                ]
+            },
+            "layout": {
+                "medianMs": 15.5122,
+                "p95Ms": 15.89612,
+                "minMs": 15.0783,
+                "maxMs": 15.9761,
+                "samplesMs": [
+                    15.0783,
+                    15.1798,
+                    15.5122,
+                    15.5762,
+                    15.9761
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 12.3169,
+                "p95Ms": 13.4644,
+                "minMs": 11.0839,
+                "maxMs": 13.7226,
+                "samplesMs": [
+                    11.0839,
+                    12.0992,
+                    12.3169,
+                    12.431600000000002,
+                    13.7226
+                ]
+            },
+            "gcCollectionsDuringCreation": 0,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 1744,
+            "observedCharsMin": 1744,
+            "observedVerticesMin": 6976,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 0,
+            "gcGen1Delta": 0,
+            "gcGen2Delta": 0,
+            "totalMemoryDeltaKB": 6100.0
+        },
+        {
+            "system": "OpenGlyph-ParallelOn",
+            "textSet": "Mixed",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 38.7045,
+                "p95Ms": 40.38238,
+                "minMs": 38.110800000000008,
+                "maxMs": 40.5845,
+                "samplesMs": [
+                    38.110800000000008,
+                    38.1689,
+                    38.7045,
+                    39.5739,
+                    40.5845
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 32.3769,
+                "p95Ms": 33.39378,
+                "minMs": 30.7422,
+                "maxMs": 33.4328,
+                "samplesMs": [
+                    30.7422,
+                    32.2684,
+                    32.3769,
+                    33.237700000000007,
+                    33.4328
+                ]
+            },
+            "layout": {
+                "medianMs": 17.3226,
+                "p95Ms": 19.526960000000004,
+                "minMs": 16.8992,
+                "maxMs": 19.8838,
+                "samplesMs": [
+                    16.8992,
+                    16.9711,
+                    17.3226,
+                    18.099600000000004,
+                    19.8838
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 13.7763,
+                "p95Ms": 13.99652,
+                "minMs": 13.6796,
+                "maxMs": 14.0144,
+                "samplesMs": [
+                    13.6796,
+                    13.7727,
+                    13.7763,
+                    13.925,
+                    14.0144
+                ]
+            },
+            "gcCollectionsDuringCreation": 1,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 2300,
+            "observedCharsMin": 2361,
+            "observedVerticesMin": 9444,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 1,
+            "gcGen1Delta": 1,
+            "gcGen2Delta": 1,
+            "totalMemoryDeltaKB": -1412.0
+        },
+        {
+            "system": "TMP",
+            "textSet": "Latin",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 417.07570000000006,
+                "p95Ms": 422.28602,
+                "minMs": 357.9794,
+                "maxMs": 423.3172,
+                "samplesMs": [
+                    357.9794,
+                    359.8297,
+                    417.07570000000006,
+                    418.16130000000006,
+                    423.3172
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 147.1293,
+                "p95Ms": 149.09318,
+                "minMs": 144.30200000000003,
+                "maxMs": 149.4956,
+                "samplesMs": [
+                    144.30200000000003,
+                    145.8399,
+                    147.1293,
+                    147.48350000000003,
+                    149.4956
+                ]
+            },
+            "layout": {
+                "medianMs": 145.6934,
+                "p95Ms": 154.53456,
+                "minMs": 144.2079,
+                "maxMs": 155.4624,
+                "samplesMs": [
+                    144.2079,
+                    145.3874,
+                    145.6934,
+                    150.8232,
+                    155.4624
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 149.4478,
+                "p95Ms": 154.58617999999999,
+                "minMs": 148.83190000000003,
+                "maxMs": 155.3397,
+                "samplesMs": [
+                    148.83190000000003,
+                    149.4239,
+                    149.4478,
+                    151.5721,
+                    155.3397
+                ]
+            },
+            "gcCollectionsDuringCreation": 36,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 2245,
+            "observedCharsMin": 2245,
+            "observedVerticesMin": 7424,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 36,
+            "gcGen1Delta": 36,
+            "gcGen2Delta": 36,
+            "totalMemoryDeltaKB": 145864.0
+        },
+        {
+            "system": "TMP",
+            "textSet": "Arabic",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 12852.0843,
+                "p95Ms": 12878.0069,
+                "minMs": 12814.526800000001,
+                "maxMs": 12878.1196,
+                "samplesMs": [
+                    12814.526800000001,
+                    12823.4387,
+                    12852.0843,
+                    12877.5561,
+                    12878.1196
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 6613.7976,
+                "p95Ms": 7347.32232,
+                "minMs": 6576.5016000000005,
+                "maxMs": 7517.1355,
+                "samplesMs": [
+                    6576.5016000000005,
+                    6608.5838,
+                    6613.7976,
+                    6668.069600000001,
+                    7517.1355
+                ]
+            },
+            "layout": {
+                "medianMs": 6668.586200000001,
+                "p95Ms": 6704.311860000001,
+                "minMs": 6627.3041,
+                "maxMs": 6710.6202,
+                "samplesMs": [
+                    6627.3041,
+                    6654.5793,
+                    6668.586200000001,
+                    6679.0785000000005,
+                    6710.6202
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 6804.9305,
+                "p95Ms": 7198.4092,
+                "minMs": 6581.9371,
+                "maxMs": 7201.1575,
+                "samplesMs": [
+                    6581.9371,
+                    6629.368100000001,
+                    6804.9305,
+                    7187.416,
+                    7201.1575
+                ]
+            },
+            "gcCollectionsDuringCreation": 656,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": false,
+            "note": "TMP cannot shape Arabic/Hebrew without a plugin; measures unshaped fallback, NOT equivalent output.",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 1868,
+            "observedCharsMin": 1868,
+            "observedVerticesMin": 40,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 656,
+            "gcGen1Delta": 656,
+            "gcGen2Delta": 656,
+            "totalMemoryDeltaKB": -155444.0
+        },
+        {
+            "system": "TMP",
+            "textSet": "Hebrew",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 11730.021400000001,
+                "p95Ms": 11758.858760000001,
+                "minMs": 11546.0192,
+                "maxMs": 11759.375100000001,
+                "samplesMs": [
+                    11546.0192,
+                    11681.3052,
+                    11730.021400000001,
+                    11756.7934,
+                    11759.375100000001
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 6145.3764,
+                "p95Ms": 6327.258900000001,
+                "minMs": 6090.2401,
+                "maxMs": 6346.9296,
+                "samplesMs": [
+                    6090.2401,
+                    6140.262500000001,
+                    6145.3764,
+                    6248.5761,
+                    6346.9296
+                ]
+            },
+            "layout": {
+                "medianMs": 6009.3363,
+                "p95Ms": 6205.01162,
+                "minMs": 5982.659900000001,
+                "maxMs": 6252.0043000000005,
+                "samplesMs": [
+                    5982.659900000001,
+                    6001.290300000001,
+                    6009.3363,
+                    6017.0409,
+                    6252.0043000000005
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 6033.3226,
+                "p95Ms": 6039.071680000001,
+                "minMs": 5960.7778,
+                "maxMs": 6040.145100000001,
+                "samplesMs": [
+                    5960.7778,
+                    5991.2253,
+                    6033.3226,
+                    6034.778,
+                    6040.145100000001
+                ]
+            },
+            "gcCollectionsDuringCreation": 602,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": false,
+            "note": "TMP cannot shape Arabic/Hebrew without a plugin; measures unshaped fallback, NOT equivalent output.",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 1744,
+            "observedCharsMin": 1744,
+            "observedVerticesMin": 108,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 602,
+            "gcGen1Delta": 602,
+            "gcGen2Delta": 602,
+            "totalMemoryDeltaKB": -14572.0
+        },
+        {
+            "system": "TMP",
+            "textSet": "Mixed",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 3025.1491,
+                "p95Ms": 3086.71392,
+                "minMs": 2954.1949,
+                "maxMs": 3087.5408,
+                "samplesMs": [
+                    2954.1949,
+                    2963.7362000000003,
+                    3025.1491,
+                    3083.4064000000003,
+                    3087.5408
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 1486.7669,
+                "p95Ms": 1507.62254,
+                "minMs": 1480.0076000000001,
+                "maxMs": 1512.0338000000002,
+                "samplesMs": [
+                    1480.0076000000001,
+                    1482.8536000000001,
+                    1486.7669,
+                    1489.9775,
+                    1512.0338000000002
+                ]
+            },
+            "layout": {
+                "medianMs": 1490.5416,
+                "p95Ms": 1508.5397600000001,
+                "minMs": 1480.2371,
+                "maxMs": 1510.8361,
+                "samplesMs": [
+                    1480.2371,
+                    1484.4957000000002,
+                    1490.5416,
+                    1499.3544000000002,
+                    1510.8361
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 1503.5926000000002,
+                "p95Ms": 1538.6141400000001,
+                "minMs": 1485.8147000000001,
+                "maxMs": 1542.6941000000002,
+                "samplesMs": [
+                    1485.8147000000001,
+                    1501.7371,
+                    1503.5926000000002,
+                    1522.2943,
+                    1542.6941000000002
+                ]
+            },
+            "gcCollectionsDuringCreation": 114,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": false,
+            "note": "TMP cannot shape Arabic/Hebrew without a plugin; measures unshaped fallback, NOT equivalent output.",
+            "creationValid": true,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 2300,
+            "observedCharsMin": 2300,
+            "observedVerticesMin": 6348,
+            "validityNote": "",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 114,
+            "gcGen1Delta": 114,
+            "gcGen2Delta": 114,
+            "totalMemoryDeltaKB": 82520.0
+        },
+        {
+            "system": "UIToolkit",
+            "textSet": "Latin",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 6.0928,
+                "p95Ms": 6.11108,
+                "minMs": 6.0219000000000009,
+                "maxMs": 6.1121,
+                "samplesMs": [
+                    6.0219000000000009,
+                    6.0758,
+                    6.0928,
+                    6.107,
+                    6.1121
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 0.0632,
+                "p95Ms": 0.06348,
+                "minMs": 0.0629,
+                "maxMs": 0.0635,
+                "samplesMs": [
+                    0.0629,
+                    0.063,
+                    0.0632,
+                    0.0634,
+                    0.0635
+                ]
+            },
+            "layout": {
+                "medianMs": 0.019700000000000003,
+                "p95Ms": 0.0198,
+                "minMs": 0.0196,
+                "maxMs": 0.0198,
+                "samplesMs": [
+                    0.0196,
+                    0.019700000000000003,
+                    0.019700000000000003,
+                    0.0198,
+                    0.0198
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 0.024200000000000004,
+                "p95Ms": 0.02444,
+                "minMs": 0.0238,
+                "maxMs": 0.0245,
+                "samplesMs": [
+                    0.0238,
+                    0.024200000000000004,
+                    0.024200000000000004,
+                    0.024200000000000004,
+                    0.0245
+                ]
+            },
+            "gcCollectionsDuringCreation": 0,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": true,
+            "note": "",
+            "creationValid": false,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 2245,
+            "observedCharsMin": 0,
+            "observedVerticesMin": 0,
+            "validityNote": "UIToolkit: resolvedStyle size 0 after a frame — Label not laid out / text not generated",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 0,
+            "gcGen1Delta": 0,
+            "gcGen2Delta": 0,
+            "totalMemoryDeltaKB": 3124.0
+        },
+        {
+            "system": "UIToolkit",
+            "textSet": "Arabic",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 6.0014,
+                "p95Ms": 6.16594,
+                "minMs": 5.8692,
+                "maxMs": 6.2031,
+                "samplesMs": [
+                    5.8692,
+                    5.9745,
+                    6.0014,
+                    6.0173000000000009,
+                    6.2031
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 0.0632,
+                "p95Ms": 0.06348,
+                "minMs": 0.063,
+                "maxMs": 0.0635,
+                "samplesMs": [
+                    0.063,
+                    0.0632,
+                    0.0632,
+                    0.0634,
+                    0.0635
+                ]
+            },
+            "layout": {
+                "medianMs": 0.027700000000000004,
+                "p95Ms": 0.0496,
+                "minMs": 0.020900000000000003,
+                "maxMs": 0.0516,
+                "samplesMs": [
+                    0.020900000000000003,
+                    0.022500000000000004,
+                    0.027700000000000004,
+                    0.041600000000000008,
+                    0.0516
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 0.024900000000000003,
+                "p95Ms": 0.17173999999999998,
+                "minMs": 0.024300000000000003,
+                "maxMs": 0.20800000000000003,
+                "samplesMs": [
+                    0.024300000000000003,
+                    0.024300000000000003,
+                    0.024900000000000003,
+                    0.0267,
+                    0.20800000000000003
+                ]
+            },
+            "gcCollectionsDuringCreation": 0,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": false,
+            "note": "UI Toolkit complex-script shaping depends on the Unity text backend; non-Latin is indicative only.",
+            "creationValid": false,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 1868,
+            "observedCharsMin": 0,
+            "observedVerticesMin": 0,
+            "validityNote": "UIToolkit: resolvedStyle size 0 after a frame — Label not laid out / text not generated",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 0,
+            "gcGen1Delta": 0,
+            "gcGen2Delta": 0,
+            "totalMemoryDeltaKB": 2844.0
+        },
+        {
+            "system": "UIToolkit",
+            "textSet": "Hebrew",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 4.934200000000001,
+                "p95Ms": 7.82516,
+                "minMs": 2.1623,
+                "maxMs": 7.926900000000001,
+                "samplesMs": [
+                    2.1623,
+                    4.1814,
+                    4.934200000000001,
+                    7.418200000000001,
+                    7.926900000000001
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 0.0629,
+                "p95Ms": 0.2510799999999999,
+                "minMs": 0.061200000000000007,
+                "maxMs": 0.298,
+                "samplesMs": [
+                    0.061200000000000007,
+                    0.0613,
+                    0.0629,
+                    0.0634,
+                    0.298
+                ]
+            },
+            "layout": {
+                "medianMs": 0.020200000000000004,
+                "p95Ms": 0.020280000000000004,
+                "minMs": 0.0199,
+                "maxMs": 0.020300000000000003,
+                "samplesMs": [
+                    0.0199,
+                    0.020200000000000004,
+                    0.020200000000000004,
+                    0.020200000000000004,
+                    0.020300000000000003
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 0.024200000000000004,
+                "p95Ms": 0.024380000000000004,
+                "minMs": 0.0241,
+                "maxMs": 0.0244,
+                "samplesMs": [
+                    0.0241,
+                    0.024200000000000004,
+                    0.024200000000000004,
+                    0.024300000000000003,
+                    0.0244
+                ]
+            },
+            "gcCollectionsDuringCreation": 0,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": false,
+            "note": "UI Toolkit complex-script shaping depends on the Unity text backend; non-Latin is indicative only.",
+            "creationValid": false,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 1744,
+            "observedCharsMin": 0,
+            "observedVerticesMin": 0,
+            "validityNote": "UIToolkit: resolvedStyle size 0 after a frame — Label not laid out / text not generated",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 0,
+            "gcGen1Delta": 0,
+            "gcGen2Delta": 0,
+            "totalMemoryDeltaKB": 2824.0
+        },
+        {
+            "system": "UIToolkit",
+            "textSet": "Mixed",
+            "objectCount": 100,
+            "iterations": 5,
+            "warmups": 2,
+            "objectCreation": {
+                "medianMs": 4.7282,
+                "p95Ms": 4.9661,
+                "minMs": 4.2672,
+                "maxMs": 5.0113,
+                "samplesMs": [
+                    4.2672,
+                    4.3126,
+                    4.7282,
+                    4.7853,
+                    5.0113
+                ]
+            },
+            "fullRebuild": {
+                "medianMs": 0.1345,
+                "p95Ms": 0.13798,
+                "minMs": 0.0626,
+                "maxMs": 0.1386,
+                "samplesMs": [
+                    0.0626,
+                    0.11570000000000001,
+                    0.1345,
+                    0.1355,
+                    0.1386
+                ]
+            },
+            "layout": {
+                "medianMs": 0.02,
+                "p95Ms": 0.02016,
+                "minMs": 0.0199,
+                "maxMs": 0.020200000000000004,
+                "samplesMs": [
+                    0.0199,
+                    0.0199,
+                    0.02,
+                    0.02,
+                    0.020200000000000004
+                ]
+            },
+            "meshRebuild": {
+                "medianMs": 0.024300000000000003,
+                "p95Ms": 0.04424,
+                "minMs": 0.024200000000000004,
+                "maxMs": 0.0492,
+                "samplesMs": [
+                    0.024200000000000004,
+                    0.024300000000000003,
+                    0.024300000000000003,
+                    0.0244,
+                    0.0492
+                ]
+            },
+            "gcCollectionsDuringCreation": 0,
+            "allocatedMBDuringCreation": 0.0,
+            "kbPerFullRebuildOp": 0.0,
+            "shapingFairForThisSystem": false,
+            "note": "UI Toolkit complex-script shaping depends on the Unity text backend; non-Latin is indicative only.",
+            "creationValid": false,
+            "fullRebuildValid": true,
+            "layoutValid": true,
+            "meshRebuildValid": true,
+            "expectedChars": 2300,
+            "observedCharsMin": 0,
+            "observedVerticesMin": 0,
+            "validityNote": "UIToolkit: resolvedStyle size 0 after a frame — Label not laid out / text not generated",
+            "gcAllocCreationKB": 0.0,
+            "gcReservedCreationKB": 0.0,
+            "gcGen0Delta": 0,
+            "gcGen1Delta": 0,
+            "gcGen2Delta": 0,
+            "totalMemoryDeltaKB": 2900.0
+        }
+    ],
+    "glyphRaster": [
+        {
+            "engine": "FreeType (OpenGlyph)",
+            "font": "NotoSans-Regular",
+            "glyphSize": 48,
+            "glyphCount": 200,
+            "totalMs": 62.864900000000009,
+            "msPerGlyph": 0.3143245,
+            "note": "UniTextFont.TryAddGlyphsBatch (FreeType raster + SDF pack)"
+        },
+        {
+            "engine": "UnityFontEngine (TMP dynamic)",
+            "font": "NotoSans-Regular",
+            "glyphSize": 48,
+            "glyphCount": 167,
+            "totalMs": 6.530200000000001,
+            "msPerGlyph": 0.039102994011976057,
+            "note": "TMP TryAddCharacters ok=False"
+        }
+    ],
+    "buildSize": [
+        {
+            "system": "OpenGlyph",
+            "font": "NotoSans-Regular.ttf",
+            "fontBytes": 629024,
+            "fontMB": 0.599884033203125,
+            "note": "raw TTF; no font compression yet"
+        },
+        {
+            "system": "OpenGlyph",
+            "font": "NotoSansArabic-Regular.ttf",
+            "fontBytes": 194176,
+            "fontMB": 0.1851806640625,
+            "note": "raw TTF; no font compression yet"
+        },
+        {
+            "system": "OpenGlyph",
+            "font": "NotoSansHebrew-Regular.ttf",
+            "fontBytes": 48036,
+            "fontMB": 0.045810699462890628,
+            "note": "raw TTF; no font compression yet"
+        },
+        {
+            "system": "TMP",
+            "font": "NotoSans-Regular",
+            "fontBytes": 0,
+            "fontMB": 0.0,
+            "note": "TMP ships a font asset (atlas + glyph table); size depends on atlas dims + static/dynamic."
+        }
+    ],
+    "openGlyphSplits": [
+        {
+            "textSet": "Latin",
+            "parallel": false,
+            "shapeMsPerObj": 0.5807,
+            "layoutMsPerObj": 0.314,
+            "rasterMsPerObj": 0.0,
+            "meshMsPerObj": 0.2364,
+            "totalMsPerObj": 1.1311,
+            "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
+        },
+        {
+            "textSet": "Arabic",
+            "parallel": false,
+            "shapeMsPerObj": 1.1877,
+            "layoutMsPerObj": 0.27190000000000005,
+            "rasterMsPerObj": 0.0,
+            "meshMsPerObj": 0.1834,
+            "totalMsPerObj": 1.643,
+            "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
+        },
+        {
+            "textSet": "Hebrew",
+            "parallel": false,
+            "shapeMsPerObj": 0.9275000000000001,
+            "layoutMsPerObj": 0.22240000000000002,
+            "rasterMsPerObj": 0.0,
+            "meshMsPerObj": 0.1217,
+            "totalMsPerObj": 1.2716,
+            "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
+        },
+        {
+            "textSet": "Mixed",
+            "parallel": false,
+            "shapeMsPerObj": 0.7376,
+            "layoutMsPerObj": 0.2899,
+            "rasterMsPerObj": 0.0,
+            "meshMsPerObj": 0.2061,
+            "totalMsPerObj": 1.2336,
+            "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
+        },
+        {
+            "textSet": "Latin",
+            "parallel": true,
+            "shapeMsPerObj": 0.5314,
+            "layoutMsPerObj": 0.269,
+            "rasterMsPerObj": 0.0,
+            "meshMsPerObj": 0.1371,
+            "totalMsPerObj": 0.9375,
+            "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
+        },
+        {
+            "textSet": "Arabic",
+            "parallel": true,
+            "shapeMsPerObj": 1.5870000000000002,
+            "layoutMsPerObj": 0.3186,
+            "rasterMsPerObj": 0.0,
+            "meshMsPerObj": 0.1951,
+            "totalMsPerObj": 2.1007000000000004,
+            "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
+        },
+        {
+            "textSet": "Hebrew",
+            "parallel": true,
+            "shapeMsPerObj": 1.0892,
+            "layoutMsPerObj": 0.2354,
+            "rasterMsPerObj": 0.0,
+            "meshMsPerObj": 0.1631,
+            "totalMsPerObj": 1.4877,
+            "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
+        },
+        {
+            "textSet": "Mixed",
+            "parallel": true,
+            "shapeMsPerObj": 0.7016,
+            "layoutMsPerObj": 0.2831,
+            "rasterMsPerObj": 0.0,
+            "meshMsPerObj": 0.21660000000000002,
+            "totalMsPerObj": 1.2013,
+            "note": "shapeMsPerObj = total - layout - mesh (shaping + first-time raster, warm atlas thereafter); layout/mesh are isolated re-dirties"
+        }
+    ]
+}
