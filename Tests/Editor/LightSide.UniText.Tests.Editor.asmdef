@@ -5,6 +5,7 @@
         "LightSide.UniText",
         "LightSide.UniText.Editor",
         "UnityEngine.UI",
+        "Unity.TextMeshPro",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
