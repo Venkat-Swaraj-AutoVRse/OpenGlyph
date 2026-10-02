@@ -81,7 +81,7 @@ parity · **stub** = present with TMP signature, TODO body (documented) ·
 | `float fontSize` | direct | → `UniText.FontSize`. |
 | `bool enableAutoSizing` | direct | → `UniText.AutoSize`. |
 | `float fontSizeMin` / `fontSizeMax` | direct | → `UniText.MinFontSize` / `MaxFontSize`. |
-| `FontStyles fontStyle` | adapter | Bold → `FontWeight`, Italic → `StyleAxis`. **Round 2:** Underline/Strikethrough are now applied by composing the engine's `<u>`/`<s>` span tags around the run (the component auto-registers the backing modifiers). Sub/Super/LowerCase/UpperCase/SmallCaps/Highlight are stored and round-trip but still **not applied** (no engine modifier yet; see font-style section). |
+| `FontStyles fontStyle` | adapter | Bold->FontWeight, Italic->StyleAxis. **Round 2 (applied):** Underline/Strikethrough (compose `<u>`/`<s>`), UpperCase/LowerCase (compose `<uppercase>`/`<lowercase>`), all auto-registering their backing modifiers. SmallCaps/Sub/Super/Highlight are stored and round-trip but **not applied** yet (no engine modifier; see font-style section). |
 | `Color color` | direct | → `UniText.color` (override). |
 | `bool enableVertexGradient` + `VertexGradient colorGradient` | adapter | 4-corner gradient applied as a per-span vertex-color modifier over the engine's gradient system. Feasible; see Gradient section. |
 | `TextAlignmentOptions alignment` | adapter | split into `HorizontalAlignment`+`VerticalAlignment`; Justified/Flush/Geometry/Baseline/Capline/Midline gaps documented below. |
@@ -140,11 +140,11 @@ ragged, matching TMP); Flush justifies the last line too. GPU evidence:
 | `Italic` | adapter | engine `FontStyleAxis = Italic` (synthetic oblique fallback). **Wired.** |
 | `Underline` | **applied (R2)** | `fontStyle` composes `<u>…</u>` around the run; the component auto-registers `UnderlineParseRule`+`UnderlineModifier`. Verified by test + GPU evidence PNG (line present, matches TMP). |
 | `Strikethrough` | **applied (R2)** | `fontStyle` composes `<s>…</s>`; auto-registers `StrikethroughParseRule`+`StrikethroughModifier`. Verified by test + GPU evidence PNG. |
-| `LowerCase` / `UpperCase` / `SmallCaps` | **gap (R2)** | no engine text-transform rule (`upper` tag exists but is not wired to `fontStyle`); TODO. |
+| `UpperCase` | **applied (R2)** | composes `<uppercase>` (alias of engine `upper`) + `UppercaseModifier`. Verified by test + GPU PNG. | `LowerCase` | **applied (R2)** | composes `<lowercase>` + new `LowercaseModifier`. Verified. | `SmallCaps` | **gap (R2)** | no engine small-caps modifier yet; TODO. |
 | `Subscript` / `Superscript` | **gap (R2)** | no engine sub/sup rule; TODO. |
 | `Highlight` | **gap (R2)** | no engine highlight rule; the component-level `TextHighlighter` is separate; TODO. |
 
-**Current reality (verified by test + GPU evidence):** `fontStyle` applies **Bold, Italic,
+**Current reality (verified by test + GPU evidence):** `fontStyle` applies **Bold, Italic, Underline, Strikethrough, UpperCase and LowerCase**. U/S compose `<u>`/`<s>`; case composes `<uppercase>`/`<lowercase>` (pre-shape codepoint transform). GPU PNGs: fontstyle_underline_strike.png, fontstyle_upper_lower.png (match TMP). SmallCaps/Sub/Super/Highlight still need engine modifiers (tracked below).
 Underline and Strikethrough**. Underline/Strikethrough render by composing the engine's
 `<u>`/`<s>` span tags around the run; the GPU evidence PNG
 (`scratch/gmp-round2/evidence/fontstyle_underline_strike.png`) shows both lines present and
@@ -201,8 +201,8 @@ as supported.
 | `<gradient=…>` | direct | engine `GradientParseRule` (`gradient`) + `UniTextGradients`. |
 | `<link=…>` | direct | engine `LinkTagParseRule` (`link`). |
 | `<style=…>` | direct | engine span-style rule (`style`). |
-| `<uppercase>` | adapter | engine tag is `upper` (not `uppercase`); map name on the way in. |
-| `<lowercase>` | **gap (R2)** | no engine rule; TODO add a lowercase transform rule. |
+| `<uppercase>` | **applied (R2)** | `UppercaseAliasParseRule` (name alias of engine `upper`) + `UppercaseModifier`. |
+| `<lowercase>` | **applied (R2)** | new `LowercaseParseRule` + `LowercaseModifier`. |
 | `<smallcaps>` | **gap (R2)** | no engine rule; TODO. |
 | `<mark=#…>` | **gap (R2)** | no engine highlight rule; TODO (highlighter exists at the component level). |
 | `<sup>` / `<sub>` | **gap (R2)** | no engine super/subscript rule; TODO. |
@@ -245,7 +245,7 @@ Target: Quest / world-space text without a Canvas. Design:
 - `GlyphMeshPro` headless engine host + world-space mesh emission.
 - `<sprite>` / `<pos>` / `<rotate>` / `<page>` tags.
 - `GetTextInfo(string)` full fidelity (sprite/link/word info arrays).
-- **`fontStyle` flags not yet wired:** LowerCase, UpperCase, SmallCaps, Subscript,
+- **`fontStyle` flags not yet wired:** SmallCaps, Subscript, Superscript, Highlight (Bold/Italic/Underline/Strikethrough/UpperCase/LowerCase now apply). SmallCaps needs a small-caps modifier; Sub/Super need a baseline-shift+scale modifier; Highlight needs a background-quad modifier.
   Superscript, Highlight (Bold/Italic/Underline/Strikethrough now apply). Underline/Strikethrough
   were wired to the existing `<u>`/`<s>` rules in Round 2; the rest need new engine modifiers
   (a case transform, a baseline-shift+scale, and a background-quad renderer).
