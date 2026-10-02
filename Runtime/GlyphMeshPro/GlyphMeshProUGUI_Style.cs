@@ -44,7 +44,8 @@ namespace OpenGlyph
         /// stored and round-trip but are not yet wrapped (their engine modifiers are Round-2 gaps).</summary>
         private bool HasWrappingStyle =>
             (m_fontStyle & (FontStyles.Underline | FontStyles.Strikethrough
-                            | FontStyles.UpperCase | FontStyles.LowerCase)) != 0;
+                            | FontStyles.UpperCase | FontStyles.LowerCase
+                            | FontStyles.Superscript | FontStyles.Subscript)) != 0;
 
         /// <summary>Composes the active style flags into a tag wrapper around <paramref name="raw"/>.
         /// Order is outer-to-inner: case transform (outermost, so it applies to the whole run),
@@ -66,6 +67,8 @@ namespace OpenGlyph
             // Opening tags, outermost first (case transform outermost so it covers the whole run).
             if ((m_fontStyle & FontStyles.UpperCase) != 0) sb.Append("<uppercase>");
             if ((m_fontStyle & FontStyles.LowerCase) != 0) sb.Append("<lowercase>");
+            if ((m_fontStyle & FontStyles.Superscript) != 0) sb.Append("<sup>");
+            if ((m_fontStyle & FontStyles.Subscript) != 0) sb.Append("<sub>");
             if ((m_fontStyle & FontStyles.Underline) != 0) sb.Append("<u>");
             if ((m_fontStyle & FontStyles.Strikethrough) != 0) sb.Append("<s>");
 
@@ -74,6 +77,8 @@ namespace OpenGlyph
             // Closing tags, innermost first (reverse order).
             if ((m_fontStyle & FontStyles.Strikethrough) != 0) sb.Append("</s>");
             if ((m_fontStyle & FontStyles.Underline) != 0) sb.Append("</u>");
+            if ((m_fontStyle & FontStyles.Subscript) != 0) sb.Append("</sub>");
+            if ((m_fontStyle & FontStyles.Superscript) != 0) sb.Append("</sup>");
             if ((m_fontStyle & FontStyles.LowerCase) != 0) sb.Append("</lowercase>");
             if ((m_fontStyle & FontStyles.UpperCase) != 0) sb.Append("</uppercase>");
 
@@ -110,7 +115,11 @@ namespace OpenGlyph
                 RegisterModifier(new ModRegister { Modifier = new UppercaseModifier(), Rule = new UppercaseAliasParseRule() });
             if (!HasRule<LowercaseParseRule>())
                 RegisterModifier(new ModRegister { Modifier = new LowercaseModifier(), Rule = new LowercaseParseRule() });
-            // SmallCaps/Sup/Sub/Highlight need engine modifiers added as each lands — parity-doc gaps.
+            if (!HasRule<SuperscriptParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new SuperSubscriptModifier(SuperSubscriptModifier.Kind.Superscript), Rule = new SuperscriptParseRule() });
+            if (!HasRule<SubscriptParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new SuperSubscriptModifier(SuperSubscriptModifier.Kind.Subscript), Rule = new SubscriptParseRule() });
+            // SmallCaps/Highlight need engine modifiers added as each lands — parity-doc gaps.
         }
 
         private bool HasRule<T>() where T : IParseRule

@@ -475,16 +475,22 @@ namespace LightSide.Tests
                 Assert.IsTrue(comp.Text.Contains("<lowercase>") && comp.Text.Contains("</lowercase>"),
                     "LowerCase flag must compose <lowercase>…</lowercase>. Engine Text=" + comp.Text);
 
+                comp.fontStyle = OpenGlyph.FontStyles.Superscript;
+                Assert.IsTrue(comp.Text.Contains("<sup>") && comp.Text.Contains("</sup>"),
+                    "Superscript flag must compose <sup>…</sup>. Engine Text=" + comp.Text);
+                comp.fontStyle = OpenGlyph.FontStyles.Subscript;
+                Assert.IsTrue(comp.Text.Contains("<sub>") && comp.Text.Contains("</sub>"),
+                    "Subscript flag must compose <sub>…</sub>. Engine Text=" + comp.Text);
+
                 // Clearing the flags returns the engine source to the raw text (no stale tags).
                 comp.fontStyle = OpenGlyph.FontStyles.Normal;
                 Assert.AreEqual("Hello", comp.Text, "Clearing style flags must restore the raw engine source.");
 
                 // Flags with no engine modifier yet are stored (round-trip) but NOT wrapped — the
-                // engine source stays raw so no literal "<sup>" leaks into the rendered run.
-                comp.fontStyle = OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Subscript
-                                 | OpenGlyph.FontStyles.Highlight;
+                // engine source stays raw so no literal tag leaks into the rendered run.
+                comp.fontStyle = OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Highlight;
                 Assert.AreEqual(
-                    OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Subscript | OpenGlyph.FontStyles.Highlight,
+                    OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Highlight,
                     comp.fontStyle, "Not-yet-wired flags must still round-trip.");
                 Assert.AreEqual("Hello", comp.Text,
                     "Not-yet-wired flags must NOT be wrapped (no literal tag leak). Engine Text=" + comp.Text);
