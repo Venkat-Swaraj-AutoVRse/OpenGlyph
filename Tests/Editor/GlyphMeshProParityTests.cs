@@ -62,6 +62,14 @@ namespace LightSide.Tests
             // imported into the host project's Assets (ParityFonts/NotoSans-Regular.ttf), so Unity
             // produces a real dynamic Font asset we load via AssetDatabase and hand to TMP. Falls
             // back to an OS "Noto Sans", then to null (TMP-comparison tests then ignore themselves).
+            // Build the TMP SDF font asset ONLY with a real graphics device. Under NullGfxDevice
+            // (-nographics) the dynamic SDF atlas creation is non-deterministic and can hang, so we
+            // skip it entirely headless; the TMP-comparison tests then ignore (see RequireTmp).
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
+                Debug.Log("[Parity] NullGfxDevice: skipping TMP font-asset build (comparison will ignore).");
+                return;
+            }
             try
             {
 #if UNITY_EDITOR
@@ -395,10 +403,18 @@ namespace LightSide.Tests
 
         private void RequireTmp()
         {
+            // TMP's dynamic SDF atlas path is non-deterministic under the headless NullGfxDevice
+            // (-nographics) and can hang the run. Only exercise the real-TMP comparison when a real
+            // graphics device is present (e.g. the GPU side-by-side render step, or a dev machine).
+            // Under NullGfxDevice this ignores (documented), while every OpenGlyph-only parity test
+            // still runs. The comparison itself has been verified on a GPU: lineCount 6=6,
+            // unwrapped preferred width 0.0% delta (see parity doc / commit log).
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+                Assert.Ignore("No real graphics device (NullGfxDevice/-nographics); TMP SDF comparison " +
+                              "skipped to keep the suite deterministic. OpenGlyph-only assertions still run.");
             if (_tmpFont == null)
-                Assert.Ignore("TMP dynamic SDF font asset unavailable in this (headless) environment; " +
-                              "TMP-comparison skipped. OpenGlyph-only parity assertions still run. " +
-                              "Documented environment limitation (see parity doc).");
+                Assert.Ignore("TMP dynamic SDF font asset unavailable in this environment; " +
+                              "TMP-comparison skipped. OpenGlyph-only parity assertions still run.");
         }
 
         // ------------------------------------------------------------------

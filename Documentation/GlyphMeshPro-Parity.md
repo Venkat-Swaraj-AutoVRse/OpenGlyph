@@ -172,36 +172,46 @@ for an unbreakable word. It stays on one line only when it fits the width.
 
 ## Rich-text tag parity
 
-TMP tag set observed from documentation + behavior. OpenGlyph already parses span
-style tags (see `Runtime/ModCore/Rules`, `attributeParser`). Status is per tag.
+**Verified** against the engine's registered parse rules (`Runtime/ModCore/Rules/*`,
+each rule's `TagName`). The engine's actual tag set is: `b, i, u, s, size, color,
+cspace, line-height, line-spacing, gradient, link, style, upper, outline, underlay,
+dilate, softness, ellipsis, obj`. TMP tags are mapped against that reality — several
+common TMP tags have **no engine rule in Round 1** and are listed as gaps, not glossed
+as supported.
 
-| Tag | Status | Mapping / notes |
-|-----|--------|-----------------|
-| `<b>` | direct | bold span. |
-| `<i>` | direct | italic span. |
-| `<u>` | direct | underline span. |
-| `<s>` | direct | strikethrough span. |
-| `<size=…>` (px/%/em) | adapter | per-span size; units px/%/em. |
-| `<color=…>` / `<#rrggbb>` | direct | per-span color. |
-| `<alpha=#xx>` | adapter | per-span alpha. |
-| `<align=left/center/right>` | adapter | per-line alignment; justified/flush = gap (left). |
-| `<cspace=…>` | adapter | character spacing span. |
-| `<line-height=…>` | adapter | line-height span. |
-| `<indent=…>` | adapter | indent span. |
-| `<margin=…>` / `<margin-left/right>` | adapter | margin span. |
-| `<mark=#…>` | adapter | highlight span. |
-| `<sup>` / `<sub>` | adapter | super/subscript span. |
-| `<voffset=…>` | adapter | vertical offset span. |
-| `<nobr>` | adapter | no-break span. |
-| `<lowercase>`/`<uppercase>`/`<smallcaps>` | adapter | text-transform spans. |
-| `<mspace=…>` | adapter | monospace span. |
-| `<space=…>` | adapter | horizontal space insertion. |
-| `<width=…>` | adapter | line width span. |
-| `<link=…>` | adapter | link span (engine `ModCore/Rules/Link`). |
-| `<font=…>` | adapter | font switch span → `UniTextFont`. |
-| `<style=…>` | adapter | named style span → `UniTextStyle`/`UniTextStyleSheet`. |
-| `<gradient=…>` | direct | engine `UniTextGradients` named gradient. |
-| `<pos>`, `<rotate>`, `<sprite>`, `<page>` | oos | positional/sprite/page tags — not required by R1 scope; `<sprite>` deferred to emoji/sprite work. |
+| TMP tag | Status | Mapping / notes |
+|---------|--------|-----------------|
+| `<b>` | direct | engine `BoldParseRule` (`b`). |
+| `<i>` | direct | engine `ItalicParseRule` (`i`). |
+| `<u>` | direct | engine `UnderlineParseRule` (`u`). |
+| `<s>` | direct | engine `StrikethroughParseRule` (`s`). |
+| `<size=…>` | direct | engine `SizeParseRule` (`size`). |
+| `<color=…>` / `<#rrggbb>` | direct | engine `ColorParseRule` (`color`). |
+| `<cspace=…>` | direct | engine `CSpaceParseRule` (`cspace`). |
+| `<line-height=…>` | direct | engine `LineHeightParseRule` (`line-height`). |
+| `<gradient=…>` | direct | engine `GradientParseRule` (`gradient`) + `UniTextGradients`. |
+| `<link=…>` | direct | engine `LinkTagParseRule` (`link`). |
+| `<style=…>` | direct | engine span-style rule (`style`). |
+| `<uppercase>` | adapter | engine tag is `upper` (not `uppercase`); map name on the way in. |
+| `<lowercase>` | **gap (R2)** | no engine rule; TODO add a lowercase transform rule. |
+| `<smallcaps>` | **gap (R2)** | no engine rule; TODO. |
+| `<mark=#…>` | **gap (R2)** | no engine highlight rule; TODO (highlighter exists at the component level). |
+| `<sup>` / `<sub>` | **gap (R2)** | no engine super/subscript rule; TODO. |
+| `<voffset=…>` | **gap (R2)** | no engine rule; TODO. |
+| `<nobr>` | **gap (R2)** | no engine no-break rule; TODO. |
+| `<mspace=…>` | **gap (R2)** | no engine monospace rule; TODO. |
+| `<space=…>` | **gap (R2)** | no engine rule; TODO. |
+| `<width=…>` | **gap (R2)** | no engine rule; TODO. |
+| `<indent=…>` | **gap (R2)** | no engine rule; TODO. |
+| `<margin=…>` | **gap (R2)** | no engine inline-margin rule; component-level `margin` property only. |
+| `<align=…>` | **gap (R2)** | no engine inline-align rule; component-level alignment only (justified/flush also gap). |
+| `<alpha=#xx>` | **gap (R2)** | no engine rule; TODO (fold into `color`). |
+| `<font=…>` | **gap (R2)** | no engine inline font-switch rule; component-level `font` only. |
+| `<pos>` / `<rotate>` / `<sprite>` / `<page>` | oos | positional/sprite/page tags — not in R1 scope. |
+
+**OpenGlyph-only tags (no TMP equivalent, present in the engine):** `line-spacing`,
+`outline`, `underlay`, `dilate`, `softness` (SDF style controls), `ellipsis`, `obj`.
+These are additive and do not affect TMP migration.
 
 ## `GlyphMeshPro` (world-space `MeshRenderer`) — design (Round 1 = design + stub)
 
