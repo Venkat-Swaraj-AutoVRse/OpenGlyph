@@ -34,6 +34,7 @@ jobs:
       matrix:
         arch: [x64, ARM64]
     runs-on: windows-2022
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Pin CMake
@@ -185,14 +186,16 @@ jobs:
       matrix:
         arch: [x64, ARM64]
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Deps
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y ninja-build
           if [ "${{ matrix.arch }}" = "ARM64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+            sudo apt-get -o Acquire::Retries=3 install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
           fi
       - name: Pin CMake
         uses: lukka/get-cmake@v3.31.6
@@ -281,6 +284,7 @@ jobs:
   # keeps Blend2D ON on both slices and produces the same universal dylib.
   macos:
     runs-on: macos-14
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Pin CMake
@@ -370,6 +374,7 @@ jobs:
       matrix:
         abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     env:
       NDK_VERSION: "26.3.11579264"   # NDK r26d, pinned
     steps:
@@ -436,6 +441,7 @@ jobs:
   # blend2d/asmjit archive to exclude (the exclusion filter below is belt-and-suspenders).
   apple_embedded:
     runs-on: macos-14
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Pin CMake
@@ -588,6 +594,7 @@ jobs:
   # Blend2D is OFF on wasm, so there is no blend2d/asmjit archive to exclude.
   webgl:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Pin CMake
@@ -706,12 +713,14 @@ jobs:
   # any glyph's RAW field exceeds 1e-4 per channel or its per-edge colours differ from msdfgen's.
   msdfref:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Deps
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y ninja-build
       - name: Pin CMake
         uses: lukka/get-cmake@v3.31.6
         with:
@@ -763,6 +772,7 @@ jobs:
             runner: macos-14
             lib: Plugins/macOS/libunitext_native.dylib
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -796,6 +806,7 @@ jobs:
   assemble:
     needs: [windows, linux, macos, android, apple_embedded, webgl]
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
         with:
