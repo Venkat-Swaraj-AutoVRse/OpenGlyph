@@ -269,6 +269,12 @@ namespace LightSide
                     var fontId = run.fontId;
                     var glyphEnd = glyphStart + glyphLen;
 
+                    // Phase 2: a glyph carries only a blittable run index. -1 = plain run (no variation,
+                    // no real-face styling) so the mesh/modifier fast path skips the run lookup entirely
+                    // and the struct stays within 4 bytes of pre-phase2. realBold/realItalic and the
+                    // VariationKey are read from the run via this index when it is >= 0.
+                    var runRef = (!run.variationKey.IsNone || run.realBold || run.realItalic) ? r : -1;
+
                     for (var g = glyphStart; g < glyphEnd; g++)
                     {
                         ref readonly var glyph = ref glyphs[g];
@@ -285,6 +291,7 @@ namespace LightSide
                             x = glyphX,
                             y = y - glyph.offsetY * glyphScale,
                             fontId = fontId,
+                            orderedRunIndex = runRef,
                             shapedGlyphIndex = g,
                             left = x,
                             right = x + advanceScaled,

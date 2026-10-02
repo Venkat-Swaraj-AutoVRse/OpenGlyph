@@ -149,6 +149,14 @@ namespace LightSide
         /// <remarks>Valid during <see cref="OnGlyph"/> callback. Maps back to codepoint indices.</remarks>
         public int currentCluster;
 
+        /// <summary>True when the current glyph's run used a real bold face (Phase 2: suppress synthetic bold).</summary>
+        /// <remarks>Valid during <see cref="OnGlyph"/> callback.</remarks>
+        public bool currentRealBold;
+
+        /// <summary>True when the current glyph's run used a real italic/oblique face (Phase 2: suppress synthetic italic).</summary>
+        /// <remarks>Valid during <see cref="OnGlyph"/> callback.</remarks>
+        public bool currentRealItalic;
+
         /// <summary>X position of the current glyph in text coordinates.</summary>
         /// <remarks>Valid during <see cref="OnGlyph"/> callback.</remarks>
         public float x;
@@ -794,7 +802,24 @@ namespace LightSide
                 if (!useCache || !cachedData.isValid)
                 {
                     var glyphId = (uint)glyph.glyphId;
-                    if (!glyphLookup.TryGetValue(glyphId, out var glyphData))
+                    Glyph glyphData;
+                    bool found;
+                    // Phase 2: a glyph belonging to a variable-font instance resolves from the
+                    // per-(VariationKey) atlas store so wght 400 and 700 use their own cells. The
+                    // VariationKey lives on the run (looked up by orderedRunIndex), NOT on the glyph,
+                    // so the per-glyph struct stays blittable. orderedRunIndex < 0 is the plain run
+                    // fast path: one int compare, then the original glyph-table lookup.
+                    if (glyph.orderedRunIndex >= 0)
+                    {
+                        ref readonly var vrun = ref buf.orderedRuns.data[glyph.orderedRunIndex];
+                        found = !vrun.variationKey.IsNone
+                            ? font.TryGetGlyph(glyphId, vrun.variationKey, out glyphData)
+                            : glyphLookup.TryGetValue(glyphId, out glyphData);
+                    }
+                    else
+                        found = glyphLookup.TryGetValue(glyphId, out glyphData);
+
+                    if (!found)
                     {
                         skippedGlyphs++;
                         cachedData.isValid = false;
@@ -901,6 +926,19 @@ namespace LightSide
                 tris[triangleCount + 5] = localI0;
 
                 currentCluster = cluster;
+                // Phase 2: real-face flags live on the run (orderedRunIndex), not the glyph, so the
+                // per-glyph struct stays minimal. -1 = plain run => not real-styled (fast path).
+                if (glyph.orderedRunIndex >= 0)
+                {
+                    ref readonly var srun = ref buf.orderedRuns.data[glyph.orderedRunIndex];
+                    currentRealBold = srun.realBold;
+                    currentRealItalic = srun.realItalic;
+                }
+                else
+                {
+                    currentRealBold = false;
+                    currentRealItalic = false;
+                }
                 x = glyph.x;
                 y = glyph.y;
                 width = widthScaled;

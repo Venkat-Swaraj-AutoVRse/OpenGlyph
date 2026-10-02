@@ -76,6 +76,10 @@ namespace LightSide
             if (!attribute.buffer.data.HasFlag(cluster))
                 return;
 
+            // Phase 2 (CSS font-synthesis): a glyph whose run used a REAL bold face must NOT be faux-bolded.
+            if (gen.currentRealBold)
+                return;
+
             var negXScale = -gen.xScale;
             var baseIdx = gen.vertexCount - 4;
             var uvs = gen.Uvs0;
@@ -113,6 +117,10 @@ namespace LightSide
             for (var r = 0; r < runCount; r++)
             {
                 ref var run = ref runs[r];
+
+                // CSS font-synthesis: never faux-bold a run that already uses a real bold face.
+                if (run.realBold)
+                    continue;
 
                 if (run.fontId != cachedFontId)
                 {
