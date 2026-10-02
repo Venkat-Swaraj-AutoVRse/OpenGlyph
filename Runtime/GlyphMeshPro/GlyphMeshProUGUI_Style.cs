@@ -119,6 +119,9 @@ namespace OpenGlyph
                 RegisterModifier(new ModRegister { Modifier = new SuperSubscriptModifier(SuperSubscriptModifier.Kind.Superscript), Rule = new SuperscriptParseRule() });
             if (!HasRule<SubscriptParseRule>())
                 RegisterModifier(new ModRegister { Modifier = new SuperSubscriptModifier(SuperSubscriptModifier.Kind.Subscript), Rule = new SubscriptParseRule() });
+            // Markup-only TMP tags (no fontStyle flag) registered so <voffset=…> works out of the box.
+            if (!HasRule<VOffsetParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new VOffsetModifier(), Rule = new VOffsetParseRule() });
             // SmallCaps/Highlight need engine modifiers added as each lands — parity-doc gaps.
         }
 

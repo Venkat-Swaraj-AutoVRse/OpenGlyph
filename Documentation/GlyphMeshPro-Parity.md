@@ -206,7 +206,7 @@ as supported.
 | `<smallcaps>` | **gap (R2)** | no engine rule; TODO. |
 | `<mark=#…>` | **gap (R2)** | no engine highlight rule; TODO (highlighter exists at the component level). |
 | `<sup>` / `<sub>` | **applied (R2)** | new `SuperscriptParseRule`/`SubscriptParseRule` + `SuperSubscriptModifier`. Verified by GPU PNG vs TMP. |
-| `<voffset=…>` | **gap (R2)** | no engine rule; TODO. |
+| `<voffset=�>` | **applied (R2)** | new `VOffsetParseRule` + `VOffsetModifier` (per-span vertical shift of the glyph quad; em/px/% value). Verified by GPU PNG vs TMP. |
 | `<nobr>` | **gap (R2)** | no engine no-break rule; TODO. |
 | `<mspace=…>` | **gap (R2)** | no engine monospace rule; TODO. |
 | `<space=…>` | **gap (R2)** | no engine rule; TODO. |
@@ -250,6 +250,6 @@ Target: Quest / world-space text without a Canvas. Design:
   were wired to the existing `<u>`/`<s>` rules in Round 2; the rest need new engine modifiers
   (a case transform, a baseline-shift+scale, and a background-quad renderer).
 - **Rich-text tags with no engine rule (apply via markup is impossible until added):**
-  `<smallcaps>`, `<mark>`, `<voffset>`, `<nobr>`,
+  `<smallcaps>`, `<mark>`, `<nobr>`,
   `<mspace>`, `<space>`, `<width>`, `<indent>`, `<margin>` (inline), `<align>` (inline),
   `<alpha>`, `<font>` (inline). `<uppercase>` is the engine's `upper` (needs a name alias).
