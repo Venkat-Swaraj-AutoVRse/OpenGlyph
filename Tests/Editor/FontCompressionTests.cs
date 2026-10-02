@@ -165,12 +165,11 @@ namespace LightSide.Tests
         [Test]
         public void Decompress_NeverCrashes_OnUnknownCodec()
         {
-            // Hand-craft a UTFZ container with a bogus codec id: decode must throw a controlled
-            // InvalidDataException, not an unhandled native/type fault.
-            var raw = new byte[256];
-            new System.Random(3).NextBytes(raw);
+            // Compressible data so a real UTFZ container is produced (random data would be kept raw).
+            var raw = new byte[4096];
+            for (int i = 0; i < raw.Length; i++) raw[i] = (byte)(i % 17);
             var packed = (byte[])FontCompression.Compress(raw, preferBrotli: false).Clone();
-            Assume.That(FontCompression.IsCompressed(packed), "need a real container to corrupt");
+            Assert.IsTrue(FontCompression.IsCompressed(packed), "compressible data yields a real container to corrupt");
             packed[6] = 0x7F; // unknown codec id
             Assert.Throws<System.IO.InvalidDataException>(() => FontCompression.Decompress(packed),
                 "an unknown codec id is rejected cleanly, never crashing the player");
