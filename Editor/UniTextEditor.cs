@@ -4,6 +4,10 @@ using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
+// R2 sub-task 4: the inspector still draws the [Obsolete] Appearance field during the deprecation
+// window so existing components remain editable; suppress 618 for this file.
+#pragma warning disable 618
+
 namespace LightSide
 {
     [CustomEditor(typeof(UniText))]
@@ -583,3 +587,4 @@ namespace LightSide
     }
 
 }
+#pragma warning restore 618
