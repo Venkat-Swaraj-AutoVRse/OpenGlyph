@@ -4,6 +4,11 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Rendering;
 
+// R2 sub-task 4: UniText is the deprecation BRIDGE — it still holds the [Obsolete] UniTextAppearance
+// field/property so existing assets load and render through the shim during the deprecation window.
+// Suppress the obsolete-usage warning for this file to keep the package warning-clean (#pragma).
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -183,6 +188,114 @@ namespace LightSide
         private readonly List<SubMeshRenderer> subMeshRenderers = new();
         private readonly List<Material> stencilMaterials = new();
         private List<UniTextRenderData> renderData;
+
+        /// <summary>Per-component override for the Render-Architecture R2 unified single-renderer path.</summary>
+        public enum UnifiedRendererMode { UseProjectSetting, ForceOn, ForceOff }
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2 unified single-renderer path for THIS component. " +
+                 "UseProjectSetting follows UniTextSettings.UseUnifiedRenderer; ForceOn/ForceOff override it.")]
+        private UnifiedRendererMode unifiedRendererMode = UnifiedRendererMode.UseProjectSetting;
+
+        /// <summary>
+        /// Per-component override for the Render-Architecture R2 unified single-renderer path.
+        /// <see cref="UnifiedRendererMode.UseProjectSetting"/> follows
+        /// <see cref="UniTextSettings.UseUnifiedRenderer"/>; ForceOn/ForceOff override it. Setting it
+        /// marks the component dirty so the next rebuild uses the chosen path.
+        /// </summary>
+        public UnifiedRendererMode UnifiedRenderer
+        {
+            get => unifiedRendererMode;
+            set
+            {
+                if (unifiedRendererMode == value) return;
+                unifiedRendererMode = value;
+                SetVerticesDirty();
+            }
+        }
+
+        /// <summary>
+        /// Whether this component renders through the R2 unified single-CanvasRenderer-per-draw-group
+        /// path (UniText/Uber + shared Texture2DArray + style table). Resolves the per-component
+        /// <see cref="unifiedRendererMode"/> against the project default. False keeps the legacy path.
+        /// </summary>
+        public bool UseUnifiedRenderer => unifiedRendererMode switch
+        {
+            UnifiedRendererMode.ForceOn => true,
+            UnifiedRendererMode.ForceOff => false,
+            _ => UniTextSettings.UseUnifiedRenderer,
+        };
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2 sub-task 1: when ON, the unified render path shades every " +
+                 "glyph from the component Style below INSTEAD of synthesising one from a legacy " +
+                 "appearance/material via AppearanceStyleShim. OFF keeps the shim fallback so a " +
+                 "component still referencing a legacy UniTextAppearance keeps rendering unchanged.")]
+        private bool overrideStyle = false;
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2 sub-task 1: the component-authored text style (face / outline " +
+                 "/ underlay-shadow / glow). Replaces a UniTextAppearance + material asset. Active only " +
+                 "when Override Style is ON and the unified renderer is used.")]
+        private UniTextStyle style = UniTextStyle.Default;
+
+        /// <summary>
+        /// Render-Architecture R2 sub-task 1: whether this component shades from its own
+        /// <see cref="Style"/> (true) or falls back to the <see cref="AppearanceStyleShim"/> reading a
+        /// legacy appearance/material (false). Only consulted on the unified render path.
+        /// </summary>
+        public bool OverrideStyle
+        {
+            get => overrideStyle;
+            set
+            {
+                if (overrideStyle == value) return;
+                overrideStyle = value;
+                SetVerticesDirty();
+            }
+        }
+
+        /// <summary>
+        /// The component-authored <see cref="UniTextStyle"/>. Used by the unified render path when
+        /// <see cref="OverrideStyle"/> is true. Setting it marks the component dirty so the next
+        /// rebuild re-shades.
+        /// </summary>
+        public UniTextStyle Style
+        {
+            get => style;
+            set
+            {
+                if (style.Equals(value)) return;
+                style = value;
+                if (overrideStyle) SetVerticesDirty();
+            }
+        }
+
+        /// <summary>R2 unified path: per-component builder + its merged (≤2) output. Lazy; disposed in OnDestroy.</summary>
+        private UnifiedRenderBuilder unifiedBuilder;
+        private List<UniTextRenderData> unifiedRenderData;
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2 sub-task 2: named styles addressable from <style=Name> per-span " +
+                 "markup. Optional — only needed if the text uses <style=…> tags.")]
+        private UniTextStyleSheet styleSheet;
+
+        /// <summary>
+        /// Render-Architecture R2 sub-task 2: the <see cref="UniTextStyleSheet"/> that resolves
+        /// <c>&lt;style=Name&gt;</c> per-span markup. Null when no named styles are used.
+        /// </summary>
+        public UniTextStyleSheet StyleSheet
+        {
+            get => styleSheet;
+            set { if (styleSheet == value) return; styleSheet = value; SetVerticesDirty(); }
+        }
+
+        /// <summary>R2 sub-task 2: per-component collector mapping composed per-span styles to local ids (0 = base).</summary>
+        private SpanStyleCollector spanStyleCollector;
+        /// <summary>True once this component's span-style OnBeforeMesh/OnGlyph coordinator is subscribed.</summary>
+        private bool spanStyleHooked;
+        /// <summary>The component base GlyphStyle captured at generation start, that span overrides layer onto.</summary>
+        private GlyphStyle spanBaseStyle;
 
         private Rect cachedClipRect;
         private bool cachedValidClip;
@@ -861,6 +974,9 @@ namespace LightSide
             base.OnDestroy();
             highlighter?.Destroy();
             DeInit();
+            UnhookSpanStyle();
+            unifiedBuilder?.Dispose();
+            unifiedBuilder = null;
             DestroyRuntimeConfigCopies();
         }
 
@@ -1075,6 +1191,15 @@ namespace LightSide
                 changed = true;
             }
 
+            // Keep an already-created provider in sync with the refilled references. Without this, a
+            // component whose Appearance was set to null after the provider existed (the migration
+            // tool's "clear legacy appearance" option does exactly that) got its field refilled here
+            // while the provider kept null, and every mesh build threw in GetMaterials.
+            if (changed && fontProvider != null)
+            {
+                if (fontProvider.Appearance != appearance) fontProvider.Appearance = appearance;
+            }
+
             if (changed) UnityEditor.EditorUtility.SetDirty(this);
 
             return fontStack != null && appearance != null;
@@ -1120,6 +1245,7 @@ namespace LightSide
             {
                 fontProvider = new UniTextFontProvider(fontStack, appearance);
                 meshGenerator = new UniTextMeshGenerator(fontProvider, buffers);
+                EnsureSpanStyleHooked();
                 textProcessor.SetFontProvider(fontProvider);
                 Cat.Meow("[UniText] FontProvider created", this);
             }
@@ -1171,12 +1297,115 @@ namespace LightSide
                 return;
             }
 
+            // Render-Architecture R2: when the unified path is enabled, collapse the per-segment
+            // renderData into ≤2 merged draw groups on the UniText/Uber material. The legacy
+            // generation is untouched; this only re-packs its output. When OFF, renderData flows to
+            // UpdateSubMeshes exactly as before (default — guards the existing test suite).
+            if (UseUnifiedRenderer)
+            {
+                // CRITICAL: the uber shader reads per-glyph (sliceIdx, glyphMode, styleIdx) from UV1
+                // (TEXCOORD1). A Canvas only uploads the vertex channels in additionalShaderChannels —
+                // UV1 is NOT included by default, so without this the shader reads UV1 = 0 →
+                // glyphMode = 0 (SDF) for EVERY glyph, and an MSDF glyph on the RGBA32 array then
+                // samples .a (= 255 from the RGB24→RGBA32 copy) → a SOLID WHITE BLOCK. Enabling
+                // TexCoord1 lets the per-glyph data reach the shader.
+                var cv = canvas;
+                if (cv != null)
+                    cv.additionalShaderChannels |= AdditionalCanvasShaderChannels.TexCoord1
+                                                 | AdditionalCanvasShaderChannels.Normal;
+
+                unifiedBuilder ??= new UnifiedRenderBuilder();
+                unifiedRenderData ??= new List<UniTextRenderData>(2);
+                spanStyleCollector ??= new SpanStyleCollector();
+                EnsureSpanStyleHooked();
+                // R2 sub-task 1: prefer the component-authored style when Override Style is ON;
+                // otherwise fall back to the shim synthesising one from the legacy appearance/material
+                // (so old assets still render identically during the deprecation window).
+                var style = overrideStyle
+                    ? this.style.ToGlyphStyle()
+                    : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
+                // The collector was reset at OnBeforeMesh with the base style and populated per glyph
+                // (local ids in UV1.w). The builder maps each glyph's local id -> a shared StyleTable row.
+                unifiedBuilder.Build(renderData, style, spanStyleCollector, unifiedRenderData);
+                UpdateSubMeshes(unifiedRenderData);
+                UniTextDebug.EndSample();
+                return;
+            }
+
             UpdateSubMeshes();
 
             UniTextDebug.EndSample();
         }
 
         protected override void UpdateMaterial() { }
+
+        // ---- Render-Architecture R2 sub-task 2: per-span style coordinator ---------------------------
+        // Exactly ONE OnGlyph per glyph composes the cluster's accumulated SpanStyleOverride over the
+        // component base style, dedups it to a local id, and writes that id into the glyph's UV1.w.
+        // The SpanStyleModifier instances only populate the shared per-cluster override buffer (data);
+        // this is the single place that stamps vertices, so a glyph is composed once regardless of how
+        // many span tags cover it.
+
+        private void EnsureSpanStyleHooked()
+        {
+            if (spanStyleHooked || meshGenerator == null) return;
+            meshGenerator.OnBeforeMesh += OnSpanStyleBeforeMesh;
+            meshGenerator.OnGlyph += OnSpanStyleGlyph;
+            spanStyleHooked = true;
+        }
+
+        private void UnhookSpanStyle()
+        {
+            if (!spanStyleHooked || meshGenerator == null) return;
+            meshGenerator.OnBeforeMesh -= OnSpanStyleBeforeMesh;
+            meshGenerator.OnGlyph -= OnSpanStyleGlyph;
+            spanStyleHooked = false;
+        }
+
+        private void OnSpanStyleBeforeMesh()
+        {
+            if (!UseUnifiedRenderer) return;
+            spanBaseStyle = overrideStyle
+                ? this.style.ToGlyphStyle()
+                : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
+            spanStyleCollector ??= new SpanStyleCollector();
+            spanStyleCollector.Reset(spanBaseStyle);
+        }
+
+        private void OnSpanStyleGlyph()
+        {
+            if (!UseUnifiedRenderer) return;
+            var gen = UniTextMeshGenerator.Current;
+            if (gen == null) return;
+            if (spanStyleCollector == null) { spanStyleCollector = new SpanStyleCollector(); spanStyleCollector.Reset(spanBaseStyle); }
+
+            // Read the accumulated per-span override for this glyph's cluster from the shared buffer.
+            var attr = Buffers?.GetAttributeData<PooledArrayAttribute<SpanStyleOverride>>(AttributeKeys.SpanStyle);
+            int localId = 0;
+            if (attr != null)
+            {
+                var buf = attr.buffer.data;
+                int cluster = gen.currentCluster;
+                if (buf != null && (uint)cluster < (uint)buf.Length)
+                {
+                    ref readonly var ov = ref buf[cluster];
+                    if (!ov.IsNone)
+                        localId = spanStyleCollector.GetOrAdd(ov.ComposeOnto(spanBaseStyle));
+                }
+            }
+
+            // Stamp the local id into UV1.w of this glyph's 4 verts (builder maps local id -> shared row).
+            int baseIdx = gen.vertexCount - 4;
+            var uv1 = gen.Uvs1;
+            if (uv1 == null || baseIdx < 0 || baseIdx + 3 >= uv1.Length) return;
+            for (int k = 0; k < 4; k++)
+            {
+                var v = uv1[baseIdx + k];
+                v.w = localId;
+                uv1[baseIdx + k] = v;
+            }
+        }
+
 
         /// <summary>Sets the clipping rectangle for masking, applying to all sub-mesh renderers.</summary>
         /// <inheritdoc/>
@@ -1241,6 +1470,127 @@ namespace LightSide
 
         #region Sub-mesh Management
 
+#if UNITY_EDITOR
+        /// <summary>EDITOR/TEST: forces this component's unified-renderer mode.</summary>
+        internal void SetUnifiedRendererModeForTests(UnifiedRendererMode mode) => unifiedRendererMode = mode;
+
+        /// <summary>EDITOR/TEST: number of currently-active drawn sub-mesh CanvasRenderers.</summary>
+        internal int ActiveSubMeshRendererCountForTests
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < subMeshRenderers.Count; i++)
+                {
+                    var r = subMeshRenderers[i].renderer;
+                    if (r != null && r.gameObject.activeSelf && r.GetMesh() != null) n++;
+                }
+                return n;
+            }
+        }
+
+        /// <summary>EDITOR/TEST: true if every active drawn renderer uses the UniText/Uber shader.</summary>
+        internal bool ActiveRenderersUseUberShaderForTests()
+        {
+            bool any = false;
+            for (int i = 0; i < subMeshRenderers.Count; i++)
+            {
+                var r = subMeshRenderers[i].renderer;
+                if (r == null || !r.gameObject.activeSelf || r.GetMesh() == null) continue;
+                any = true;
+                var mat = r.GetMaterial(0);
+                if (mat == null || mat.shader == null || mat.shader.name != "UniText/Uber") return false;
+            }
+            return any;
+        }
+
+        /// <summary>EDITOR/TEST: vertices actually submitted to the active drawn CanvasRenderers.</summary>
+        internal List<Vector3> GetDrawnVerticesForTests()
+        {
+            var result = new List<Vector3>();
+            for (int i = 0; i < subMeshRenderers.Count; i++)
+            {
+                var r = subMeshRenderers[i].renderer;
+                if (r == null || !r.gameObject.activeSelf) continue;
+                var m = r.GetMesh();
+                if (m != null) result.AddRange(m.vertices);
+            }
+            return result;
+        }
+
+        /// <summary>EDITOR/TEST: shader names of each active drawn renderer's material[0] (diagnostics).</summary>
+        internal List<string> GetActiveRendererShaderNamesForTests()
+        {
+            var names = new List<string>();
+            for (int i = 0; i < subMeshRenderers.Count; i++)
+            {
+                var r = subMeshRenderers[i].renderer;
+                if (r == null || !r.gameObject.activeSelf || r.GetMesh() == null) continue;
+                var mat = r.GetMaterial(0);
+                names.Add(mat == null ? "<null>" : (mat.shader == null ? "<null shader>" : mat.shader.name));
+            }
+            return names;
+        }
+
+        /// <summary>
+        /// EDITOR/TEST: the merged unified-path render data this component produced on the last
+        /// rebuild (source-side, independent of CanvasRenderer material read-back semantics). Each
+        /// entry is one draw group; its material[0] shader is what will be drawn. Null/empty when the
+        /// unified path did not run.
+        /// </summary>
+        internal List<string> GetUnifiedGroupShaderNamesForTests()
+        {
+            var names = new List<string>();
+            if (unifiedRenderData == null) return names;
+            foreach (var rd in unifiedRenderData)
+            {
+                var mat = rd.material;
+                names.Add(mat == null ? "<null>" : (mat.shader == null ? "<null shader>" : mat.shader.name));
+            }
+            return names;
+        }
+
+        /// <summary>EDITOR/TEST: number of merged unified-path draw groups produced on the last rebuild.</summary>
+        internal int UnifiedGroupCountForTests => unifiedRenderData?.Count ?? 0;
+
+        /// <summary>EDITOR/TEST: number of DISTINCT per-span styles the span-style collector resolved on
+        /// the last rebuild (local id 0 = base, so 1 means no distinct span styles). Proves per-span
+        /// dedup / "a row per distinct span style".</summary>
+        internal int SpanStyleLocalCountForTests => spanStyleCollector?.Count ?? 0;
+
+        /// <summary>EDITOR/TEST: the per-vertex styleIdx (UV1.w) of every vertex submitted to the active
+        /// unified-path draw groups. Distinct values across glyphs prove per-glyph style selection in
+        /// a single renderer.</summary>
+        internal List<int> GetUnifiedStyleIndicesForTests()
+        {
+            var result = new List<int>();
+            if (unifiedRenderData == null) return result;
+            var uv1 = new List<Vector4>();
+            foreach (var rd in unifiedRenderData)
+            {
+                if (rd.mesh == null) continue;
+                uv1.Clear(); rd.mesh.GetUVs(1, uv1);
+                foreach (var v in uv1) result.Add((int)(v.w + 0.5f));
+            }
+            return result;
+        }
+
+        /// <summary>EDITOR/TEST: the (mesh, material, texture) tuples this component built for the
+        /// ACTIVE path. For the legacy path the atlas is the per-entry texture (the component binds it
+        /// via CanvasRenderer.SetTexture, not on the material); for the unified path the array is on
+        /// the material and this texture is null.</summary>
+        internal List<(Mesh mesh, Material mat, Texture tex)> GetDrawnMeshMaterialsForTests()
+        {
+            var result = new List<(Mesh, Material, Texture)>();
+            var src = UseUnifiedRenderer ? unifiedRenderData : renderData;
+            if (src == null) return result;
+            foreach (var rd in src)
+                if (rd.mesh != null && rd.mesh.vertexCount > 0)
+                    result.Add((rd.mesh, rd.material, rd.texture));
+            return result;
+        }
+#endif
+
         private void CollectExistingSubMeshRenderers()
         {
             subMeshRenderers.Clear();
@@ -1258,9 +1608,14 @@ namespace LightSide
 
         private void UpdateSubMeshes()
         {
+            UpdateSubMeshes(renderData);
+        }
+
+        private void UpdateSubMeshes(List<UniTextRenderData> data)
+        {
             UniTextDebug.BeginSample("UniText.UpdateSubMeshes");
 
-            var requiredCount = renderData.Count;
+            var requiredCount = data.Count;
             var existingCount = subMeshRenderers.Count;
 
             var currentPivot = rectTransform.pivot;
@@ -1291,7 +1646,7 @@ namespace LightSide
 
             for (var i = 0; i < requiredCount; i++)
             {
-                var pair = renderData[i];
+                var pair = data[i];
 
                 if (i < existingCount)
                 {
@@ -1431,3 +1786,4 @@ namespace LightSide
     }
 
 }
+#pragma warning restore 618

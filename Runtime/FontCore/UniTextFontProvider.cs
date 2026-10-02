@@ -4,6 +4,10 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
+// R2 sub-task 4: the provider still exposes the [Obsolete] UniTextAppearance + calls GetMaterials as
+// the runtime bridge feeding the shim during the deprecation window. Suppress 618 for this file.
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -318,8 +322,13 @@ namespace LightSide
         /// <returns>Materials array. Single for normal, two for 2-pass (outline + face).</returns>
         public Material[] GetMaterials(int fontId)
         {
-            var fontAsset = GetFontAsset(fontId);
-            return Appearance.GetMaterials(fontAsset);
+            // A component whose legacy appearance was cleared (e.g. by the migration tool's
+            // "Clear the legacy appearance reference" option) has Appearance == null. Fall back to
+            // the project default appearance; with none, return null, which the mesh generator
+            // already treats as "no materials" (the unified path never reads these).
+            var appearance = Appearance != null ? Appearance : UniTextSettings.DefaultAppearance;
+            if (appearance == null) return null;
+            return appearance.GetMaterials(GetFontAsset(fontId));
         }
 
         /// <summary>
@@ -335,3 +344,4 @@ namespace LightSide
     }
 
 }
+#pragma warning restore 618

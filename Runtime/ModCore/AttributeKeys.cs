@@ -13,5 +13,8 @@ namespace LightSide
         public const string LetterSpacing = "cspace";
         public const string InteractiveRanges = "interactiveRanges";
         public const string Gradient = "gradient";
+        // Render-Architecture R2 sub-task 2: per-span style overrides (outline/underlay/dilate/softness/style)
+        // all accumulate into ONE shared per-cluster buffer under this key so nested spans merge.
+        public const string SpanStyle = "spanstyle";
     }
 }
