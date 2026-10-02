@@ -315,13 +315,42 @@ namespace LightSide
         /// <summary>Gets the list of generated mesh segments, one per font/atlas combination.</summary>
         internal PooledList<GeneratedMeshSegment> GeneratedSegments => generatedSegments;
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static ulong HashBits(ulong h, int bits, ulong fnvPrime)
+        {
+            unchecked
+            {
+                // Mix all 32 bits of the word (FNV-1a byte-at-a-time) so no information is lost.
+                h = (h ^ (uint)(bits & 0xFF)) * fnvPrime;
+                h = (h ^ (uint)((bits >> 8) & 0xFF)) * fnvPrime;
+                h = (h ^ (uint)((bits >> 16) & 0xFF)) * fnvPrime;
+                h = (h ^ (uint)((bits >> 24) & 0xFF)) * fnvPrime;
+            }
+            return h;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static ulong HashFloat(ulong h, float f, ulong fnvPrime)
+        {
+            // Raw IEEE-754 bits — NO quantization. A sub-quantum position change (smooth animation)
+            // or any float difference the renderer would draw differently changes the hash. NaN is
+            // canonicalized so two NaNs with different bit patterns do not spuriously differ.
+            int bits = float.IsNaN(f) ? unchecked((int)0x7FC00000) : BitConverter.SingleToInt32Bits(f);
+            return HashBits(h, bits, fnvPrime);
+        }
+
         /// <summary>
-        /// A cheap order-sensitive fingerprint (64-bit FNV-1a) of the CURRENTLY GENERATED geometry —
-        /// vertex count, positions, UV0 and vertex colours. Two rebuilds whose rendered output is
-        /// identical hash equal, so the component can skip the Unity mesh re-upload (the dominant
-        /// cost of a full rebuild) when a text change produces the same geometry (e.g. a
-        /// trailing-whitespace-only edit, or reassigning equivalent text). Zero when no data is
-        /// generated. Reads only pooled buffers — allocation-free.
+        /// An EXACT order-sensitive fingerprint (64-bit FNV-1a) of the CURRENTLY GENERATED geometry.
+        /// It hashes EVERY channel the generator writes, at full precision (raw IEEE-754 bits, no
+        /// quantization): vertex positions (x,y,z), UV0 (x,y,z,w), UV1 (x,y,z,w — the effect/line
+        /// data the unified renderer and its outline/underlay read), vertex colours, the full index
+        /// buffer, and the per-segment structure (fontId, atlasIndex, vertex/triangle ranges, submesh
+        /// /material count + each material's instance id, and the atlas texture's instance id). Two
+        /// rebuilds hash equal <b>iff</b> they would upload byte-identical meshes to byte-identical
+        /// renderers, so the <see cref="UniText.DoApplyMesh"/> skip can NEVER drop a visible change:
+        /// a sub-pixel move, a change in a non-UV0 channel, a different index/submesh/material
+        /// assignment, or a change in the number of segments/renderers all change the hash.
+        /// Zero when no data is generated. Reads only pooled buffers — allocation-free.
         /// </summary>
         public ulong GeometryFingerprint()
         {
@@ -332,24 +361,71 @@ namespace LightSide
 
             unchecked
             {
-                h = (h ^ (uint)vertexCount) * fnvPrime;
-                h = (h ^ (uint)triangleCount) * fnvPrime;
+                h = HashBits(h, vertexCount, fnvPrime);
+                h = HashBits(h, triangleCount, fnvPrime);
 
                 var v = vertices.data;
-                var u = uvs0.data;
+                var u0 = uvs0.data;
+                var u1 = uvs1.data;
                 var c = colors.data;
                 int n = vertexCount;
-                // Hash every vertex: position (quantized to avoid float-noise flapping), UV0, colour.
+                // Every vertex channel the generator writes, at full precision.
                 for (int i = 0; i < n; i++)
                 {
                     var p = v[i];
-                    h = (h ^ (uint)Mathf.RoundToInt(p.x * 16f)) * fnvPrime;
-                    h = (h ^ (uint)Mathf.RoundToInt(p.y * 16f)) * fnvPrime;
-                    var uv = u[i];
-                    h = (h ^ (uint)Mathf.RoundToInt(uv.x * 4096f)) * fnvPrime;
-                    h = (h ^ (uint)Mathf.RoundToInt(uv.y * 4096f)) * fnvPrime;
+                    h = HashFloat(h, p.x, fnvPrime);
+                    h = HashFloat(h, p.y, fnvPrime);
+                    h = HashFloat(h, p.z, fnvPrime);
+
+                    var a = u0[i];
+                    h = HashFloat(h, a.x, fnvPrime);
+                    h = HashFloat(h, a.y, fnvPrime);
+                    h = HashFloat(h, a.z, fnvPrime);
+                    h = HashFloat(h, a.w, fnvPrime);
+
+                    var b = u1[i];
+                    h = HashFloat(h, b.x, fnvPrime);
+                    h = HashFloat(h, b.y, fnvPrime);
+                    h = HashFloat(h, b.z, fnvPrime);
+                    h = HashFloat(h, b.w, fnvPrime);
+
                     var col = c[i];
-                    h = (h ^ (uint)(col.r | (col.g << 8) | (col.b << 16) | (col.a << 24))) * fnvPrime;
+                    h = HashBits(h, col.r | (col.g << 8) | (col.b << 16) | (col.a << 24), fnvPrime);
+                }
+
+                // Index buffer: a change of winding / index/submesh assignment with the same vertices
+                // must re-upload. triangleCount alone cannot catch a reorder.
+                var tris = triangles.data;
+                int t = triangleCount;
+                for (int i = 0; i < t; i++)
+                    h = HashBits(h, tris[i], fnvPrime);
+
+                // Per-segment structure: a change in the NUMBER of segments (⇒ renderers), or in any
+                // segment's font/atlas/range/submesh-material-count/material/texture, changes the draw
+                // even when the vertex arrays are byte-identical. The unified and legacy paths both
+                // key renderers off these, so they must be in the fingerprint.
+                if (generatedSegments != null)
+                {
+                    int segCount = generatedSegments.Count;
+                    h = HashBits(h, segCount, fnvPrime);
+                    for (int s = 0; s < segCount; s++)
+                    {
+                        ref var seg = ref generatedSegments.buffer[s];
+                        h = HashBits(h, seg.fontId, fnvPrime);
+                        h = HashBits(h, seg.atlasIndex, fnvPrime);
+                        h = HashBits(h, seg.vertexStart, fnvPrime);
+                        h = HashBits(h, seg.vertexCount, fnvPrime);
+                        h = HashBits(h, seg.triangleStart, fnvPrime);
+                        h = HashBits(h, seg.triangleCount, fnvPrime);
+                        int matCount = seg.materials?.Length ?? 0;
+                        h = HashBits(h, matCount, fnvPrime);   // submesh count == material count
+                        for (int m = 0; m < matCount; m++)
+                        {
+                            var mat = seg.materials[m];
+                            h = HashBits(h, mat != null ? mat.GetInstanceID() : 0, fnvPrime);
+                        }
+                        h = HashBits(h, seg.texture != null ? seg.texture.GetInstanceID() : 0, fnvPrime);
+                    }
                 }
             }
             return h;
