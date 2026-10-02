@@ -1,6 +1,10 @@
 using System;
 using UnityEngine;
 
+// R2 sub-task 4: settings still carries the editor-only DefaultAppearance (the [Obsolete] type) so new
+// components can seed from a project default during the deprecation window; suppress 618 for this file.
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -62,6 +66,44 @@ namespace LightSide
             }
         }
 
+        [Header("Shared Glyph Atlas (Render Architecture R2)")]
+        [SerializeField]
+        [Tooltip("Max pages (Texture2DArray slices) PER shared glyph-atlas array before LRU eviction " +
+                 "begins reusing pages. 0 (default) = unbounded: the array grows and never evicts, so " +
+                 "behaviour is identical to the legacy per-font atlas until a budget is configured. " +
+                 "Set a positive cap to bound glyph memory under variable fonts; least-recently-used, " +
+                 "unreferenced glyphs are then evicted and re-rasterized on demand.")]
+        [Min(0)]
+        private int sharedAtlasPageBudget = 0;
+
+        /// <summary>
+        /// Max pages per shared glyph-atlas array before eviction. 0 = unbounded (no eviction;
+        /// unchanged legacy behaviour). See <see cref="GlyphAtlasArray.PageBudget"/>.
+        /// </summary>
+        public static int SharedAtlasPageBudget => Instance != null ? Instance.sharedAtlasPageBudget : 0;
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2: when ON, each UniText component draws through a SINGLE " +
+                 "CanvasRenderer per draw group (at most two: SDF/coverage + MSDF/color) using the " +
+                 "UniText/Uber shader, a shared Texture2DArray atlas and a float-texture style table, " +
+                 "instead of one child CanvasRenderer per font/atlas/pass. OFF (default) keeps the " +
+                 "legacy per-segment renderer path, byte-for-byte unchanged. A component may override " +
+                 "this per-instance.")]
+        private bool useUnifiedRenderer = false;
+
+        /// <summary>
+        /// Project-wide default for the Render-Architecture R2 unified single-renderer path. False
+        /// (default) keeps the legacy per-segment CanvasRenderer path unchanged. A
+        /// <c>UniText</c> component may override this per instance.
+        /// </summary>
+        public static bool UseUnifiedRenderer => Instance != null && Instance.useUnifiedRenderer;
+
+        /// <summary>TEST ONLY: forces the project-wide unified-renderer default on the current instance.</summary>
+        internal static void SetUseUnifiedRendererForTests(bool value)
+        {
+            if (Instance != null) { Instance.useUnifiedRenderer = value; Changed?.Invoke(); }
+        }
+
         public static event Action Changed;
 
     #if UNITY_EDITOR
@@ -79,6 +121,19 @@ namespace LightSide
 
         /// <summary>Gets the default appearance for new UniText components (Editor only).</summary>
         public static UniTextAppearance DefaultAppearance => Instance?.defaultAppearance;
+
+        [SerializeField]
+        [Tooltip("Render Architecture R2 sub-task 3: when ON, imported/changed prefabs and scenes are " +
+                 "AUTO-migrated from legacy appearance/material settings to component styles via " +
+                 "Tools/OpenGlyph/Migrate Appearance to Styles. OFF (default) — migration is manual only. " +
+                 "Leave OFF unless you want every asset import to rewrite UniText components.")]
+        private bool autoMigrateAppearanceOnImport = false;
+
+        /// <summary>
+        /// Render-Architecture R2 sub-task 3: project-wide opt-in for auto-migrating appearance/material
+        /// settings to component styles on asset import. False (default) = manual migration only.
+        /// </summary>
+        public static bool AutoMigrateAppearanceOnImport => Instance != null && Instance.autoMigrateAppearanceOnImport;
     #endif
 
         /// <summary>Gets the compiled Unicode data asset, loaded from Resources.</summary>
@@ -138,3 +193,4 @@ namespace LightSide
 #endif
     }
 }
+#pragma warning restore 618

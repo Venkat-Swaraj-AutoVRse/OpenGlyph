@@ -2,6 +2,10 @@ using System;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
+// R2 sub-task 4: BoldModifier reads the [Obsolete] appearance for weight-delta caching on the legacy
+// path; suppress 618 for this file during the deprecation window.
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -163,3 +167,4 @@ namespace LightSide
         }
     }
 }
+#pragma warning restore 618

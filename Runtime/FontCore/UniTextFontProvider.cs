@@ -4,6 +4,10 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
+// R2 sub-task 4: the provider still exposes the [Obsolete] UniTextAppearance + calls GetMaterials as
+// the runtime bridge feeding the shim during the deprecation window. Suppress 618 for this file.
+#pragma warning disable 618
+
 namespace LightSide
 {
     /// <summary>
@@ -335,3 +339,4 @@ namespace LightSide
     }
 
 }
+#pragma warning restore 618

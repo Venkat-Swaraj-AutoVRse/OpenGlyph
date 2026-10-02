@@ -37,10 +37,44 @@ namespace LightSide
         {
             Cat.Meow($"[UniText] OnPreprocessBuild, platform: {report.summary.platformGroup}");
 
+            EnsureUberShaderIncluded();
+
             if (report.summary.platformGroup == BuildTargetGroup.WebGL)
             {
                 ValidateWebGLSettings();
             }
+        }
+
+        // The UniText/Uber shader is instantiated at runtime via Shader.Find (no material asset
+        // references it), so Unity's build-time shader stripping would drop it from the player and
+        // the unified renderer would silently fall back to UI/Default. Pin it into GraphicsSettings'
+        // Always-Included Shaders so it ships in every build. Idempotent.
+        private static void EnsureUberShaderIncluded()
+        {
+            var uber = Shader.Find("UniText/Uber");
+            if (uber == null)
+            {
+                Cat.MeowWarnFormat("[UniText] UniText/Uber not found at build time; unified renderer will be unavailable in the player.");
+                return;
+            }
+
+            var gs = AssetDatabase.LoadAssetAtPath<GraphicsSettings>("ProjectSettings/GraphicsSettings.asset");
+            var so = new SerializedObject(gs);
+            var arr = so.FindProperty("m_AlwaysIncludedShaders");
+            if (arr == null) return;
+
+            for (int i = 0; i < arr.arraySize; i++)
+                if (arr.GetArrayElementAtIndex(i).objectReferenceValue == uber)
+                {
+                    Cat.Meow("[UniText] UniText/Uber already in Always-Included Shaders.");
+                    return;
+                }
+
+            int idx = arr.arraySize;
+            arr.InsertArrayElementAtIndex(idx);
+            arr.GetArrayElementAtIndex(idx).objectReferenceValue = uber;
+            so.ApplyModifiedProperties();
+            Cat.Meow("[UniText] Added UniText/Uber to Always-Included Shaders for the build.");
         }
 
         private static void ValidateWebGLSettings()
