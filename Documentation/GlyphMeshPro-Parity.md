@@ -165,6 +165,11 @@ this explicitly rather than hiding it.
 | `PreserveWhitespace` | stub | TODO — maps to Normal; whitespace-preservation flag not yet wired. |
 | `PreserveWhitespaceNoWrap` | stub | TODO — maps to NoWrap. |
 
+**Observed behaviour (verified by test):** an over-long single token (no break
+opportunities) wider than the rect is **character-wrapped** across lines by the
+engine's emergency overflow break — matching TMP's character-wrapping fallback
+for an unbreakable word. It stays on one line only when it fits the width.
+
 ## Rich-text tag parity
 
 TMP tag set observed from documentation + behavior. OpenGlyph already parses span
