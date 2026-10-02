@@ -84,6 +84,16 @@ namespace LightSide
 
             EditorGUILayout.Space(10);
 
+            var dictionariesProp = serializedSettings.FindProperty("segmentationDictionaries");
+            if (dictionariesProp != null)
+            {
+                EditorGUILayout.PropertyField(dictionariesProp, new GUIContent("Word Segmentation Dictionaries",
+                    "Opt-in per-script dictionaries (Thai, Lao, Khmer, Myanmar) for word-boundary line breaks. " +
+                    "Scripts without a dictionary keep the default line breaking."), true);
+            }
+
+            EditorGUILayout.Space(10);
+
             var fontsProp = serializedSettings.FindProperty("defaultFontStack");
             var appearanceProp = serializedSettings.FindProperty("defaultAppearance");
 

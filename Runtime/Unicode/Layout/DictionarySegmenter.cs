@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using UnityEngine;
 
 namespace LightSide
@@ -68,6 +69,38 @@ namespace LightSide
         private volatile DictSnapshot _snapshot;
         private readonly object _snapshotLock = new object();
 
+        // Bit per script (1 << (int)SegmentationScript) whose "no dictionary" warning has already
+        // been logged. Reset whenever the settings change. Updated with Interlocked because
+        // InjectBreaks can run on layout worker threads.
+        private int _missingWarnedMask;
+
+        private void WarnMissingDictionaryOnce(UnicodeScript unicodeScript)
+        {
+            SegmentationScript script;
+            switch (unicodeScript)
+            {
+                case UnicodeScript.Thai: script = SegmentationScript.Thai; break;
+                case UnicodeScript.Lao: script = SegmentationScript.Lao; break;
+                case UnicodeScript.Khmer: script = SegmentationScript.Khmer; break;
+                case UnicodeScript.Myanmar: script = SegmentationScript.Myanmar; break;
+                default: return;
+            }
+
+            int bit = 1 << (int)script;
+            while (true)
+            {
+                int seen = Volatile.Read(ref _missingWarnedMask);
+                if ((seen & bit) != 0) return;
+                if (Interlocked.CompareExchange(ref _missingWarnedMask, seen | bit, seen) == seen) break;
+            }
+
+            Debug.LogWarning(
+                $"[DictionarySegmenter] No segmentation dictionary assigned for {script}. " +
+                $"Text in this script will not receive dictionary word-boundary line breaks. " +
+                $"Assign a dictionary in Project Settings \u2192 UniText \u2192 Word Segmentation Dictionaries " +
+                $"to enable it. See Documentation/GettingStarted.md (\u201cWord segmentation\u201d).");
+        }
+
         // Reusable candidate-length scratch for the 3-word lookahead (word lengths are
         // small; POSSIBLE_WORD_LIST_MAX in ICU is 20).
         private readonly int[] _cand0 = new int[64];
@@ -98,6 +131,9 @@ namespace LightSide
         {
             lock (_snapshotLock)
             {
+                // A settings change may assign or remove dictionaries: allow each still-missing
+                // script to warn once more, the next time text in it is actually laid out.
+                Interlocked.Exchange(ref _missingWarnedMask, 0);
                 _snapshot = new DictSnapshot(
                     Load(SegmentationScript.Thai),
                     Load(SegmentationScript.Lao),
@@ -161,7 +197,11 @@ namespace LightSide
                     j++;
                 int runEnd = j;
 
-                if (runEnd - runStart >= MinWord * 2 && ResolveTrie(snap, codepoints[runStart]) != null)
+                DictionaryTrie trie = runEnd - runStart >= MinWord * 2 ? ResolveTrie(snap, codepoints[runStart]) : null;
+                if (trie == null && runEnd - runStart >= MinWord * 2)
+                    WarnMissingDictionaryOnce(_provider.GetScript(codepoints[runStart]));
+
+                if (trie != null)
                 {
                     // Compute grapheme boundaries once, lazily, only if a real SA run with
                     // a dictionary is present (avoids the O(n) pass for pure non-SA text).
@@ -377,16 +417,12 @@ namespace LightSide
         /// </summary>
         private static DictionaryTrie Load(SegmentationScript script)
         {
+            // No warning here: this runs for all four scripts whenever the snapshot is built, so
+            // warning here would fire for scripts the project never displays. The warning is
+            // emitted lazily by WarnMissingDictionaryOnce, only when text in that script is laid out.
             var asset = UniTextSettings.GetSegmentationDictionary(script);
             if (asset == null)
-            {
-                Debug.LogWarning(
-                    $"[DictionarySegmenter] No segmentation dictionary assigned for {script}. " +
-                    $"Text in this script will not receive dictionary word-boundary line breaks. " +
-                    $"Assign a dictionary in Project Settings \u2192 UniText \u2192 Word Segmentation Dictionaries " +
-                    $"to enable it. See Documentation/GettingStarted.md (\u201cWord segmentation\u201d).");
                 return null;
-            }
 
             try
             {

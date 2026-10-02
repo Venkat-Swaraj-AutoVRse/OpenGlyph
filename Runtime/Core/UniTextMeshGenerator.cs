@@ -805,9 +805,17 @@ namespace LightSide
                     Glyph glyphData;
                     bool found;
                     // Phase 2: a glyph belonging to a variable-font instance resolves from the
-                    // per-(VariationKey) atlas store so wght 400 and 700 use their own cells.
-                    if (!glyph.variationKey.IsNone)
-                        found = font.TryGetGlyph(glyphId, glyph.variationKey, out glyphData);
+                    // per-(VariationKey) atlas store so wght 400 and 700 use their own cells. The
+                    // VariationKey lives on the run (looked up by orderedRunIndex), NOT on the glyph,
+                    // so the per-glyph struct stays blittable. orderedRunIndex < 0 is the plain run
+                    // fast path: one int compare, then the original glyph-table lookup.
+                    if (glyph.orderedRunIndex >= 0)
+                    {
+                        ref readonly var vrun = ref buf.orderedRuns.data[glyph.orderedRunIndex];
+                        found = !vrun.variationKey.IsNone
+                            ? font.TryGetGlyph(glyphId, vrun.variationKey, out glyphData)
+                            : glyphLookup.TryGetValue(glyphId, out glyphData);
+                    }
                     else
                         found = glyphLookup.TryGetValue(glyphId, out glyphData);
 
@@ -918,8 +926,19 @@ namespace LightSide
                 tris[triangleCount + 5] = localI0;
 
                 currentCluster = cluster;
-                currentRealBold = glyph.realBold;
-                currentRealItalic = glyph.realItalic;
+                // Phase 2: real-face flags live on the run (orderedRunIndex), not the glyph, so the
+                // per-glyph struct stays minimal. -1 = plain run => not real-styled (fast path).
+                if (glyph.orderedRunIndex >= 0)
+                {
+                    ref readonly var srun = ref buf.orderedRuns.data[glyph.orderedRunIndex];
+                    currentRealBold = srun.realBold;
+                    currentRealItalic = srun.realItalic;
+                }
+                else
+                {
+                    currentRealBold = false;
+                    currentRealItalic = false;
+                }
                 x = glyph.x;
                 y = glyph.y;
                 width = widthScaled;

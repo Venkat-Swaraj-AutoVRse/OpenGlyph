@@ -186,10 +186,16 @@ namespace LightSide.Tests
             int boldId = UniTextFontProvider.GetFontId(_bold);
             bool anyRealBold = false, anyRegularNotBold = false;
             var pg = proc.PositionedGlyphs;
+            // Phase 2 (perf): realBold lives on the run, not the per-glyph struct (keeps
+            // PositionedGlyph blittable + minimal on the hot path). Resolve it via orderedRunIndex;
+            // orderedRunIndex < 0 means a plain run, which is never a real styled face.
+            var oruns = buffers.orderedRuns.data;
             for (int i = 0; i < pg.Length; i++)
             {
-                if (pg[i].fontId == boldId) { if (pg[i].realBold) anyRealBold = true; }
-                else if (!pg[i].realBold) anyRegularNotBold = true;
+                int ri = pg[i].orderedRunIndex;
+                bool realBold = ri >= 0 && oruns[ri].realBold;
+                if (pg[i].fontId == boldId) { if (realBold) anyRealBold = true; }
+                else if (!realBold) anyRegularNotBold = true;
             }
             buffers.EnsureReturnBuffers();
             Assert.IsTrue(anyRealBold, "The bold-face glyph must carry realBold=true (suppresses faux bold).");
