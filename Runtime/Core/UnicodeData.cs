@@ -224,16 +224,30 @@ namespace LightSide
             if (IsInitialized)
                 return;
 
-            var settings = UniTextSettings.Instance;
-            if (settings == null || UniTextSettings.UnicodeDataAsset == null)
+            // Unicode initialization depends ONLY on the compiled Unicode-data TextAsset, which ships
+            // inside the package's own Resources folder (Resources/UnicodeData.bytes) and is therefore
+            // present in EVERY player build. It does NOT depend on UniTextSettings.Instance: a project
+            // that never created Resources/UniTextSettings.asset must still render text. Gating Unicode
+            // init on the settings instance (as earlier revisions did) caused a SILENT failure in such
+            // builds — the data provider stayed null, UniText.CanWork returned false every frame, and
+            // the engine rendered nothing while emitting only a log line. See UniTextSettings.Instance
+            // for the loud, single error + runtime default that covers an actually-missing settings asset.
+            var unicodeDataAsset = UniTextSettings.UnicodeDataAsset;
+            if (unicodeDataAsset == null)
             {
-                Debug.LogError("UnicodeData: Failed to initialize - UniTextSettings or UnicodeDataAsset is null.");
+                // UnicodeDataAsset already logs a specific error when the asset is missing; this is a
+                // true package-integrity failure (the package shipped without its own Resources data).
+                Debug.LogError(
+                    "UnicodeData: cannot initialize because the compiled Unicode data asset " +
+                    "(Resources/UnicodeData.bytes) is missing from the build. This asset ships inside " +
+                    "the OpenGlyph package; a missing copy means the package was imported incompletely. " +
+                    "Reinstall the OpenGlyph package. Text cannot render until this is resolved.");
                 return;
             }
 
             try
             {
-                provider = new UnicodeDataProvider(UniTextSettings.UnicodeDataAsset.bytes);
+                provider = new UnicodeDataProvider(unicodeDataAsset.bytes);
                 Cat.Meow("[UnicodeData] Initialized");
             }
             catch (Exception ex)
