@@ -103,5 +103,48 @@ namespace LightSide.Tests
                 Object.DestroyImmediate(font);
             }
         }
+
+        [Test]
+        public void LargeCjkFont_Compression_VsUniText20Bar()
+        {
+            // The UniText 2.0 bar: a ~12 MB font -> 4.4 MB in build (36.7%), sub-ms decompress.
+            // Measure our codec on the ~11 MB NotoSerifSC OTF if it is reachable (benchmark asset),
+            // so the doc compares against the bar on a comparable font. Skipped when not present.
+            string big = FindBigFont();
+            if (big == null) { Assert.Ignore("No large (>5 MB) font reachable for the 2.0-bar comparison."); return; }
+            byte[] raw = File.ReadAllBytes(big);
+
+            var sw = Stopwatch.StartNew();
+            var packed = FontCompression.Compress(raw);
+            sw.Stop();
+            var sw2 = Stopwatch.StartNew();
+            var back = FontCompression.Decompress(packed);
+            sw2.Stop();
+
+            Assert.AreEqual(raw, back, "large font round-trips byte-exact");
+            double ratio = packed.Length / (double)raw.Length;
+            double perMb = sw2.ElapsedMilliseconds / (raw.Length / (1024.0 * 1024.0));
+            Debug.Log($"[FontCompress] {Path.GetFileName(big)} raw={raw.Length / (1024.0 * 1024.0):F1} MB " +
+                      $"-> {packed.Length / (1024.0 * 1024.0):F1} MB ({ratio:P1} of raw); " +
+                      $"compress={sw.ElapsedMilliseconds} ms decompress={sw2.ElapsedMilliseconds} ms ({perMb:F1} ms/MB). " +
+                      $"2.0 bar: 36.7% + sub-ms. NOTE: whole-font byte decompress cannot be sub-ms for 12 MB; " +
+                      $"the sub-ms bar implies subsetting (ship a tiny font) — see FontSubsetter.");
+            Assert.Less(packed.Length, raw.Length, "large font still compresses below raw");
+        }
+
+        private static string FindBigFont()
+        {
+            foreach (var root in new[]
+            {
+                "D:/OpenGlyphWork/scratch/lse-bench/repo/Assets/UniText.Test/BenchmarkWorkshop/TMPFonts/Languages/Raw",
+            })
+            {
+                if (!Directory.Exists(root)) continue;
+                foreach (var ext in new[] { "*.otf", "*.ttf", "*.ttc" })
+                    foreach (var f in Directory.GetFiles(root, ext))
+                        if (new FileInfo(f).Length > 5 * 1024 * 1024) return f;
+            }
+            return null;
+        }
     }
 }

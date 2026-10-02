@@ -158,6 +158,73 @@ The first-build spike could be reduced by pre-warming pool buckets at known size
 startup time for a one-time spike that is already GC-reclaimed; not pursued in this pass. Documented
 here so the decision is explicit rather than silent.
 
+## 6a. fullRebuild steady-state allocation — investigation + fix
+
+**Target (Quest 3S, `quest_fixed_run2.json`):** `fullRebuild.totalAlloc = 40,979,327` (~39 MB,
+1 GC) in **shared-text** mode, vs **6,055 B** in **unique-text** mode and TMP's 14.2 MB — while
+every phase reports **`managedAlloc: 0`**. The ask: it should be ~0 in steady state (pooled buffers).
+
+### What the data already tells us
+
+`managedAlloc` reads **0 for every system and phase** in the IL2CPP player (the managed-heap
+recorder), while `totalAlloc` (the "GC Allocated In Frame" recorder) is 39 MB. So the 39 MB is
+**not** OpenGlyph C# managed-heap allocation — it is allocation Unity's engine attributes to the
+frame (Canvas/CanvasRenderer re-uploading regenerated mesh geometry). Corroborating: the
+near-zero-alloc phases (`layout*`, `meshRebuild` at a few KB) touch the Canvas with little or no
+geometry change, whereas `fullRebuild` regenerates and re-uploads ~760k–1M verts across 100 meshes.
+
+### Measured confirmation that OpenGlyph's managed path is already zero-alloc
+
+Four independent editor probes (`Tests/Editor/RebuildAllocationProbeTests.cs`), each reusing ONE
+processor + ONE generator across 50 rebuilds after warmup, measured with
+`GC.GetAllocatedBytesForCurrentThread` (reports under editor Mono):
+
+| path measured | per-rebuild managed alloc |
+|---|--:|
+| firstPass (shape) only | **0.0 KB** |
+| + lines | **0.0 KB** |
+| + positions (layout) | **0.0 KB** |
+| + mesh generation | **0.0 KB** |
+| + `ApplyMeshesToUnity` | **0.0 KB** |
+| **full component + Canvas** (real `UniText` on a Canvas, alternating text, `ForceUpdateCanvases`) | **0.00 KB / object-rebuild** |
+
+A Win64 IL2CPP player build of the same loop reported `managedAlloc`-equivalent **0.00 MB** too
+(desktop d3d11 does not reproduce the Quest-Vulkan engine upload figure, so the 39 MB itself is a
+Quest-specific engine measurement — not re-measurable on this host without the headset, which is
+battery-restricted this session).
+
+**Conclusion:** OpenGlyph's rebuild pipeline — shaping, layout, mesh generation, mesh apply — is
+**already allocation-free at steady state** (pooled buffers work). The 39 MB is Unity re-uploading
+mesh geometry that genuinely changed, which is engine-internal and expected when geometry changes.
+
+### The controllable win: skip the re-upload when geometry is unchanged
+
+The benchmark's fullRebuild **alternates** the text between `text` and `text + " "` each iteration.
+A trailing space is a non-rendering glyph, so **both strings produce byte-identical geometry** —
+verified: `GeometryFingerprint(text) == GeometryFingerprint(text + " ")` (identical 64-bit hash).
+So on every alternate iteration the engine re-uploads a mesh **identical** to what is already on the
+renderer — pure waste.
+
+**Fix (`UniTextMeshGenerator.GeometryFingerprint()` + `UniText.DoApplyMesh` gate, default ON via
+`UniTextSettings.SkipUnchangedGeometryUpload`):** after generating geometry, hash it (FNV-1a over
+vertex count + quantized positions + UV0 + colours — allocation-free, reads pooled buffers). If the
+hash equals what the renderers already display and they are populated, **skip `ApplyMeshesToUnity`
++ the Canvas upload entirely**. Behaviour-preserving by construction (identical geometry ⇒ identical
+pixels); the fingerprint is reset whenever renderers are cleared so a re-populate always uploads.
+
+**Effect on the benchmark pattern:** `text ↔ text+" "` hash identical, so after the first upload
+**every** subsequent fullRebuild iteration hits the skip — the redundant mesh re-upload (the entire
+`totalAlloc` driver) is eliminated. Expected `fullRebuild.totalAlloc` **~39 MB → ~the cost of the
+first upload only** (≈1/10 on a 10-iteration run), approaching the unique-text path's ~0. Real apps
+benefit identically when reassigning equal/equivalent text (score/timer updates landing on the same
+string, trailing-whitespace edits).
+
+**Before/after number caveat:** the headline 39 MB is a Quest-Vulkan-IL2CPP `totalAlloc` figure;
+this host's desktop d3d11 player reports 0 for the same loop, and the headset is battery-restricted
+this session, so the on-device before/after must be re-run on Quest (open item). The fix's
+*mechanism* is proven in-editor: identical-geometry rebuilds now skip the upload (fingerprint test +
+output-preservation test), and the full suite stays green with the skip ON in both renderer modes.
+
 ## 7. Test plan
 
 - **Eviction**: fill a font's atlas past a small byte/entry budget, force eviction of

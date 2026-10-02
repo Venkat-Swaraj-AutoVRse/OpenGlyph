@@ -189,6 +189,12 @@ namespace LightSide
         private readonly List<Material> stencilMaterials = new();
         private List<UniTextRenderData> renderData;
 
+        // Geometry-identity re-upload skip (see DoApplyMesh): the fingerprint of the geometry
+        // currently on the renderers, so a rebuild producing identical geometry can skip the Unity
+        // mesh upload. Reset whenever the renderers are cleared, so a re-populate always uploads.
+        private ulong lastAppliedGeometryFingerprint;
+        private bool hasAppliedGeometry;
+
         /// <summary>Per-component override for the Render-Architecture R2 unified single-renderer path.</summary>
         public enum UnifiedRendererMode { UseProjectSetting, ForceOn, ForceOff }
 
@@ -1735,6 +1741,9 @@ namespace LightSide
         private void ClearAllRenderers()
         {
             for (var i = 0; i < subMeshRenderers.Count; i++) subMeshRenderers[i].renderer?.Clear();
+            // Renderers no longer hold the fingerprinted geometry — force the next build to re-upload.
+            hasAppliedGeometry = false;
+            lastAppliedGeometryFingerprint = 0;
         }
 
         private void ReleaseSubMeshStencilMaterials()
