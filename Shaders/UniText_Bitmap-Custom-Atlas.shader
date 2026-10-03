@@ -63,6 +63,7 @@ SubShader{
 			fixed4 color		: COLOR;
 			float4 texcoord0	: TEXCOORD0;
 			float2 texcoord1	: TEXCOORD1;
+			UNITY_VERTEX_INPUT_INSTANCE_ID
 		};
 
 		struct v2f
@@ -72,6 +73,7 @@ SubShader{
 			float2	texcoord0	: TEXCOORD0;
 			float2	texcoord1	: TEXCOORD1;
 			float4	mask		: TEXCOORD2;
+			UNITY_VERTEX_OUTPUT_STEREO
 		};
 
 		uniform	sampler2D 	_MainTex;
@@ -90,6 +92,7 @@ SubShader{
 
 		v2f vert (appdata_t v)
 		{
+			UNITY_SETUP_INSTANCE_ID(v);
 			float4 vert = v.vertex;
 			vert.x += _VertexOffsetX;
 			vert.y += _VertexOffsetY;
@@ -106,6 +109,8 @@ SubShader{
 			faceColor *= _FaceColor;
 
 			v2f OUT;
+			UNITY_INITIALIZE_OUTPUT(v2f, OUT);
+			UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT); // single-pass instanced / multiview (Quest)
 			OUT.vertex = vPosition;
 			OUT.color = faceColor;
 			OUT.texcoord0 = v.texcoord0;

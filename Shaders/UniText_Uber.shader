@@ -74,6 +74,7 @@ Shader "UniText/Uber"
                 fixed4 color    : COLOR;
                 float4 uv0      : TEXCOORD0; // xy = atlas UV, z = gradientScale, w = xScale(signed=bold)
                 float4 uv1      : TEXCOORD1; // x = spreadRatio, y = sliceIdx, z = glyphMode, w = styleIdx
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct v2f
@@ -84,11 +85,15 @@ Shader "UniText/Uber"
                 float4 uv1      : TEXCOORD1;
                 float4 worldPos : TEXCOORD2;
                 float4 cov      : TEXCOORD3; // x=baseWeight, y=normFactor, z=baseScale (projection-derived, legacy)
+                UNITY_VERTEX_OUTPUT_STEREO // single-pass instanced / multiview (Quest), as the legacy shaders
             };
 
             v2f vert(appdata v)
             {
                 v2f o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_OUTPUT(v2f, o);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
                 o.worldPos = v.vertex;
                 float4 vPosition = UnityObjectToClipPos(v.vertex);
                 o.vertex = vPosition;
