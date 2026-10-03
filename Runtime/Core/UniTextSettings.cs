@@ -83,6 +83,57 @@ namespace LightSide
         public static int SharedAtlasPageBudget => Instance != null ? Instance.sharedAtlasPageBudget : 0;
 
         [SerializeField]
+        [Tooltip("Max RESIDENT bytes PER shared glyph-atlas array before LRU eviction begins " +
+                 "(pages x size^2 x bytesPerPixel). 0 (default) = unbounded. This is the " +
+                 "mobile-relevant knob: a 1024x1024 Alpha8 page is 1 MB and an RGBA32 page is 4 MB, " +
+                 "so e.g. 8388608 (8 MB) caps an Alpha8 array at 8 pages. Least-recently-used, " +
+                 "unreferenced glyphs are evicted and re-rasterized on demand. Enforced together " +
+                 "with the page budget (whichever is hit first).")]
+        [Min(0)]
+        private long sharedAtlasByteBudgetPerArray = 0;
+
+        /// <summary>
+        /// Max resident bytes per shared glyph-atlas array before eviction. 0 = unbounded. The byte
+        /// equivalent of <see cref="SharedAtlasPageBudget"/>; see <see cref="GlyphAtlasArray.ByteBudget"/>.
+        /// </summary>
+        public static long SharedAtlasByteBudgetPerArray => Instance != null ? Instance.sharedAtlasByteBudgetPerArray : 0;
+
+        [SerializeField]
+        [Tooltip("Max RESIDENT bytes across ALL shared glyph-atlas arrays combined before global " +
+                 "LRU eviction. 0 (default) = unbounded. A process-wide ceiling on glyph memory, " +
+                 "evaluated after each frame's atlas growth; when exceeded, the globally " +
+                 "least-recently-used unreferenced glyphs are evicted across every array until the " +
+                 "total is back under budget. Use this to bound total glyph memory on devices with a " +
+                 "hard budget (Quest 3S), independent of how many fonts/variations are in play.")]
+        [Min(0)]
+        private long sharedAtlasByteBudgetGlobal = 0;
+
+        /// <summary>
+        /// Max resident bytes across all shared glyph-atlas arrays before global eviction. 0 =
+        /// unbounded. See <see cref="SharedGlyphAtlas.EnforceGlobalByteBudget"/>.
+        /// </summary>
+        public static long SharedAtlasByteBudgetGlobal => Instance != null ? Instance.sharedAtlasByteBudgetGlobal : 0;
+
+        [SerializeField]
+        [Tooltip("OPT-IN (default OFF). When ON, a UniText component skips the Unity mesh re-upload on " +
+                 "a rebuild whose generated geometry is byte-identical to what its renderers already " +
+                 "display (same vertices/UVs/colours). Behaviour-preserving: identical geometry draws " +
+                 "identically. NOT free: the exact-geometry fingerprint costs ~25.5 ms per 100 objects " +
+                 "x 2,405 chars, about +17% on every Windows full rebuild (148 ms) and more on Quest. " +
+                 "It only pays off when text changes often WITHOUT changing rendered output (e.g. " +
+                 "trailing-whitespace alternation, reassigning equivalent text); for general text it is " +
+                 "a net cost. Leave OFF unless your workload is dominated by no-op geometry rebuilds.")]
+        private bool skipUnchangedGeometryUpload = false;
+
+        /// <summary>
+        /// Opt-in (default false). When true, a component skips the Unity mesh re-upload when a rebuild
+        /// produces geometry identical to what is already displayed. See UniText.DoApplyMesh.
+        /// Behaviour-preserving, but the exact fingerprint adds ~17% to a Windows full rebuild, so it
+        /// only pays off on workloads dominated by no-op geometry rebuilds.
+        /// </summary>
+        public static bool SkipUnchangedGeometryUpload => Instance != null && Instance.skipUnchangedGeometryUpload;
+
+        [SerializeField]
         [Tooltip("Render Architecture R2: when ON, each UniText component draws through a SINGLE " +
                  "CanvasRenderer per draw group (at most two: SDF/coverage + MSDF/color) using the " +
                  "UniText/Uber shader, a shared Texture2DArray atlas and a float-texture style table, " +
@@ -102,6 +153,13 @@ namespace LightSide
         internal static void SetUseUnifiedRendererForTests(bool value)
         {
             if (Instance != null) { Instance.useUnifiedRenderer = value; Changed?.Invoke(); }
+        }
+
+        /// <summary>TEST ONLY: forces the geometry-skip default on the current instance (it is OFF by
+        /// default, so a test that needs the skip to fire must enable it explicitly).</summary>
+        internal static void SetSkipUnchangedGeometryUploadForTests(bool value)
+        {
+            if (Instance != null) { Instance.skipUnchangedGeometryUpload = value; Changed?.Invoke(); }
         }
 
         public static event Action Changed;
@@ -153,10 +211,27 @@ namespace LightSide
 
         private static UniTextSettings instance;
 
+        /// <summary>True once the loud "missing settings asset" error has been emitted, so it fires exactly once.</summary>
+        private static bool loggedMissingInstance;
+
+        /// <summary>
+        /// True when <see cref="Instance"/> is serving a runtime-created default because no
+        /// <c>Resources/UniTextSettings.asset</c> was found. Exposed for diagnostics and tests.
+        /// </summary>
+        internal static bool IsUsingRuntimeDefault { get; private set; }
+
         /// <summary>Returns true if the instance is already loaded (without triggering load).</summary>
         internal static bool IsNull => instance == null;
 
         /// <summary>Gets the singleton settings instance, loading from Resources if needed.</summary>
+        /// <remarks>
+        /// Resolution order: (1) a project-authored <c>Resources/UniTextSettings.asset</c> — if present it
+        /// always wins; (2) otherwise a runtime-created default instance with safe built-in values, so that
+        /// every static accessor (Gradients, SharedAtlasPageBudget, UseUnifiedRenderer, …) keeps working
+        /// instead of throwing a NullReferenceException. A project that never created the asset therefore
+        /// still renders text with default configuration. A single, clear <see cref="Debug.LogError"/> names
+        /// the missing asset and how to create it — emitted once, never silently.
+        /// </remarks>
         public static UniTextSettings Instance
         {
             get
@@ -166,9 +241,27 @@ namespace LightSide
                     instance = Resources.Load<UniTextSettings>(ResourcePath);
 
                     if (instance == null)
-                        Debug.LogError(
-                            $"UniTextSettings not found at Resources/{ResourcePath}.asset. " +
-                            "Create it via Assets > Create > UniText > Settings and place in Resources folder.");
+                    {
+                        // No project-authored asset. Fall back to a runtime default so the engine stays
+                        // functional (default gradients/renderer/atlas config) rather than NRE-ing or,
+                        // worse, rendering nothing. Emit ONE loud error naming the asset and the remedy.
+                        if (!loggedMissingInstance)
+                        {
+                            loggedMissingInstance = true;
+                            Debug.LogError(
+                                $"[OpenGlyph] No UniTextSettings asset found at Resources/{ResourcePath}.asset. " +
+                                "Falling back to built-in default settings so text still renders. For project-" +
+                                "specific configuration (named gradients, atlas page budget, unified renderer " +
+                                "default), create one via Assets > Create > UniText > Settings and place it in a " +
+                                "Resources folder; the editor build check (UniTextBuildProcessor) also offers to " +
+                                "create it before a build ships.");
+                        }
+
+                        instance = CreateInstance<UniTextSettings>();
+                        instance.name = "UniTextSettings (runtime default)";
+                        instance.hideFlags = HideFlags.HideAndDontSave;
+                        IsUsingRuntimeDefault = true;
+                    }
                 }
 
                 return instance;
@@ -180,6 +273,7 @@ namespace LightSide
         public static void SetInstance(UniTextSettings settings)
         {
             instance = settings;
+            IsUsingRuntimeDefault = false;
             Changed?.Invoke();
         }
 
