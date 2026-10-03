@@ -16,14 +16,14 @@ Every row is kept in sync with ACTUAL behaviour; a non-"applied" status is a rea
 | fontStyle Highlight (`<mark>`) | **done (R3)** | `MarkTag_DrawsLineHighBoxBehindRun` (legacy + unified) |
 | fontStyle SmallCaps | **done (R3)** | `SmallCaps_UsesSmcpOrSyntheticCapitalsAtPointEight` |
 | Tags `<nobr> <font> <align> <indent> <line-indent> <mark> <noparse>` | **done (R3)** | see tag table; `<sprite>` out of scope |
-| 3D GlyphMeshPro (world-space MeshRenderer) | **not started** (Round-1 stub) | headless host + mesh emission |
+| 3D GlyphMeshPro (world-space MeshRenderer) | **done (wave 3)** | `Wave3WorldTextTests::GlyphMeshPro_World_MatchesGlyphMeshProUGUI`; see the GlyphMeshPro section below and `WorldText.md` |
 | Overflow Page / Linked / ScrollRect | **done (R3)** | see overflow table |
 
 Each "done" row: deterministic headless test + full suite BOTH modes (renderer-off 256 pass/0 fail; unified-on 272 pass/0 fail; 280 total) + GPU side-by-side PNG verified against real TextMeshPro.
 
 tag surface of Unity's TextMeshPro (`TMP_Text` / `TextMeshProUGUI`) onto the
 OpenGlyph components `GlyphMeshProUGUI` (Canvas, implemented in Round 1) and
-`GlyphMeshPro` (world-space `MeshRenderer`, design + stub in Round 1).
+`GlyphMeshPro` (world-space `MeshRenderer`, implemented in wave 3).
 
 ## Legal / clean-room note
 
@@ -70,7 +70,7 @@ Where TMP exposes a concept the engine lacks (overflow modes, justification,
 | TextMeshPro type              | OpenGlyph / GlyphMeshPro type         | Notes |
 |-------------------------------|---------------------------------------|-------|
 | `TextMeshProUGUI`             | `OpenGlyph.GlyphMeshProUGUI`          | Canvas component. |
-| `TextMeshPro`                 | `OpenGlyph.GlyphMeshPro`              | World-space; design + stub (Round 1). |
+| `TextMeshPro`                 | `OpenGlyph.GlyphMeshPro`              | World-space MeshRenderer (wave 3): the GlyphMeshProUGUI adapter drawn without a Canvas; adds `sortingLayerID`, `sortingOrder`, `renderer`, `mesh`. |
 | `TMP_FontAsset`               | `LightSide.UniTextFont`               | Font asset. |
 | `TMP_Text`                    | `GlyphMeshProUGUI` base surface       | Abstract base in TMP; folded into the component here. |
 | `FontStyles` (flags)          | `OpenGlyph.FontStyles` (flags)        | Mirror of TMP flag names. Every flag applies (SmallCaps and Highlight since R3). |
@@ -250,25 +250,24 @@ as supported.
 `outline`, `underlay`, `dilate`, `softness` (SDF style controls), `ellipsis`, `obj`.
 These are additive and do not affect TMP migration.
 
-## `GlyphMeshPro` (world-space `MeshRenderer`) — design (Round 1 = design + stub)
+## `GlyphMeshPro` (world-space `MeshRenderer`) — wave 3
 
-Target: Quest / world-space text without a Canvas. Design:
+`GlyphMeshPro : GlyphMeshProUGUI`: every TMP-named property, method, tag and layout rule of the Canvas
+adapter, with the output drawn by the `MeshFilter` / `MeshRenderer` on the GameObject (no Canvas), the
+same way `UniTextWorld` does it for `UniText` (the world output lives in `UniText_World.cs`). See
+`Documentation/WorldText.md`.
 
-- `GlyphMeshPro : MonoBehaviour` requiring `MeshRenderer` + `MeshFilter`
-  (not a `Graphic`), reusing the **same** `TextProcessor`/shaping/layout engine
-  via a thin headless engine host (no `CanvasRenderer`).
-- Shares the TMP-named adapter surface with `GlyphMeshProUGUI` through a common
-  `IGlyphMeshText` interface so property code is written once.
-- Mesh pushed to `MeshFilter.sharedMesh`; material = OpenGlyph SDF material
-  (unified renderer shader), enabling world-space SDF with the same quality.
-- Round 1 ships the component **stub** (serialized fields + `IGlyphMeshText`
-  surface, `// TODO R2` bodies) + this design. Full headless engine host and
-  mesh emission are Round 2.
-
+| TMP `TextMeshPro` | GlyphMeshPro | Notes |
+|---|---|---|
+| `text`, `fontSize`, `alignment`, spacing, wrapping, overflow, `margin`, `maxVisible*`, `GetPreferredValues`, `textInfo`, … | same as `GlyphMeshProUGUI` | `Wave3WorldTextTests::GlyphMeshPro_World_MatchesGlyphMeshProUGUI`: glyph positions equal to GlyphMeshProUGUI for the same text and settings. |
+| `sortingLayerID`, `sortingOrder` | applied | Forwarded to the MeshRenderer (`World_SortingAndRendererDefaults`). |
+| `renderer`, `mesh` | applied | The MeshRenderer and the component-owned mesh. |
+| `fontSharedMaterial` / material presets | different | One shared `UniText/World/Uber` material per render option set (`Options`: lit, depth write, double-sided, collider). |
+| Glyph scale | different | TMP scales world glyphs by 0.1 (font size 36 in a 20 x 5 rect). GlyphMeshPro uses local units like the UGUI component; the TMP look is localScale 0.1 with a 200 x 50 rect (what the **GameObject > 3D Object > OpenGlyph > GlyphMeshPro - Text** menu creates). |
+| `isOrthographic`, `isVolumetricText`, `renderMode` | not applicable | |
 ## Open gaps (tracked)
 
 - Wrapping **PreserveWhitespace / PreserveWhitespaceNoWrap**.
-- `GlyphMeshPro` headless engine host + world-space mesh emission (separate task).
 - `<sprite>` (separate task), `<pos>` / `<rotate>` / `<page>` tags.
 - `GetTextInfo(string)` full fidelity (sprite/link/word info arrays).
 - Rich-text tags with no engine rule: `<mspace>`, `<space>`, `<width>`, `<margin>` (inline), `<alpha>`.

@@ -47,6 +47,7 @@ and rendered as SDF/MSDF through Unity's Canvas — including in VR.
 | 🌊 | **Text animations** | `<wave> <bounce> <pulse> <shake> <fade> <rainbow>` span tags on a shared clock; a per-frame vertex pass with 0 GC per frame ([below](#reveal-and-text-animations)). |
 | ✨ | **Glow, inner shadow, second outline** | SDF glow (colour, size, softness, intensity), inner shadow and a second stroke band, per span and for the whole text ([below](#glow-inner-shadow-second-outline)). |
 | 🎨 | **Radial and angular gradients** | `<gradient=name,radial>`, `<gradient=name,angular,deg>` and a whole-text `GradientFill`; both renderers ([below](#radial-and-angular-gradients)). |
+| 🌐 | **World-space text without a Canvas** | `UniTextWorld` and `GlyphMeshPro` (the TMP `TextMeshPro` API) draw through a MeshRenderer: same engine and output as Canvas text, one shared material for all labels, unlit or lit shader for URP and Built-in, links clickable through a `PhysicsRaycaster` ([below](#world-space-text)). |
 
 ## Drop-in TextMesh Pro API — GlyphMeshProUGUI
 
@@ -202,6 +203,33 @@ Vertex colours, so both renderers; `<color>` and `<gradient>` spans override the
 [Gradients.md](Documentation/Gradients.md)
 
 ![Linear, radial and angular gradients as span tags and as whole-text fills](.github/assets/features/gradients.png)
+
+## World-space text
+
+```csharp
+var go = new GameObject("Label", typeof(RectTransform));
+go.transform.localScale = Vector3.one * 0.005f;           // 200 local units = 1 m
+var label = go.AddComponent<UniTextWorld>();              // MeshFilter + MeshRenderer, no Canvas
+label.rectTransform.sizeDelta = new Vector2(400, 80);
+label.FontSize = 36;
+label.Text = "Valve <b>A</b>: <link=valveA>details</link>";
+label.Lighting = WorldTextLighting.Lit;                    // Unlit (default) | Lit
+label.RangeClicked += hit => Debug.Log(hit.range.data);    // with a PhysicsRaycaster on the camera
+```
+
+`UniTextWorld` (and `OpenGlyph.GlyphMeshPro`, the TMP `TextMeshPro` counterpart) runs the same engine as
+UniText and draws the result with a MeshRenderer: glyphs, positions and a camera render at an angle are
+identical to the same text on a World Space Canvas. Every label with the same options shares one
+`UniText/World/Uber` material (no per-label material or property block), so many labels cost one draw
+each, batched by the SRP Batcher (URP) or dynamic batching (Built-in), with no Canvas per label. Options:
+lit or unlit, depth write, double-sided, sorting layer / order. Links and `TextClicked` work through the
+EventSystem with a `PhysicsRaycaster` or XRI's `TrackedDevicePhysicsRaycaster` (a BoxCollider sized to the
+rect is kept while the text is interactive), or from a ray with `HitTestRay`.
+[WorldText.md](Documentation/WorldText.md)
+
+![World labels in a 3D scene: plain, rich text, Hebrew and Arabic, colour emoji and a lit CJK label on a panel](.github/assets/features/world-text.png)
+
+![The same labels as UniTextWorld and as UniText on a World Space Canvas, seen at an angle](.github/assets/features/world-text-vs-canvas.png)
 
 ## Showcase
 
@@ -369,6 +397,7 @@ binaries but were not tested on device for this release.
 - [System font fallback (any script)](Documentation/SystemFontFallback.md)
 - [OpenType features](Documentation/OpenTypeFeatures.md) · [Language-aware shaping](Documentation/LanguageShaping.md) · [Content measurement](Documentation/ContentMeasurement.md) · [Padding](Documentation/Padding.md) · [Auto Size fit steps](Documentation/AutoSizeSteps.md) · [Unity Localization](Documentation/Localization.md)
 - [Text reveal](Documentation/TextReveal.md) · [Text animations](Documentation/TextAnimations.md) · [Glow, inner shadow, second outline](Documentation/GlowAndShadows.md) · [Radial and angular gradients](Documentation/Gradients.md)
+- [World-space text: UniTextWorld, GlyphMeshPro](Documentation/WorldText.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
 - [Changelog](CHANGELOG.md)
 
