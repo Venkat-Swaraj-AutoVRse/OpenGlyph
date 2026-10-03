@@ -109,6 +109,10 @@ namespace LightSide
         [SerializeField]
         [Tooltip("Enable word wrapping at container boundaries.")]
         private bool wordWrap = true;
+
+        [SerializeField]
+        [Tooltip("Vertical overflow handling: Overflow spills out of the rect, Truncate drops lines that do not fit, Ellipsis truncates and ends the last line with an ellipsis, Clip hides pixels outside the rect.")]
+        private TextOverflow overflow = TextOverflow.Overflow;
         
         [SerializeField]
         [Tooltip("Horizontal text alignment within the container.")]
@@ -606,6 +610,32 @@ namespace LightSide
             }
         }
 
+        /// <summary>
+        /// Gets or sets how text that does not fit the RectTransform vertically is handled. Default
+        /// <see cref="TextOverflow.Overflow"/> keeps the text spilling out of the rect.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="TextOverflow.Truncate"/> / <see cref="TextOverflow.Ellipsis"/> drop the lines that do not
+        /// fit (after auto-size has shrunk the text, when enabled); <see cref="TextOverflow.Clip"/> keeps the
+        /// layout and clips the drawn pixels to the rect.
+        /// <para>Notes: <see cref="preferredHeight"/> still reports the FULL text height, so a ContentSizeFitter /
+        /// LayoutGroup grows the rect to fit and truncation then never triggers. For <see cref="HorizontalAlignment.Justified"/>
+        /// the kept last line of a truncated/ellipsized text is treated as the paragraph's last line (not justified).</para>
+        /// </remarks>
+        public TextOverflow Overflow
+        {
+            get => overflow;
+            set
+            {
+                if (overflow == value) return;
+                overflow = value;
+                SetDirty(DirtyFlags.Layout);
+                // Clip is a renderer state, not geometry: refresh it now (the rebuild may skip an
+                // identical mesh upload) so toggling it never waits for a geometry change.
+                RefreshOverflowClip();
+            }
+        }
+
         /// <summary>Gets or sets the horizontal text alignment.</summary>
         public HorizontalAlignment HorizontalAlignment
         {
@@ -1027,6 +1057,18 @@ namespace LightSide
             crossFadeStartFrame = Time.frameCount;
         }
 
+#if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+            // Undo, prefab revert and the Inspector write the serialized overflow field directly,
+            // bypassing the setter: re-lay out and re-apply the clip.
+            if (!isActiveAndEnabled) return;
+            SetDirty(DirtyFlags.Layout);
+            RefreshOverflowClip();
+        }
+#endif
+
         private void Update()
         {
             if (syncingCanvasColor)
@@ -1047,6 +1089,7 @@ namespace LightSide
                 }
             }
 
+            if (overflow == TextOverflow.Clip || hasAppliedClip) RefreshOverflowClip();
             highlighter?.Update();
             var c = canvas;
             
@@ -1318,6 +1361,7 @@ namespace LightSide
             fontSize = effectiveFontSize,
             baseDirection = baseDirection,
             enableWordWrap = wordWrap,
+            Overflow = overflow,
             TmpJustification = UseTmpJustification
         };
 
@@ -1472,18 +1516,113 @@ namespace LightSide
             base.SetClipRect(clipRect, validRect);
             cachedClipRect = clipRect;
             cachedValidClip = validRect;
+            ApplyClipToRenderers(true);
+        }
+
+        // Scratch for GetWorldCorners (main thread only; no per-call allocation).
+        private static readonly Vector3[] overflowCorners = new Vector3[4];
+
+        /// <summary>
+        /// The rect clipping the sub-mesh renderers should use, in root-canvas space (the space
+        /// <c>CanvasRenderer.EnableRectClipping</c> and RectMask2D use): this component's own rect when
+        /// <see cref="TextOverflow.Clip"/> is on, intersected with the parent RectMask2D clip when there is one.
+        /// </summary>
+        private bool TryGetEffectiveClip(out Rect clip)
+        {
+            clip = cachedClipRect;
+            var valid = cachedValidClip;
+
+            if (overflow == TextOverflow.Clip && TryGetOwnClipRect(out var own))
+            {
+                if (!valid) { clip = own; return true; }
+
+                var xMin = Mathf.Max(own.xMin, clip.xMin);
+                var yMin = Mathf.Max(own.yMin, clip.yMin);
+                var xMax = Mathf.Min(own.xMax, clip.xMax);
+                var yMax = Mathf.Min(own.yMax, clip.yMax);
+                // Disjoint rects clip everything: an empty rect.
+                clip = new Rect(xMin, yMin, Mathf.Max(0f, xMax - xMin), Mathf.Max(0f, yMax - yMin));
+                return true;
+            }
+
+            return valid;
+        }
+
+        private bool TryGetOwnClipRect(out Rect rect)
+        {
+            rect = default;
+            var c = canvas;
+            if (c == null) return false;
+            var root = c.rootCanvas != null ? c.rootCanvas.transform : c.transform;
+
+            rectTransform.GetWorldCorners(overflowCorners);
+            var min = (Vector2)root.InverseTransformPoint(overflowCorners[0]);
+            var max = min;
+            for (var i = 1; i < 4; i++)
+            {
+                var p = (Vector2)root.InverseTransformPoint(overflowCorners[i]);
+                min = Vector2.Min(min, p);
+                max = Vector2.Max(max, p);
+            }
+            rect = Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+            return true;
+        }
+
+        private void ApplyClipToRenderers(bool resetCullWhenInvalid)
+        {
+            var valid = TryGetEffectiveClip(out var clip);
+            if (valid) { lastAppliedClip = clip; hasAppliedClip = true; }
+            else hasAppliedClip = false;
 
             for (var i = 0; i < subMeshRenderers.Count; i++)
             {
                 var r = subMeshRenderers[i].renderer;
                 if (r == null) continue;
-                if (validRect) r.EnableRectClipping(clipRect);
+                if (valid) r.EnableRectClipping(clip);
                 else
                 {
                     r.DisableRectClipping();
-                    r.cull = false;
+                    if (resetCullWhenInvalid) r.cull = false;
                 }
             }
+        }
+
+        /// <summary>
+        /// Re-evaluates the overflow clip (own rect for <see cref="TextOverflow.Clip"/>, plus parent mask) and
+        /// pushes it to the renderers when it changed. Cheap enough to call every frame in Clip mode so a moved
+        /// or resized rect keeps clipping correctly.
+        /// </summary>
+        private void RefreshOverflowClip()
+        {
+            if (subMeshRenderers.Count == 0) return;
+            var valid = TryGetEffectiveClip(out var clip);
+            if (valid == hasAppliedClip && (!valid || ClipApproximatelyEqual(clip, lastAppliedClip))) return;
+            ApplyClipToRenderers(false);
+        }
+
+        private static bool ClipApproximatelyEqual(Rect a, Rect b) =>
+            Mathf.Abs(a.xMin - b.xMin) < 0.01f && Mathf.Abs(a.yMin - b.yMin) < 0.01f &&
+            Mathf.Abs(a.xMax - b.xMax) < 0.01f && Mathf.Abs(a.yMax - b.yMax) < 0.01f;
+
+        private Rect lastAppliedClip;
+        private bool hasAppliedClip;
+
+        /// <summary>EDITOR/TEST: the effective overflow clip rect (root-canvas space), if clipping is active.</summary>
+        internal bool TryGetEffectiveClipForTests(out Rect clip) => TryGetEffectiveClip(out clip);
+
+        /// <summary>EDITOR/TEST: whether every active sub-mesh renderer currently has rect clipping enabled.</summary>
+        internal bool AllSubMeshRenderersRectClippedForTests(out int activeCount)
+        {
+            activeCount = 0;
+            var all = true;
+            for (var i = 0; i < subMeshRenderers.Count; i++)
+            {
+                var r = subMeshRenderers[i].renderer;
+                if (r == null || !r.gameObject.activeSelf) continue;
+                activeCount++;
+                if (!r.hasRectClipping) all = false;
+            }
+            return all && activeCount > 0;
         }
 
         /// <summary>Sets soft clipping edges for smooth mask transitions on all sub-mesh renderers.</summary>
@@ -1722,6 +1861,8 @@ namespace LightSide
                 else subMeshRenderers.Add(newR);
             }
 
+            RefreshOverflowClip();
+
             UniTextDebug.EndSample();
         }
 
@@ -1780,7 +1921,7 @@ namespace LightSide
             var r = go.AddComponent<CanvasRenderer>();
             SetSubMeshRendererData(r, mesh, mats, tex, index, stencilDepth);
 
-            if (cachedValidClip) r.EnableRectClipping(cachedClipRect);
+            if (TryGetEffectiveClip(out var effectiveClip)) r.EnableRectClipping(effectiveClip);
             r.clippingSoftness = cachedClipSoftness;
             r.cull = subMeshRenderers.Count > 0 && subMeshRenderers[0].renderer != null && subMeshRenderers[0].renderer.cull;
 
