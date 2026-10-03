@@ -27,7 +27,7 @@ and rendered as SDF/MSDF through Unity's Canvas — including in VR.
 
 | | Feature | Details |
 |---|---|---|
-| 🌐 | **Every script via HarfBuzz** | Arabic, Hebrew, Devanagari and other complex scripts are shaped by HarfBuzz. Thai, Lao, Khmer and Myanmar get dictionary word breaking (ICU-matched). CJK falls back to the operating system's font at runtime ([details](Documentation/SystemFontFallback.md)). |
+| 🌐 | **Every script via HarfBuzz** | Arabic, Hebrew, Devanagari and other complex scripts are shaped by HarfBuzz. Thai, Lao, Khmer and Myanmar get dictionary word breaking (ICU-matched). Any script your font stack does not cover (CJK, Tamil, Bengali, Georgian, Ethiopic, Tibetan, ...) falls back to an installed system font at runtime, with one warning per script; bundle fonts for consistent results across devices ([details](Documentation/SystemFontFallback.md)). |
 | 🔄 | **Full UAX #9 BiDi** | Mixed LTR/RTL text with numbers and punctuation; 100 % of the Unicode 17.0 BiDi conformance data (861,948 cases). |
 | 😀 | **Color emoji** | COLRv1 color glyphs; ZWJ sequences (e.g. 👨‍👩‍👧‍👦) are a single grapheme cluster. |
 | 🏷️ | **Rich text & span styles** | `<b> <i> <u> <s> <color> <size> <gradient> <link> <cspace> <sup> <sub>` and more; per-span outline/underlay styles. |
@@ -245,7 +245,7 @@ binaries but were not tested on device for this release.
 - [Feature comparison (with test citations)](Documentation/FeatureComparison.md)
 - [GlyphMeshPro ↔ TextMesh Pro parity](Documentation/GlyphMeshPro-Parity.md)
 - [Unified vs legacy render path](Documentation/RenderPathComparison.md)
-- [System font fallback (CJK)](Documentation/SystemFontFallback.md)
+- [System font fallback (any script)](Documentation/SystemFontFallback.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
 - [Changelog](CHANGELOG.md)
 
