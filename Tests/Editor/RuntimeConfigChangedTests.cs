@@ -180,9 +180,9 @@ namespace LightSide.Tests
             all.AddRange(EditorOnlyMatches(Path.Combine(root, "Runtime", "Core", "UniTextSettings.cs"),
                 "event Action Changed"));
             all.AddRange(EditorOnlyMatches(Path.Combine(root, "Runtime", "FontCore", "UniTextAppearance.cs"),
-                "event Action Changed", "NotifyChanged"));
+                "event Action Changed", "void NotifyChanged"));
             all.AddRange(EditorOnlyMatches(Path.Combine(root, "Runtime", "ModCore", "ModRegisterConfig.cs"),
-                "event Action Changed", "NotifyChanged"));
+                "event Action Changed", "void NotifyChanged"));
             all.AddRange(EditorOnlyMatches(Path.Combine(root, "Runtime", "Core", "Component", "UniText.cs"),
                 "ListenConfigChanged", "UnlistenConfigChanged",
                 "UniTextSettings.Changed", "appearance.Changed", "config.Changed"));
