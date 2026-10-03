@@ -39,6 +39,12 @@ namespace LightSide
         // serialized — it is rebuilt from the stored (possibly compressed) fontData on demand.
         [NonSerialized] private byte[] rawFontDataCache;
 
+        // Latched once a decompression of the current compressed fontData has thrown, so a corrupt
+        // container logs ONE error (not once per FontData access) and thereafter transparently
+        // returns the stored bytes. Reset whenever fontData changes (SetFontData / Compress /
+        // Decompress), so a different container gets a fresh attempt.
+        [NonSerialized] private bool rawFontDataDecodeFailed;
+
         [SerializeField]
         [Tooltip("Hash of font data for identification.")]
         protected int fontDataHash;
@@ -193,7 +199,22 @@ namespace LightSide
             {
                 if (fontData == null || fontData.Length == 0) return fontData;
                 if (!FontCompression.IsCompressed(fontData)) return fontData;
-                return rawFontDataCache ??= FontCompression.Decompress(fontData);
+                if (rawFontDataCache != null) return rawFontDataCache;
+                // A corrupt/undecodable container must not throw on every glyph request: latch the
+                // failure, log it once, and fall back to the stored bytes (FreeType then reports a
+                // clean load failure rather than this access faulting repeatedly).
+                if (rawFontDataDecodeFailed) return fontData;
+                try
+                {
+                    return rawFontDataCache = FontCompression.Decompress(fontData);
+                }
+                catch (Exception e)
+                {
+                    rawFontDataDecodeFailed = true;
+                    Debug.LogWarning($"[UniTextFont] {name}: font data decompression failed ({e.Message}); " +
+                                     "using stored bytes. This is logged once per load.");
+                    return fontData;
+                }
             }
         }
 
@@ -219,7 +240,12 @@ namespace LightSide
             byte[] raw = fontData;                 // currently raw
             var compressed = FontCompression.Compress(raw, level);
             if (ReferenceEquals(compressed, raw)) return false; // compression did not help
+            // A live FreeType face holds a pointer INTO the current data array. We are about to swap
+            // fontData to the compressed container; release the faces so the next render reloads from
+            // the (cached) raw bytes rather than reading through a now-stale reference.
+            ReleaseFTFace();
             rawFontDataCache = raw;                // keep raw available without re-decoding
+            rawFontDataDecodeFailed = false;       // fresh container — allow a decode attempt
             fontData = compressed;
             // fontDataHash stays the raw-byte hash — do NOT recompute from the compressed container.
             return true;
@@ -233,8 +259,12 @@ namespace LightSide
         {
             if (fontData == null || fontData.Length == 0) return false;
             if (!FontCompression.IsCompressed(fontData)) return true;
+            // Faces point into the current (compressed-container-backed cache) array; release them so
+            // the next render reloads from the newly-raw fontData.
+            ReleaseFTFace();
             fontData = FontCompression.Decompress(fontData);
             rawFontDataCache = null;
+            rawFontDataDecodeFailed = false;
             return true;
         }
 
@@ -737,7 +767,15 @@ namespace LightSide
             if (cachedFaceIndex < 0)
                 cachedFaceIndex = faceInfo.faceIndex;
 
-            ftFace = FT.LoadFace(fontData, cachedFaceIndex < 0 ? 0 : cachedFaceIndex);
+            // FreeType keeps a pointer INTO the byte array for the face's lifetime, so it must be the
+            // DECOMPRESSED raw bytes (FontData), and that array must stay referenced. FontData caches
+            // the decompressed array in rawFontDataCache, which lives as long as this font and is only
+            // dropped by ReleaseFTFace-guarded Compress/Decompress — so the pointer never dangles.
+            var raw = FontData;
+            if (raw == null || raw.Length == 0)
+                return IntPtr.Zero;
+
+            ftFace = FT.LoadFace(raw, cachedFaceIndex < 0 ? 0 : cachedFaceIndex);
             Cat.MeowFormat("[EnsureFTFace] {0}: loaded face={1}", name, ftFace != IntPtr.Zero);
             return ftFace;
         }
@@ -916,6 +954,39 @@ namespace LightSide
         // (fontId, glyphIndex, VariationKey). Lazy + cached: a published glyph is not re-copied.
         [NonSerialized] private HashSet<GlyphAtlasArray.GlyphCellKey> _publishedCells;
 
+        // Process-wide revision counter per legacy atlas PAGE, keyed by the page Texture2D's instance
+        // id. Legacy atlas pages are mutated IN PLACE (page.Apply after every glyph upload), so the
+        // shared-array copy the unified renderer takes (GlyphAtlasArray.AddPage) goes stale when
+        // glyphs are added after the first copy. Bumping this on every upload gives the renderer a
+        // cheap "has this page changed?" token to pass to AddPage, which re-copies the page into its
+        // existing slice when the revision moved. Static + keyed by page id so the renderer reads it
+        // without a font reference (it only has the page texture). Runtime-only.
+        private static readonly Dictionary<int, int> _atlasPageRevisions = new();
+
+        /// <summary>
+        /// Monotonic revision of a legacy atlas page (its <see cref="Texture2D"/>), incremented on
+        /// every glyph upload into that page. The unified renderer passes this to
+        /// <see cref="GlyphAtlasArray.AddPage"/> so a page updated in place after its first copy is
+        /// re-copied into the shared array rather than drawing stale (blank) glyphs. Returns 0 for a
+        /// page that has never been uploaded.
+        /// </summary>
+        public static int AtlasPageRevision(Texture2D page)
+        {
+            if (page == null) return 0;
+            return _atlasPageRevisions.TryGetValue(page.GetInstanceID(), out var r) ? r : 0;
+        }
+
+        // Bumps the revision of a page and uploads it (Apply). Call instead of a bare page.Apply at
+        // every site that writes glyph pixels into a legacy atlas page.
+        private static void BumpAndApplyAtlasPage(Texture2D page)
+        {
+            if (page == null) return;
+            int id = page.GetInstanceID();
+            _atlasPageRevisions.TryGetValue(id, out var r);
+            _atlasPageRevisions[id] = r + 1;
+            page.Apply(false, false);
+        }
+
         /// <summary>
         /// Ensures the glyph <paramref name="glyphIndex"/> (variation <paramref name="key"/>) is
         /// present in the shared <see cref="GlyphAtlasArray"/> for this font's format, copying its
@@ -1093,7 +1164,7 @@ namespace LightSide
                 if (msdfVarFace != IntPtr.Zero) FTVar.SetNamedInstance(msdfVarFace, 0);
             }
             if (atlasTextures != null && atlasTextures.Count > 0)
-                atlasTextures[^1].Apply(false, false);
+                BumpAndApplyAtlasPage(atlasTextures[^1]);
             return added;
         }
 
@@ -1116,7 +1187,7 @@ namespace LightSide
 
             if (!TryPackGlyphShelf(r.bmpWidth, r.bmpHeight, out var packRect))
             {
-                atlasTextures[^1].Apply(false, false);
+                BumpAndApplyAtlasPage(atlasTextures[^1]);
                 CreateNewAtlasTexture();
                 if (!TryPackGlyphShelf(r.bmpWidth, r.bmpHeight, out packRect))
                 {
@@ -1212,7 +1283,13 @@ namespace LightSide
             glyphIndexList ??= new List<uint>();
 
 #if !UNITY_WEBGL || UNITY_EDITOR
-            sdfFacePool ??= new FreeTypeFacePool(fontData, cachedFaceIndex < 0 ? 0 : cachedFaceIndex, pointSize);
+            // Decompressed bytes: the pool loads FreeType faces from this array across its lifetime
+            // and holds its own reference to it, so it must be the raw TTF/OTF (FontData), never the
+            // possibly-compressed stored container.
+            var poolData = FontData;
+            if (poolData == null || poolData.Length == 0)
+                return null;
+            sdfFacePool ??= new FreeTypeFacePool(poolData, cachedFaceIndex < 0 ? 0 : cachedFaceIndex, pointSize);
 #else
             if (EnsureFTFace() == IntPtr.Zero) return null;
 #endif
@@ -1343,7 +1420,11 @@ namespace LightSide
             if (msdfFace != IntPtr.Zero) return msdfFace;
             if (fontData == null || fontData.Length == 0) return IntPtr.Zero;
             if (!FT.IsInitialized) FT.Initialize();
-            msdfFace = FT.LoadFace(fontData, cachedFaceIndex < 0 ? 0 : cachedFaceIndex);
+            // Decompressed raw bytes: FreeType keeps a pointer into the array for the face's lifetime.
+            // FontData caches the decompressed array (rawFontDataCache), which outlives this face.
+            var raw = FontData;
+            if (raw == null || raw.Length == 0) return IntPtr.Zero;
+            msdfFace = FT.LoadFace(raw, cachedFaceIndex < 0 ? 0 : cachedFaceIndex);
             return msdfFace;
         }
 
@@ -1405,7 +1486,7 @@ namespace LightSide
 
                 if (!TryPackGlyphShelf(r.bmpWidth, r.bmpHeight, out var packRect))
                 {
-                    atlasTextures[^1].Apply(false, false);
+                    BumpAndApplyAtlasPage(atlasTextures[^1]);
                     CreateNewAtlasTexture();
                     cachedAtlasTex = null;
                     if (!TryPackGlyphShelf(r.bmpWidth, r.bmpHeight, out packRect))
@@ -1468,7 +1549,7 @@ namespace LightSide
             }
 
             if (atlasTextures is { Count: > 0 })
-                atlasTextures[^1].Apply(false, false);
+                BumpAndApplyAtlasPage(atlasTextures[^1]);
 
             return totalAdded;
         }
@@ -1829,6 +1910,7 @@ namespace LightSide
             ReleaseFTFace();
             fontData = data;
             rawFontDataCache = null;
+            rawFontDataDecodeFailed = false;
             fontDataHash = ComputeFontDataHash(data);
 
             if (data != null && data.Length > 0)
