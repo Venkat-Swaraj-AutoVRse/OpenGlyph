@@ -1427,12 +1427,38 @@ namespace LightSide
                 return;
             }
 
+            WarnIfLegacyDropsSpanStyles();
             UpdateSubMeshes();
 
             UniTextDebug.EndSample();
         }
 
         protected override void UpdateMaterial() { }
+
+        private bool warnedLegacySpanStyles;
+
+        /// <summary>
+        /// MAIN-THREAD (mesh-apply time): the legacy renderer draws per font material and cannot render
+        /// per-glyph span styles (outline/underlay/dilate/softness/style tags). Logs ONE warning per
+        /// component instance when the parsed text carries any. Checked here, not in per-glyph
+        /// callbacks, because mesh generation may run on worker threads.
+        /// </summary>
+        private void WarnIfLegacyDropsSpanStyles()
+        {
+            if (warnedLegacySpanStyles) return;
+            var attr = Buffers?.GetAttributeData<PooledArrayAttribute<SpanStyleOverride>>(AttributeKeys.SpanStyle);
+            var buf = attr?.buffer.data;
+            if (buf == null) return;
+            var n = Math.Min(buf.Length, Buffers.codepoints.count);
+            for (var i = 0; i < n; i++)
+            {
+                if (buf[i].IsNone) continue;
+                warnedLegacySpanStyles = true;
+                Debug.LogWarning($"[OpenGlyph] '{name}' uses <outline>/<underlay>/... span styles, which only render " +
+                                 "with the unified renderer. Set UnifiedRenderer = ForceOn (or enable it project-wide in UniTextSettings).", this);
+                return;
+            }
+        }
 
         // ---- Render-Architecture R2 sub-task 2: per-span style coordinator ---------------------------
         // Exactly ONE OnGlyph per glyph composes the cluster's accumulated SpanStyleOverride over the
