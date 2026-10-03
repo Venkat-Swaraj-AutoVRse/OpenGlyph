@@ -380,12 +380,43 @@ namespace OpenGlyph
             }
         }
 
-        /// <summary>Mirrors <c>TMP_Text.overflowMode</c>. Overflow/Ellipsis/Truncate/Masking are
-        /// implemented; ScrollRect/Page/Linked fall back to Overflow (parity doc).</summary>
+        /// <summary>Mirrors <c>TMP_Text.overflowMode</c>. Overflow/Ellipsis/Truncate map to the engine's
+        /// <see cref="UniText.Overflow"/> modes and Masking maps to Clip; ScrollRect/Page/Linked fall back to
+        /// Overflow with a one-time warning (parity doc).</summary>
         public TextOverflowModes overflowMode
         {
             get => m_overflowMode;
-            set { if (m_overflowMode == value) return; m_overflowMode = value; SetDirty(DirtyFlags.Layout); }
+            set
+            {
+                if (m_overflowMode == value) return;
+                m_overflowMode = value;
+                ApplyOverflowMode(value);
+                SetDirty(DirtyFlags.Layout);
+            }
+        }
+
+        private static bool s_warnedUnsupportedOverflow;
+
+        private void ApplyOverflowMode(TextOverflowModes mode)
+        {
+            TextOverflow mapped;
+            switch (mode)
+            {
+                case TextOverflowModes.Ellipsis: mapped = TextOverflow.Ellipsis; break;
+                case TextOverflowModes.Truncate: mapped = TextOverflow.Truncate; break;
+                case TextOverflowModes.Masking: mapped = TextOverflow.Clip; break;
+                case TextOverflowModes.Overflow: mapped = TextOverflow.Overflow; break;
+                default:
+                    mapped = TextOverflow.Overflow;
+                    if (!s_warnedUnsupportedOverflow)
+                    {
+                        s_warnedUnsupportedOverflow = true;
+                        Debug.LogWarning("[GlyphMeshProUGUI] overflowMode " + mode +
+                                         " is not supported; falling back to Overflow.");
+                    }
+                    break;
+            }
+            Overflow = mapped;
         }
 
         // =====================================================================
@@ -685,6 +716,7 @@ namespace OpenGlyph
             base.OnEnable();
             // Re-apply TMP-named adapter state onto the engine after (de)serialization.
             ApplyAlignment(m_alignment);
+            ApplyOverflowMode(m_overflowMode);
             FontWeight = (m_fontStyle & FontStyles.Bold) != 0 ? 700 : 400;
             FontStyleAxis = (m_fontStyle & FontStyles.Italic) != 0 ? StyleAxis.Italic : StyleAxis.Normal;
             WordWrap = m_textWrappingMode == TextWrappingModes.Normal

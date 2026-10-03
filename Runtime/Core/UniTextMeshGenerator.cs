@@ -911,7 +911,8 @@ namespace LightSide
 
             var glyphLookup = font.GlyphLookupTable;
 
-            buf.glyphDataCache.EnsureCapacity(buf.shapedGlyphs.count);
+            // +EllipsisSlotCount: overflow-ellipsis glyphs live in scratch slots just past the counted glyphs.
+            buf.glyphDataCache.EnsureCapacity(buf.shapedGlyphs.count + TextProcessor.EllipsisSlotCount);
             var glyphCache = buf.glyphDataCache.data;
             var useCache = buf.hasValidGlyphCache;
 

@@ -146,6 +146,9 @@ namespace LightSide
         /// <summary>Runs reordered for visual display within each line.</summary>
         public PooledBuffer<ShapedRun> orderedRuns;
 
+        /// <summary>Scratch copy of the last kept line's runs while an overflow ellipsis is spliced in.</summary>
+        internal PooledBuffer<ShapedRun> overflowRuns;
+
         /// <summary>Final positioned glyphs ready for rendering.</summary>
         public PooledBuffer<PositionedGlyph> positionedGlyphs;
 
@@ -323,6 +326,7 @@ namespace LightSide
             graphemeBreaks.Return();
             lines.Return();
             orderedRuns.Return();
+            overflowRuns.Return();
             positionedGlyphs.Return();
             virtualCodepoints.Return();
 
