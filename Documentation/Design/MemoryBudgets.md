@@ -1,5 +1,35 @@
 # Memory Budgets, Eviction & Font Compression — Design
 
+> ## ⚠️ Status: glyph-atlas memory budgets are CURRENTLY INACTIVE
+>
+> The shared glyph-atlas memory budgets described in this document — the per-array page budget,
+> the per-array byte budget, and the global byte budget — are **disabled in the runtime** as of
+> the `disable-budgets` change. **Setting any of them has no effect**; the atlas runs unbounded
+> (no eviction), exactly as if every budget were 0.
+>
+> **Why they were disabled.** The eviction machinery in `GlyphAtlasArray` only evicts cells whose
+> **refcount is 0**, driven by an **LRU clock advanced by `BeginFrame()`**. But the runtime render
+> path never calls `Acquire`/`Release` (so *every* glyph — including ones on screen — has refcount
+> 0) and never calls `BeginFrame()` (so the LRU clock is frozen at 0). Under those conditions a
+> non-zero budget would evict glyphs that are **currently visible** and reuse their atlas space,
+> making on-screen text draw the **wrong glyphs**. In addition, the **global** budget
+> (`SharedGlyphAtlas.EnforceGlobalByteBudget` / `ReleaseEmptyPages`) has **no runtime caller at
+> all**, and the **per-font legacy atlases** — where glyph memory actually goes by default — are
+> **not budgeted** by this machinery in the first place.
+>
+> **What the disable does.** `SharedGlyphAtlas` now reads every budget as **0 (unbounded)**
+> regardless of the `UniTextSettings` values, so no eviction can happen through the runtime. If a
+> project has set a non-zero budget, a **single warning** is logged once per session. The eviction
+> code and its unit tests are **retained** (tests exercise `GlyphAtlasArray` directly), and the
+> serialized settings fields are **kept** so existing assets load unchanged — they are just marked
+> *"not active yet"* in their tooltips.
+>
+> **Re-enabling (future work).** The budgets become safe to re-enable only once the render path
+> (a) calls `Acquire`/`Release` so on-screen glyphs are reference-counted and pinned, and
+> (b) calls `SharedGlyphAtlas.BeginFrame()` once per frame so the LRU clock advances; and once the
+> per-font legacy atlas path is either budgeted too or retired in favour of the shared array. The
+> design below describes the **intended** behaviour for that future wiring.
+
 Rendering-phase memory work for OpenGlyph. Two features:
 
 - **(A) Glyph/atlas memory budgets with eviction** — bound resident glyph memory on
@@ -88,7 +118,9 @@ Significant budget machinery already exists and is **off by default**:
 - **`SharedGlyphAtlas`** (`Runtime/FontCore/SharedGlyphAtlas.cs`) — process-wide registry of those
   arrays keyed by (format, size); reads the budget from
   **`UniTextSettings.SharedAtlasPageBudget`** (0 ⇒ unbounded) at array creation, with
-  `ApplyBudgetFromSettings()` + `BeginFrame()` to drive LRU.
+  `ApplyBudgetFromSettings()` + `BeginFrame()` to drive LRU. **(INACTIVE — see the status banner
+  at the top: `SharedGlyphAtlas` currently forces every budget to 0 regardless of the settings
+  values, so this read never produces a non-zero budget and no eviction happens.)**
 - **`UniTextArrayPool<T>`** — two-tier (thread-local + shared) array pool, buckets 32…65536;
   arrays > 65536 bypass pooling and allocate directly. This is why warm builds are
   allocation-neutral.

@@ -130,11 +130,14 @@ namespace LightSide.Tests
         }
 
         [Test]
-        public void GlobalByteBudget_EvictsAcrossArrays_UntilUnderBudget()
+        public void GlobalByteBudget_IsDisabled_NoEvictionEvenWhenBudgetSet()
         {
-            // Two independent arrays (two formats) share one global ceiling. Fill both unbounded,
-            // then set a tiny global budget and enforce: eviction must drop unreferenced glyphs
-            // (globally LRU) across BOTH arrays until total resident bytes <= budget.
+            // Budgets are DISABLED in the runtime (SharedGlyphAtlas reads every budget as 0,
+            // regardless of the serialized UniTextSettings values). Setting a tiny global byte budget
+            // and enforcing it must therefore be a NO-OP: nothing is evicted and resident bytes are
+            // unchanged. This FAILS on main, where SafeGlobalByteBudget() returned the settings value
+            // and enforcement evicted across arrays. (The eviction MECHANISM itself is still covered
+            // directly at the GlyphAtlasArray level by the ByteBudget_* tests above.)
             SharedGlyphAtlas.Clear();
             try
             {
@@ -153,18 +156,26 @@ namespace LightSide.Tests
                     rgba.AddGlyph(K(2, (uint)i), rgbaPix, 20, 20, 4, out _);
 
                 long before = SharedGlyphAtlas.TotalResidentBytes;
+                int cellsBefore = alpha.CellCount + rgba.CellCount;
                 Assert.Greater(before, 0);
 
-                // Budget = one Alpha8 page (whichever pages survive, total must come under this).
+                // Set a tiny global budget directly on the settings instance (one Alpha8 page). On main
+                // this would force eviction across both arrays; with budgets disabled it is ignored.
                 long budget = (long)Size * Size * 1;
                 typeof(UniTextSettings).GetField("sharedAtlasByteBudgetGlobal",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                     .SetValue(settings, budget);
 
+                // A non-zero budget is configured, but SharedGlyphAtlas reports it as 0 (ignored).
+                // (The once-per-session "NOT ACTIVE" warning is not asserted here: it is a static,
+                // fire-once flag and any earlier test in the suite may have already consumed it, so
+                // asserting it would be test-order dependent.)
                 int evicted = SharedGlyphAtlas.EnforceGlobalByteBudget();
-                Assert.Greater(evicted, 0, "global enforcement evicted at least one unreferenced glyph");
-                Assert.LessOrEqual(SharedGlyphAtlas.TotalResidentBytes, budget,
-                    "after enforcement, combined resident bytes are within the global budget");
+                Assert.AreEqual(0, evicted, "budgets disabled => global enforcement evicts nothing even with a budget set");
+                Assert.AreEqual(cellsBefore, alpha.CellCount + rgba.CellCount, "no cells evicted from either array");
+                Assert.AreEqual(before, SharedGlyphAtlas.TotalResidentBytes, "resident bytes unchanged (no eviction)");
+                Assert.Greater(SharedGlyphAtlas.TotalResidentBytes, budget,
+                    "resident bytes stay ABOVE the configured budget — proof the budget is not enforced");
             }
             finally
             {
@@ -186,6 +197,97 @@ namespace LightSide.Tests
                 int before = alpha.CellCount;
                 Assert.AreEqual(0, SharedGlyphAtlas.EnforceGlobalByteBudget(), "zero global budget evicts nothing");
                 Assert.AreEqual(before, alpha.CellCount, "no glyphs evicted when global budget is unbounded");
+            }
+            finally
+            {
+                SharedGlyphAtlas.Clear();
+            }
+        }
+
+        /// <summary>
+        /// REGRESSION GUARD for the disabled shared-atlas budgets (PR "disable-budgets").
+        ///
+        /// With a NON-ZERO per-array byte budget set in <see cref="UniTextSettings"/>, driving the
+        /// RUNTIME path (<see cref="SharedGlyphAtlas.Get"/> → <c>AddGlyph</c>) with many distinct
+        /// glyphs must NEVER evict: because the runtime never calls Acquire/Release or BeginFrame,
+        /// every glyph has refcount 0 and the LRU clock is frozen, so any enforced budget would evict
+        /// glyphs that are on screen and corrupt visible text. The fix makes SharedGlyphAtlas read the
+        /// budget as 0, so the array created for the runtime is unbounded.
+        ///
+        /// Assertions: (1) every added glyph is still resident (no eviction); (2) the pages GREW
+        /// rather than being capped; (3) every cell returned when the glyph was added still reads back
+        /// its ORIGINAL pixel value — i.e. its atlas space was never reused for a different glyph.
+        ///
+        /// This FAILS ON MAIN: there <c>SafeByteBudget()</c> returned the settings value, so
+        /// <see cref="SharedGlyphAtlas.Get"/> built a budgeted array, <c>AddGlyph</c> evicted
+        /// unreferenced (refcount-0) cells to stay under budget, CellCount was capped and the recorded
+        /// cells' pixels were overwritten by later glyphs.
+        /// </summary>
+        [Test]
+        public void SharedAtlas_RuntimePath_WithByteBudgetSet_NeverEvicts_AndCellsKeepTheirPixels()
+        {
+            SharedGlyphAtlas.Clear();
+            try
+            {
+                // A real settings instance carrying a TINY per-array byte budget: one Alpha8 page.
+                // On main this caps each array at a single page and forces eviction; with budgets
+                // disabled it is ignored and the array grows unbounded.
+                var settings = ScriptableObject.CreateInstance<UniTextSettings>();
+                long onePage = (long)Size * Size * 1; // Alpha8 = 1 B/px
+                typeof(UniTextSettings).GetField("sharedAtlasByteBudgetPerArray",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .SetValue(settings, onePage);
+                typeof(UniTextSettings).GetField("sharedAtlasPageBudget",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .SetValue(settings, 1);
+                UniTextSettings.SetInstance(settings);
+
+                // Drive the RUNTIME path: Get() reads the budget from settings at array creation.
+                var atlas = SharedGlyphAtlas.Get(TextureFormat.Alpha8, Size);
+
+                // Add many distinct glyphs through the runtime path. Each gets a DIFFERENT, non-zero
+                // pixel value so a reused cell is detectable. Record the (key, cell, pixel) of each.
+                const int glyphW = 10, glyphH = 10;
+                const int count = 300; // far more than fit in one page => main would evict heavily
+                var keys = new Key[count];
+                var cells = new GlyphAtlasArray.GlyphCell[count];
+                var pixelOf = new byte[count];
+
+                for (int i = 0; i < count; i++)
+                {
+                    byte v = (byte)(1 + (i % 254)); // 1..254, never 0 (0 would be an empty cell)
+                    var key = K(1, (uint)(1000 + i));
+                    Assert.IsTrue(atlas.AddGlyph(key, Alpha(glyphW, glyphH, v), glyphW, glyphH, 1, out var cell),
+                        $"AddGlyph #{i} should succeed");
+                    keys[i] = key;
+                    cells[i] = cell;
+                    pixelOf[i] = v;
+                }
+
+                // (1) No eviction: every glyph is still resident and CellCount == count.
+                Assert.AreEqual(count, atlas.CellCount,
+                    "budgets disabled => the runtime atlas retained every glyph (no eviction)");
+                for (int i = 0; i < count; i++)
+                    Assert.IsTrue(atlas.IsResident(keys[i]),
+                        $"glyph #{i} must still be resident (never evicted)");
+
+                // (2) It GREW pages rather than being capped at the (ignored) one-page budget.
+                Assert.Greater(atlas.PageCount, 1,
+                    "the array grew past one page — proof the one-page byte budget was NOT enforced");
+
+                // (3) Every originally-returned cell still holds ITS glyph's pixels: the atlas space
+                //     was never reused for a different glyph. Read back one pixel from each cell and
+                //     also confirm the live cell position is unchanged.
+                for (int i = 0; i < count; i++)
+                {
+                    Assert.IsTrue(atlas.TryGetCell(keys[i], out var now), $"cell #{i} still looked up");
+                    Assert.AreEqual(cells[i].slice, now.slice, $"cell #{i} slice unchanged (space not reused)");
+                    Assert.AreEqual(cells[i].pixelRect.x, now.pixelRect.x, $"cell #{i} x unchanged");
+                    Assert.AreEqual(cells[i].pixelRect.y, now.pixelRect.y, $"cell #{i} y unchanged");
+                    byte readBack = atlas.ReadCpuByte(cells[i].slice, cells[i].pixelRect.x, cells[i].pixelRect.y);
+                    Assert.AreEqual(pixelOf[i], readBack,
+                        $"cell #{i} still holds its original glyph's pixel ({pixelOf[i]}) — space never reused");
+                }
             }
             finally
             {

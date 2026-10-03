@@ -64,19 +64,22 @@ namespace OpenGlyph
         // Text content
         // =====================================================================
 
-        /// <summary>The displayed text. Mirrors <c>TMP_Text.text</c> → engine <c>Text</c>.</summary>
+        /// <summary>The displayed text (the user's RAW source, before fontStyle-flag wrapping).
+        /// Mirrors <c>TMP_Text.text</c>. The setter stores the raw value and feeds the engine the
+        /// style-composed form (see <see cref="ComposeStyledSource"/>), so <c>fontStyle</c> flags
+        /// such as Underline/Strikethrough render exactly as TMP's whole-run markup would.</summary>
         public virtual string text
         {
-            get => Text;
-            set => Text = value;
+            get => m_rawText;
+            set { m_rawText = value ?? string.Empty; ApplyStyledSource(); }
         }
 
         /// <summary>Mirrors <c>TMP_Text.SetText(string)</c>.</summary>
-        public void SetText(string sourceText) => Text = sourceText;
+        public void SetText(string sourceText) => text = sourceText;
 
         /// <summary>Mirrors <c>TMP_Text.SetText(string, bool)</c>. The sync flag has no
         /// effect here (no bound input field in Round 1).</summary>
-        public void SetText(string sourceText, bool syncTextInputBox) => Text = sourceText;
+        public void SetText(string sourceText, bool syncTextInputBox) => text = sourceText;
 
         /// <summary>Mirrors <c>TMP_Text.SetText(StringBuilder)</c>. Copies into a reused
         /// char buffer to avoid a per-call string allocation.</summary>
@@ -244,8 +247,11 @@ namespace OpenGlyph
             set => MaxFontSize = value;
         }
 
-        /// <summary>Mirrors <c>TMP_Text.fontStyle</c>. Bold/Italic map to engine weight/axis;
-        /// the remaining flags are realised as span-style tags during processing.</summary>
+        /// <summary>Mirrors <c>TMP_Text.fontStyle</c>. Bold/Italic map to the engine's
+        /// FontWeight/StyleAxis (a real or synthetic face). The remaining flags
+        /// (Underline, Strikethrough, Upper/LowerCase, SmallCaps, Super/Subscript, Highlight)
+        /// are realised by wrapping the whole run in the engine's span tags — exactly how TMP
+        /// composes <c>fontStyle</c> as whole-run markup. See <see cref="ComposeStyledSource"/>.</summary>
         public FontStyles fontStyle
         {
             get => m_fontStyle;
@@ -255,6 +261,8 @@ namespace OpenGlyph
                 m_fontStyle = value;
                 FontWeight = (value & FontStyles.Bold) != 0 ? 700 : 400;
                 FontStyleAxis = (value & FontStyles.Italic) != 0 ? StyleAxis.Italic : StyleAxis.Normal;
+                // Re-compose the engine source so wrapping flags (u/s/case/sup/sub/mark) apply.
+                ApplyStyledSource();
                 SetDirty(DirtyFlags.Text); // style flags affect span processing → full rebuild
             }
         }
@@ -314,6 +322,11 @@ namespace OpenGlyph
             }
         }
 
+        /// <summary>GlyphMeshPro mirrors TextMeshPro, so it opts into TMP-compatible justification
+        /// (5% wrap overrun + word/character spacing split). Plain <c>UniText</c> keeps the inherited
+        /// <c>false</c>, so this scoping change leaves every existing plain-UniText layout untouched.</summary>
+        protected override bool UseTmpJustification => true;
+
         private void ApplyAlignment(TextAlignmentOptions value)
         {
             int bits = (int)value;
@@ -323,7 +336,11 @@ namespace OpenGlyph
                 HorizontalAlignment = HorizontalAlignment.Right;
             else if ((bits & (int)HorizontalAlignmentOptions.Center) != 0)
                 HorizontalAlignment = HorizontalAlignment.Center;
-            else // Left, Justified, Flush, Geometry → Left in R1 (justification is an R2 gap)
+            else if ((bits & (int)HorizontalAlignmentOptions.Flush) != 0)
+                HorizontalAlignment = HorizontalAlignment.Flush;      // Round 2: real flush justification
+            else if ((bits & (int)HorizontalAlignmentOptions.Justified) != 0)
+                HorizontalAlignment = HorizontalAlignment.Justified;  // Round 2: real inter-word justification
+            else // Left, Geometry → Left
                 HorizontalAlignment = HorizontalAlignment.Left;
 
             // Vertical
@@ -481,7 +498,7 @@ namespace OpenGlyph
             float fs = AutoSize ? MaxFontSize : FontSize;
             float w = TextProcessor.GetPreferredWidth(fs);
             float measureWidth = width > 0 ? width : TextProcessSettings.FloatMax;
-            TextProcessor.EnsureLines(measureWidth, fs, WordWrap);
+            TextProcessor.EnsureLines(measureWidth, fs, WordWrap, HorizontalAlignment, UseTmpJustification);
             float h = TextProcessor.GetPreferredHeight(fs, 0f, OverEdge, UnderEdge, LeadingDistribution);
             return new Vector2(w, h);
         }
@@ -508,6 +525,7 @@ namespace OpenGlyph
                 fontSize = fs,
                 baseDirection = BaseDirection,
                 enableWordWrap = WordWrap,
+                TmpJustification = UseTmpJustification,
             };
             TextProcessor.EnsureFirstPass(src.AsSpan(), settings);
         }
@@ -560,7 +578,7 @@ namespace OpenGlyph
             if (TextProcessor.HasValidFirstPassData)
             {
                 float fs = AutoSize ? MaxFontSize : FontSize;
-                TextProcessor.EnsureLines(measureW, fs, WordWrap);
+                TextProcessor.EnsureLines(measureW, fs, WordWrap, HorizontalAlignment, UseTmpJustification);
             }
         }
 
@@ -671,6 +689,13 @@ namespace OpenGlyph
             FontStyleAxis = (m_fontStyle & FontStyles.Italic) != 0 ? StyleAxis.Italic : StyleAxis.Normal;
             WordWrap = m_textWrappingMode == TextWrappingModes.Normal
                        || m_textWrappingMode == TextWrappingModes.PreserveWhitespace;
+            // m_rawText is the serialized source of truth. Legacy components (saved before this
+            // field existed) have base.Text set but m_rawText empty — migrate once, treating the
+            // persisted engine text as the raw source. Then always compose from m_rawText so the
+            // engine sees the style-wrapped form.
+            if (string.IsNullOrEmpty(m_rawText) && !string.IsNullOrEmpty(base.Text))
+                m_rawText = base.Text;
+            ApplyStyledSource();
             ApplyPlainFaceDefault();
         }
 
