@@ -301,7 +301,7 @@ namespace LightSide.Msdf
             Median(Mix(f[oa], f[ob], t), Mix(f[oa + 1], f[ob + 1], t), Mix(f[oa + 2], f[ob + 2], t));
 
         /// <summary>msdfgen interpolatedMedian (bilinear quadratic form): median of t*(t*q+l)+a.</summary>
-        private static float InterpolatedMedianQuad(float[] a, float[] l, float[] q, double t) =>
+        private static float InterpolatedMedianQuad(ReadOnlySpan<float> a, ReadOnlySpan<float> l, ReadOnlySpan<float> q, double t) =>
             Median(
                 (float)(t * (t * q[0] + l[0]) + a[0]),
                 (float)(t * (t * q[1] + l[1]) + a[1]),
@@ -337,10 +337,9 @@ namespace LightSide.Msdf
 
         /// <summary>msdfgen hasDiagonalArtifactInner.</summary>
         private static bool HasDiagonalArtifactInner(double span, bool prot, float am, float dm,
-            float[] a, float[] l, float[] q, float dA, float dBC, float dD, double tEx0, double tEx1,
-            float[] f, int oa) // oa unused beyond a[]; a/l/q are precomputed arrays
+            ReadOnlySpan<float> a, ReadOnlySpan<float> l, ReadOnlySpan<float> q, float dA, float dBC, float dD, double tEx0, double tEx1)
         {
-            double[] roots = new double[2];
+            Span<double> roots = stackalloc double[2]; // per-texel path: no heap allocation
             int solutions = EquationSolver.SolveQuadratic(roots, dD - dBC + dA, dBC - dA - dA, dA);
             for (int si = 0; si < solutions; si++)
             {
@@ -358,7 +357,7 @@ namespace LightSide.Msdf
             return false;
         }
 
-        private static int ExtremeCheck(double span, bool prot, float[] a, float[] l, float[] q,
+        private static int ExtremeCheck(double span, bool prot, ReadOnlySpan<float> a, ReadOnlySpan<float> l, ReadOnlySpan<float> q,
             float am, float dm, float xm, double t, double tEx)
         {
             if (tEx > 0 && tEx < 1)
@@ -379,30 +378,29 @@ namespace LightSide.Msdf
             float dm = Median(f[od], f[od + 1], f[od + 2]);
             if (Math.Abs(am - 0.5f) >= Math.Abs(dm - 0.5f))
             {
-                // abc = a - b - c (per channel).
-                float[] a = { f[oa], f[oa + 1], f[oa + 2] };
-                float[] abc =
+                // abc = a - b - c (per channel). stackalloc'd: this runs for up to 4 diagonals per
+                // texel, so heap arrays here produced ~5 allocations per diagonal per texel.
+                Span<float> a = stackalloc float[3];
+                Span<float> l = stackalloc float[3];
+                Span<float> q = stackalloc float[3];
+                for (int ch = 0; ch < 3; ch++)
                 {
-                    f[oa]     - f[ob]     - f[oc],
-                    f[oa + 1] - f[ob + 1] - f[oc + 1],
-                    f[oa + 2] - f[ob + 2] - f[oc + 2],
-                };
-                float[] l = { -a[0] - abc[0], -a[1] - abc[1], -a[2] - abc[2] };
-                float[] q = { f[od] + abc[0], f[od + 1] + abc[1], f[od + 2] + abc[2] };
-                double[] tEx =
-                {
-                    -0.5 * l[0] / q[0],
-                    -0.5 * l[1] / q[1],
-                    -0.5 * l[2] / q[2],
-                };
+                    a[ch] = f[oa + ch];
+                    float abc = f[oa + ch] - f[ob + ch] - f[oc + ch];
+                    l[ch] = -a[ch] - abc;
+                    q[ch] = f[od + ch] + abc;
+                }
+                double tEx0 = -0.5 * l[0] / q[0];
+                double tEx1 = -0.5 * l[1] / q[1];
+                double tEx2 = -0.5 * l[2] / q[2];
                 // dBC terms: (b[ch1]-b[ch0]) + (c[ch1]-c[ch0]).
                 float bR = f[ob], bG = f[ob + 1], bB = f[ob + 2];
                 float cR = f[oc], cG = f[oc + 1], cB = f[oc + 2];
                 float dR = f[od], dG = f[od + 1], dB = f[od + 2];
                 return
-                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[1] - a[0], (bG - bR) + (cG - cR), dG - dR, tEx[0], tEx[1], f, oa) ||
-                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[2] - a[1], (bB - bG) + (cB - cG), dB - dG, tEx[1], tEx[2], f, oa) ||
-                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[0] - a[2], (bR - bB) + (cR - cB), dR - dB, tEx[2], tEx[0], f, oa);
+                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[1] - a[0], (bG - bR) + (cG - cR), dG - dR, tEx0, tEx1) ||
+                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[2] - a[1], (bB - bG) + (cB - cG), dB - dG, tEx1, tEx2) ||
+                    HasDiagonalArtifactInner(span, prot, am, dm, a, l, q, a[0] - a[2], (bR - bB) + (cR - cB), dR - dB, tEx2, tEx0);
             }
             return false;
         }

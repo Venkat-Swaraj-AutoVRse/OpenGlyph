@@ -172,7 +172,9 @@ namespace LightSide.Msdf
             double c = 2 * Vector2D.Dot(ab, ab) + Vector2D.Dot(qa, br);
             double d = Vector2D.Dot(qa, ab);
 
-            double[] roots = new double[3];
+            // stackalloc: this runs per relevant edge per texel; a heap array here was the dominant
+            // source of MSDF generation garbage.
+            Span<double> roots = stackalloc double[3];
             int solutions = EquationSolver.SolveCubic(roots, a, b, c, d);
 
             Vector2D epDir = Direction(0);

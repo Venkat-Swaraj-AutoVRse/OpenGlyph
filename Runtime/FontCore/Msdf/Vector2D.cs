@@ -117,7 +117,9 @@ namespace LightSide.Msdf
     {
         private const double TooLargeRatio = 1e12;
 
-        public static int SolveQuadratic(double[] x, double a, double b, double c)
+        // Root buffers are Span<double> so per-texel callers can pass stackalloc'd storage: these
+        // solvers run once per relevant edge per texel and must not allocate.
+        public static int SolveQuadratic(Span<double> x, double a, double b, double c)
         {
             // a == 0 -> linear
             if (Math.Abs(a) < 1e-14 || Math.Abs(b) > TooLargeRatio * Math.Abs(a))
@@ -143,7 +145,7 @@ namespace LightSide.Msdf
             return 0;
         }
 
-        private static int SolveCubicNormed(double[] x, double a, double b, double c)
+        private static int SolveCubicNormed(Span<double> x, double a, double b, double c)
         {
             double a2 = a * a;
             double q = (a2 - 3 * b) / 9;
@@ -176,7 +178,7 @@ namespace LightSide.Msdf
             }
         }
 
-        public static int SolveCubic(double[] x, double a, double b, double c, double d)
+        public static int SolveCubic(Span<double> x, double a, double b, double c, double d)
         {
             if (Math.Abs(a) < 1e-14)
                 return SolveQuadratic(x, b, c, d);
