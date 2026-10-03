@@ -45,6 +45,18 @@ namespace LightSide
         // Decompress), so a different container gets a fresh attempt.
         [NonSerialized] private bool rawFontDataDecodeFailed;
 
+        /// <summary>
+        /// When true, a successful decode of a compressed container replaces the stored container
+        /// with the raw bytes in memory, so only one copy of the font stays resident. On in players
+        /// (nothing re-serializes the asset there); off in the Editor so assets stay compressed on
+        /// save. Tests may toggle it.
+        /// </summary>
+#if UNITY_EDITOR
+        internal static bool ReleaseCompressedAfterDecode = false;
+#else
+        internal static bool ReleaseCompressedAfterDecode = true;
+#endif
+
         [SerializeField]
         [Tooltip("Hash of font data for identification.")]
         protected int fontDataHash;
@@ -206,7 +218,20 @@ namespace LightSide
                 if (rawFontDataDecodeFailed) return fontData;
                 try
                 {
-                    return rawFontDataCache = FontCompression.Decompress(fontData);
+                    // Shared decode: assets whose stored containers are identical (Regular/Bold/Italic
+                    // assets of one file) get the SAME decompressed array rather than one copy each.
+                    var raw = SharedFontData.GetOrDecompress(fontData);
+                    if (ReleaseCompressedAfterDecode)
+                    {
+                        // Player builds: the compressed container is only needed to produce `raw`;
+                        // once decoded (and handed to FreeType/HarfBuzz, which read the raw array in
+                        // place), keep just the raw bytes resident. Editor keeps the container so the
+                        // asset still serializes compressed.
+                        fontData = raw;
+                        rawFontDataCache = null;
+                        return raw;
+                    }
+                    return rawFontDataCache = raw;
                 }
                 catch (Exception e)
                 {
