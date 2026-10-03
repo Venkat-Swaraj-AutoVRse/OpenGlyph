@@ -277,8 +277,9 @@ SubShader {
 			half4 result = half4(0, 0, 0, 0);
 
 		    #if UNDERLAY_ON
-			half ud = UniTextSampleMSDF(_MainTex, input.texcoord2.xy) * input.texcoord2.z;
-			result = SDFLayer(ud, input.texcoord2.w, input.underlayColor);
+			half rawUd = UniTextSampleMSDF(_MainTex, input.texcoord2.xy);
+			half ud = rawUd * input.texcoord2.z;
+			result = SDFLayer(ud, input.texcoord2.w, input.underlayColor) * UniTextFieldGate(rawUd, _MainTex_TexelSize.w);
 		    #endif
 
 		    #if UNDERLAY_INNER
@@ -298,7 +299,7 @@ SubShader {
 			outlineColor.rgb *= outlineColor.a;
 
 			half dSoftness = d * scaleSoftness / scale;
-			half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor);
+			half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor) * UniTextFieldGate(sampled, _MainTex_TexelSize.w);
 			result = BlendOver(result, outlineResult);
 
 			half4 faceColor = _FaceColor;
@@ -306,7 +307,7 @@ SubShader {
 			faceColor *= tex2D(_FaceTex, input.textures.xy + float2(_FaceUVSpeedX, _FaceUVSpeedY) * _Time.y);
 			faceColor.rgb *= faceColor.a;
 
-			half4 faceResult = SDFLayer(d, bias, faceColor);
+			half4 faceResult = SDFLayer(d, bias, faceColor) * UniTextFieldGate(sampled, _MainTex_TexelSize.w);
 
 		    #if BEVEL_ON
 			float normalizedFaceEffect = (baseWeight + _FaceDilate * _ScaleRatioA * 0.5) * normFactor;

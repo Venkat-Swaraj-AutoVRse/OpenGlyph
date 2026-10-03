@@ -55,6 +55,18 @@ half4 SDFLayer(half d, float threshold, half4 color)
 	return color * saturate(d - threshold);
 }
 
+// Exterior-floor gate: zeroes a layer where the atlas field is clamped at 0 (outside the encoded
+// spread), so a dilation bias cannot floor at positive coverage across the padded quad. Knee is
+// 0.5 texel; exactly 1 for rawDist >= 1/(2*atlasSize). See UniText_Uber.shader "EXTERIOR-FLOOR GATE".
+// rawDist = unscaled distance sample (MSDF: the median); atlasSize = _MainTex_TexelSize.w.
+#ifndef UNITEXT_FIELD_GATE_DEFINED
+#define UNITEXT_FIELD_GATE_DEFINED
+float UniTextFieldGate(float rawDist, float atlasSize)
+{
+	return saturate(rawDist * atlasSize * 2.0);
+}
+#endif // UNITEXT_FIELD_GATE_DEFINED
+
 // Blend layer on top of existing result (premultiplied alpha)
 half4 BlendOver(half4 dst, half4 src)
 {

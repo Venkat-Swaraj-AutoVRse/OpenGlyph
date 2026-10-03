@@ -261,7 +261,8 @@ SubShader {
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 
-			half d = tex2D(_MainTex, input.atlas.xy).a * input.param.y;  // * scale
+			half rawD = tex2D(_MainTex, input.atlas.xy).a;  // raw distance (unscaled), for UniTextFieldGate
+			half d = rawD * input.param.y;  // * scale
 
 		    #ifndef UNDERLAY_ON
 			clip(tex2D(_MainTex, input.atlas.xy).a - input.param.x);
@@ -277,8 +278,9 @@ SubShader {
 
 			// Underlay layer (behind everything)
 		    #if UNDERLAY_ON
-			half ud = tex2D(_MainTex, input.texcoord2.xy).a * input.texcoord2.z;
-			result = SDFLayer(ud, input.texcoord2.w, input.underlayColor);
+			half rawUd = tex2D(_MainTex, input.texcoord2.xy).a;
+			half ud = rawUd * input.texcoord2.z;
+			result = SDFLayer(ud, input.texcoord2.w, input.underlayColor) * UniTextFieldGate(rawUd, _MainTex_TexelSize.w);
 		    #endif
 
 		    #if UNDERLAY_INNER
@@ -299,7 +301,7 @@ SubShader {
 			outlineColor.rgb *= outlineColor.a;
 
 			half dSoftness = d * scaleSoftness / scale;
-			half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor);
+			half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 			result = BlendOver(result, outlineResult);
 
 			// Face layer (on top)
@@ -308,7 +310,7 @@ SubShader {
 			faceColor *= tex2D(_FaceTex, input.textures.xy + float2(_FaceUVSpeedX, _FaceUVSpeedY) * _Time.y);
 			faceColor.rgb *= faceColor.a;
 
-			half4 faceResult = SDFLayer(d, bias, faceColor);
+			half4 faceResult = SDFLayer(d, bias, faceColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 
 		    #if BEVEL_ON
 			// Calculate sd for bevel (using normFactor for independence from atlas settings)

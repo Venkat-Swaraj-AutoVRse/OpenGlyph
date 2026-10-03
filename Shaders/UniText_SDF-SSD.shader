@@ -250,7 +250,8 @@ SubShader {
             // SDF scale (includes xScaleVal and gradientScale for proper edge rendering)
             float scale = baseScale * xScaleVal * gradientScale;
 
-            half d = tex2D(_MainTex, input.atlas.xy).a * scale;
+            half rawD = tex2D(_MainTex, input.atlas.xy).a;  // raw distance (unscaled), for UniTextFieldGate
+            half d = rawD * scale;
 
             // Face bias with dilate applied via normFactor (independent of atlas settings)
             float normalizedFaceEffect = (baseWeight + _FaceDilate * _ScaleRatioA * 0.5) * normFactor;
@@ -269,8 +270,9 @@ SubShader {
             #endif
 
             #if UNDERLAY_ON
-            half ud = tex2D(_MainTex, input.texcoord2.xy).a * layerScale;
-            result = SDFLayer(ud, layerBias, input.underlayColor);
+            half rawUd = tex2D(_MainTex, input.texcoord2.xy).a;
+            half ud = rawUd * layerScale;
+            result = SDFLayer(ud, layerBias, input.underlayColor) * UniTextFieldGate(rawUd, _MainTex_TexelSize.w);
             #endif
 
             #if UNDERLAY_INNER
@@ -291,7 +293,7 @@ SubShader {
             outlineColor.rgb *= outlineColor.a;
 
             half dSoftness = d * scaleSoftness / scale;
-            half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor);
+            half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
             result = BlendOver(result, outlineResult);
 
             // Face layer (on top)
@@ -300,7 +302,7 @@ SubShader {
             faceColor *= tex2D(_FaceTex, input.textures.xy + float2(_FaceUVSpeedX, _FaceUVSpeedY) * _Time.y);
             faceColor.rgb *= faceColor.a;
 
-            half4 faceResult = SDFLayer(d, bias, faceColor);
+            half4 faceResult = SDFLayer(d, bias, faceColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 
             #if BEVEL_ON
             // Calculate sd for bevel (using normFactor for independence from atlas settings)
