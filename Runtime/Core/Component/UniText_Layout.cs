@@ -88,7 +88,7 @@ namespace LightSide
         public float maxWidth => float.PositiveInfinity;
         public float maxHeight => float.PositiveInfinity;
 
-        public float minWidth => 0;
+        public float minWidth => contentMinWidth ? GetMinContentWidth() : 0;
         public float preferredWidth => cachedPreferredWidth;
         public float flexibleWidth => -1;
 

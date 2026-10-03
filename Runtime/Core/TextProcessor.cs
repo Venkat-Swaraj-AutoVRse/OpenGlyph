@@ -1716,7 +1716,24 @@ namespace LightSide
                 return;
             }
 
-            float mainAscender, mainDescender, mainLineHeight;
+            buf.perLineAdvances.EnsureCapacity(lineCount);
+            cachedRawHeight = ComputeLineAdvances(buf.lines.data, lineCount, buf.orderedRuns.data, fontSize,
+                lineSpacing, distribution, buf.perLineAdvances.data,
+                out cachedEffectiveFirstLineHeight, out cachedEffectiveLastLineHeight,
+                out cachedMainAscender, out cachedMainDescender, out cachedMainLineHeight);
+            buf.perLineAdvances.count = lineCount;
+            cachedHeightFontSize = fontSize;
+        }
+
+        /// <summary>
+        /// Per-line advances into <paramref name="advances"/> (last entry 0) for the given lines, and the
+        /// raw (untrimmed) text height. Pure: reads the lines/runs passed in, writes only the outputs.
+        /// </summary>
+        private float ComputeLineAdvances(TextLine[] lines, int lineCount, ShapedRun[] orderedRuns,
+            float fontSize, float lineSpacing, LeadingDistribution distribution, float[] advances,
+            out float firstLineHeight, out float lastLineHeight,
+            out float mainAscender, out float mainDescender, out float mainLineHeight)
+        {
             if (fontProvider != null)
                 fontProvider.GetLineMetrics(fontSize, out mainAscender, out mainDescender, out mainLineHeight);
             else
@@ -1726,11 +1743,6 @@ namespace LightSide
                 mainDescender = -mainLineHeight * 0.2f;
             }
 
-            buf.perLineAdvances.EnsureCapacity(lineCount);
-
-            var lines = buf.lines.data;
-            var orderedRuns = buf.orderedRuns.data;
-            var advances = buf.perLineAdvances.data;
             var totalLineAdvances = 0f;
 
             // Phase 1: Compute per-line effective heights (CSS line box model)
@@ -1745,8 +1757,8 @@ namespace LightSide
                 advances[i] = h;
             }
 
-            cachedEffectiveFirstLineHeight = advances[0];
-            cachedEffectiveLastLineHeight = advances[lineCount - 1];
+            firstLineHeight = advances[0];
+            lastLineHeight = advances[lineCount - 1];
 
             // Phase 2: Compute inter-line advances based on leading distribution model
             var prevH = advances[0];
@@ -1793,12 +1805,7 @@ namespace LightSide
             if (lineCount > 0)
                 advances[lineCount - 1] = 0f;
 
-            buf.perLineAdvances.count = lineCount;
-            cachedRawHeight = mainAscender - mainDescender + totalLineAdvances;
-            cachedMainAscender = mainAscender;
-            cachedMainDescender = mainDescender;
-            cachedMainLineHeight = mainLineHeight;
-            cachedHeightFontSize = fontSize;
+            return mainAscender - mainDescender + totalLineAdvances;
         }
 
         private void ComputeMaxLineMetrics(in TextLine line, ShapedRun[] orderedRuns, float fontSize,
