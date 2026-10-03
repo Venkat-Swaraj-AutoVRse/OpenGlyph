@@ -628,7 +628,8 @@ namespace LightSide
             }
         }
 
-        /// <summary>Gets or sets the horizontal text alignment.</summary>
+        /// <summary>Gets or sets the horizontal text alignment. Left/Right are the paragraph's start/end
+        /// edge (an RTL paragraph aligned Left is flush right); see <see cref="LightSide.HorizontalAlignment"/>.</summary>
         public HorizontalAlignment HorizontalAlignment
         {
             get => horizontalAlignment;
@@ -1348,8 +1349,17 @@ namespace LightSide
             baseDirection = baseDirection,
             enableWordWrap = wordWrap,
             Overflow = overflow,
-            TmpJustification = UseTmpJustification
+            TmpJustification = UseTmpJustification,
+            PhysicalAlignment = UsePhysicalAlignment
         };
+
+        /// <summary>
+        /// Whether Left/Right alignment is PHYSICAL (TextMeshPro semantics: the rect's left/right edge for
+        /// every paragraph). Plain <c>UniText</c> returns false: Left/Right are the paragraph's start/end
+        /// edge, so an RTL paragraph aligned Left is flush right. <c>GlyphMeshProUGUI</c> overrides this
+        /// to true.
+        /// </summary>
+        protected virtual bool UsePhysicalAlignment => false;
 
         /// <summary>
         /// Whether this component uses the opt-in TextMeshPro-compatible justification (5% wrap overrun

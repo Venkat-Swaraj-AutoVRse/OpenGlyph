@@ -337,19 +337,32 @@ namespace LightSide
     /// <summary>
     /// Specifies horizontal text alignment within the layout bounds.
     /// </summary>
+    /// <remarks>
+    /// Left/Right are paragraph-relative (logical) in the core engine: <see cref="Left"/> is the
+    /// paragraph's START edge and <see cref="Right"/> its END edge, so an RTL (Arabic/Hebrew) paragraph
+    /// aligned <see cref="Left"/> renders flush RIGHT. Direction is resolved per paragraph, so mixed
+    /// LTR/RTL text aligns each paragraph to its own start. The TMP-parity component
+    /// <c>GlyphMeshProUGUI</c> opts into PHYSICAL alignment instead (see
+    /// <see cref="LayoutSettings.physicalAlignment"/>), matching TextMeshPro.
+    /// </remarks>
     public enum HorizontalAlignment : byte
     {
-        /// <summary>Align text to the left edge.</summary>
+        /// <summary>Align to the paragraph's START edge: the left edge for an LTR paragraph, the right
+        /// edge for an RTL paragraph (physical left when <see cref="LayoutSettings.physicalAlignment"/>
+        /// is set).</summary>
         Left = 0,
 
         /// <summary>Center text horizontally.</summary>
         Center = 1,
 
-        /// <summary>Align text to the right edge.</summary>
+        /// <summary>Align to the paragraph's END edge: the right edge for an LTR paragraph, the left
+        /// edge for an RTL paragraph (physical right when <see cref="LayoutSettings.physicalAlignment"/>
+        /// is set).</summary>
         Right = 2,
 
         /// <summary>Justify: distribute inter-word slack so each line (except the last line of a
-        /// paragraph) fills the available width. The last line of a paragraph is left-aligned.</summary>
+        /// paragraph) fills the available width. The last line of a paragraph is START-aligned (left for
+        /// LTR, right for RTL). RTL lines are currently start-aligned without inter-word spreading.</summary>
         Justified = 3,
 
         /// <summary>Flush: like <see cref="Justified"/> but justifies EVERY line, including the last
