@@ -384,6 +384,14 @@ namespace LightSide
             if (materialsPrepared && preparedMaterials.TryGetValue(fontId, out var prepped))
                 return prepped;
 
+            // A fallback font first registered by this worker's own first pass can't have been
+            // prepared yet. Never touch Unity off the main thread: serve the main font's materials
+            // (fallbacks use the appearance's default materials unless overridden per font); the
+            // mesh-generation prepare step resolves the exact materials before rendering.
+            if (materialsPrepared && !UniTextThreadGuard.IsMainThread &&
+                preparedMaterials.TryGetValue(mainFontId, out var mainPrepped))
+                return mainPrepped;
+
             // Miss (serial path, or a font that escaped PrepareMaterials): resolve live. On a worker
             // this trips UniTextThreadGuard via the appearance, which is exactly the intended signal.
             // A component whose legacy appearance was cleared (e.g. by the migration tool's
