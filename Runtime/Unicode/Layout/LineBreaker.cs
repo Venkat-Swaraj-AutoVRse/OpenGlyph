@@ -81,6 +81,7 @@ namespace LightSide
             float widthTolerance = 1f)
         {
             searchStartRunIdx = 0;
+            ResetRunClusterOrder(runs.Length);
 
             var cpCount = codepoints.Length;
 
@@ -180,20 +181,8 @@ namespace LightSide
                 if (runStart > endCp)
                     break;
 
-                int glyphFirst = -1, glyphLast = -1;
-
-                for (var g = 0; g < run.glyphCount; g++)
-                {
-                    var glyph = glyphs[run.glyphStart + g];
-                    var cpIdx = glyph.cluster;
-                    var inRange = cpIdx >= startCp && cpIdx <= endCp;
-
-                    if (inRange)
-                    {
-                        if (glyphFirst < 0) glyphFirst = g;
-                        glyphLast = g;
-                    }
-                }
+                int glyphFirst, glyphLast;
+                FindGlyphRangeInLine(glyphs, run, runIdx, startCp, endCp, out glyphFirst, out glyphLast);
 
                 if (glyphFirst < 0) continue;
 
@@ -232,6 +221,108 @@ namespace LightSide
                 width = actualLineWidth,
                 startMargin = startMargin
             };
+        }
+
+        // Per-run cluster order, computed lazily once per BreakLines call (see FindGlyphRangeInLine).
+        private const byte OrderUnknown = 0, OrderAscending = 1, OrderDescending = 2, OrderUnordered = 3;
+        private byte[] runClusterOrder;
+
+        /// <summary>
+        /// Finds the first/last glyph (relative to the run) whose cluster lies in [startCp, endCp].
+        /// </summary>
+        /// <remarks>
+        /// This used to scan every glyph of the run for every line the run touches. A single long run
+        /// (one font/script paragraph) touches every line, so wrapping was O(lines × glyphs) =
+        /// O(n²) in text length. Shaped clusters are monotonic within a run (ascending for LTR,
+        /// descending for RTL), so the in-range glyphs are one contiguous block found by binary
+        /// search. A run whose clusters are not monotonic falls back to the original full scan, so
+        /// the result is identical in every case.
+        /// </remarks>
+        private void FindGlyphRangeInLine(ReadOnlySpan<ShapedGlyph> glyphs, in ShapedRun run, int runIdx,
+            int startCp, int endCp, out int glyphFirst, out int glyphLast)
+        {
+            glyphFirst = -1;
+            glyphLast = -1;
+            var count = run.glyphCount;
+            if (count <= 0) return;
+            var runGlyphs = glyphs.Slice(run.glyphStart, count);
+
+            var order = runClusterOrder[runIdx];
+            if (order == OrderUnknown)
+                runClusterOrder[runIdx] = order = ClassifyClusterOrder(runGlyphs);
+
+            if (order == OrderAscending)
+            {
+                // First glyph with cluster >= startCp, last glyph with cluster <= endCp.
+                var first = LowerBoundAscending(runGlyphs, startCp);
+                var last = LowerBoundAscending(runGlyphs, endCp + 1) - 1;
+                if (first <= last) { glyphFirst = first; glyphLast = last; }
+                return;
+            }
+
+            if (order == OrderDescending)
+            {
+                // First glyph with cluster <= endCp, last glyph with cluster >= startCp.
+                var first = FirstAtOrBelowDescending(runGlyphs, endCp);
+                var last = FirstAtOrBelowDescending(runGlyphs, startCp - 1) - 1;
+                if (first <= last) { glyphFirst = first; glyphLast = last; }
+                return;
+            }
+
+            for (var g = 0; g < count; g++)
+            {
+                var cpIdx = runGlyphs[g].cluster;
+                if (cpIdx >= startCp && cpIdx <= endCp)
+                {
+                    if (glyphFirst < 0) glyphFirst = g;
+                    glyphLast = g;
+                }
+            }
+        }
+
+        private static byte ClassifyClusterOrder(ReadOnlySpan<ShapedGlyph> runGlyphs)
+        {
+            bool asc = true, desc = true;
+            for (var g = 1; g < runGlyphs.Length && (asc || desc); g++)
+            {
+                var prev = runGlyphs[g - 1].cluster;
+                var cur = runGlyphs[g].cluster;
+                if (cur < prev) asc = false;
+                if (cur > prev) desc = false;
+            }
+            return asc ? OrderAscending : desc ? OrderDescending : OrderUnordered;
+        }
+
+        /// <summary>Index of the first glyph with cluster &gt;= value (clusters non-decreasing).</summary>
+        private static int LowerBoundAscending(ReadOnlySpan<ShapedGlyph> runGlyphs, int value)
+        {
+            int lo = 0, hi = runGlyphs.Length;
+            while (lo < hi)
+            {
+                var mid = (lo + hi) >> 1;
+                if (runGlyphs[mid].cluster < value) lo = mid + 1; else hi = mid;
+            }
+            return lo;
+        }
+
+        /// <summary>Index of the first glyph with cluster &lt;= value (clusters non-increasing).</summary>
+        private static int FirstAtOrBelowDescending(ReadOnlySpan<ShapedGlyph> runGlyphs, int value)
+        {
+            int lo = 0, hi = runGlyphs.Length;
+            while (lo < hi)
+            {
+                var mid = (lo + hi) >> 1;
+                if (runGlyphs[mid].cluster > value) lo = mid + 1; else hi = mid;
+            }
+            return lo;
+        }
+
+        private void ResetRunClusterOrder(int runCount)
+        {
+            if (runClusterOrder == null || runClusterOrder.Length < runCount)
+                runClusterOrder = new byte[Math.Max(runCount, runClusterOrder == null ? 64 : runClusterOrder.Length * 2)];
+            else
+                Array.Clear(runClusterOrder, 0, runCount);
         }
 
         private void ReorderRunsPerLine(ReadOnlySpan<BidiParagraph> paragraphs)
