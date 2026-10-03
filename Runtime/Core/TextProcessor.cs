@@ -102,6 +102,17 @@ namespace LightSide
         }
 
         /// <summary>
+        /// Opt-in physical (TextMeshPro) horizontal alignment: Left/Right mean the rect's left/right edge
+        /// for every paragraph instead of the paragraph's start/end edge. Only the TMP-parity components
+        /// set this. See <see cref="LayoutSettings.physicalAlignment"/>.
+        /// </summary>
+        public bool PhysicalAlignment
+        {
+            get => layout.physicalAlignment;
+            set => layout.physicalAlignment = value;
+        }
+
+        /// <summary>
         /// Gets or sets the vertical text alignment.
         /// </summary>
         public VerticalAlignment VerticalAlignment
@@ -309,6 +320,7 @@ namespace LightSide
         private HorizontalAlignment lastLayoutHAlign;
         private VerticalAlignment lastLayoutVAlign;
         private TextOverflow lastLayoutOverflow;
+        private bool lastLayoutPhysicalAlign;
         private bool hasValidPositionedGlyphs;
 
         private TextProcessSettings lastSettings;
@@ -600,7 +612,7 @@ namespace LightSide
         {
             if (!hasValidLinesData) return;
             if (CanReusePositions(settings.MaxHeight, settings.HorizontalAlignment, settings.VerticalAlignment,
-                    settings.Overflow)) return;
+                    settings.Overflow) && lastLayoutPhysicalAlign == settings.PhysicalAlignment) return;
 
             UniTextDebug.BeginSample("TextProcessor.EnsurePositions");
 
@@ -612,6 +624,7 @@ namespace LightSide
             lastLayoutHAlign = settings.HorizontalAlignment;
             lastLayoutVAlign = settings.VerticalAlignment;
             lastLayoutOverflow = settings.Overflow;
+            lastLayoutPhysicalAlign = settings.PhysicalAlignment;
             hasValidPositionedGlyphs = true;
 
             LayoutComplete?.Invoke();
