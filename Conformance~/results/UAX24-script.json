@@ -1,0 +1,13 @@
+{
+  "standard": "UAX24-script",
+  "name": "Unicode Script property (Scripts.txt)",
+  "unicodeVersion": "17.0.0",
+  "dataFile": "Scripts.txt",
+  "total": 159866,
+  "passed": 159866,
+  "failed": 0,
+  "excluded": 0,
+  "exclusions": [],
+  "failureClasses": {},
+  "firstFailures": []
+}

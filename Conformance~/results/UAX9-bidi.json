@@ -1,0 +1,13 @@
+{
+  "standard": "UAX9-bidi",
+  "name": "Unicode Bidirectional Algorithm (BidiTest)",
+  "unicodeVersion": "17.0.0",
+  "dataFile": "BidiTest.txt",
+  "total": 770241,
+  "passed": 770241,
+  "failed": 0,
+  "excluded": 0,
+  "exclusions": [],
+  "failureClasses": {},
+  "firstFailures": []
+}
