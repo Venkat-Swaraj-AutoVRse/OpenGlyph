@@ -41,6 +41,17 @@ namespace LightSide
         public LeadingDistribution leadingDistribution;
 
         /// <summary>
+        /// Opt-in TextMeshPro-compatible justification. When FALSE (the default, and the behaviour
+        /// plain <c>UniText</c> keeps), Justified/Flush wrap at the exact box width and spread slack
+        /// across inter-word whitespace only — the pre-Round-2.1 behaviour. When TRUE (set only by the
+        /// TMP-parity components <c>GlyphMeshProUGUI</c>/<c>GlyphMeshPro</c>), the line-breaker allows a
+        /// 5% overrun before wrapping and the layout splits slack between word AND character spacing
+        /// (TMP's wordWrappingRatios), so GlyphMeshPro matches TMP without changing any existing plain
+        /// UniText layout.
+        /// </summary>
+        public bool tmpJustification;
+
+        /// <summary>
         /// Gets the default layout settings with unlimited dimensions and top-left alignment.
         /// </summary>
         public static LayoutSettings Default => new()
@@ -53,7 +64,8 @@ namespace LightSide
             verticalAlignment = VerticalAlignment.Top,
             overEdge = TextOverEdge.Ascent,
             underEdge = TextUnderEdge.Descent,
-            leadingDistribution = LeadingDistribution.HalfLeading
+            leadingDistribution = LeadingDistribution.HalfLeading,
+            tmpJustification = false
         };
     }
 
@@ -177,7 +189,8 @@ namespace LightSide
             PositionedGlyph[] result,
             ref int glyphCount,
             out float width,
-            out float height)
+            out float height,
+            ReadOnlySpan<int> codepoints = default)
         {
             glyphCount = 0;
             width = 0;
@@ -260,6 +273,75 @@ namespace LightSide
                     }
                 }
 
+                // ---- Justification (Justified/Flush) --------------------------------------------
+                // TWO behaviours, selected by settings.tmpJustification:
+                //  * OFF (plain UniText, the default): legacy — spread the slack across inter-word
+                //    whitespace ONLY, no overrun (the LineBreaker used tolerance 1.0 so lineWidth <=
+                //    availableWidth), no character spacing, no compression. Byte-identical to main.
+                //  * ON (GlyphMeshPro, opt-in TMP parity): split the slack between word spacing and
+                //    character spacing by wordWrappingRatios (TMP 0.4) — spaces take 60%, visible
+                //    CLUSTERS take 40%. Slack may be negative (a 5%-overrun line compresses back). A
+                //    floor keeps a space >= 70% of its advance. The character share is applied at
+                //    GRAPHEME-CLUSTER boundaries (after the last glyph of each cluster), never between a
+                //    base and its marks/conjunct parts, so Devanagari/Thai/Khmer/Myanmar marks keep
+                //    their offset. On a line containing a JOINING script (Arabic, Syriac, N'Ko,
+                //    Mongolian, ...) character spreading is skipped entirely — the whole slack goes to
+                //    spaces (with the floor) — because inserting advance between joined letters would
+                //    break the cursive join. RTL lines are already excluded below (noted for clarity).
+                const float WordWrappingRatio = 0.4f;   // TMP m_wordWrappingRatios default
+                const float MinSpaceFraction = 0.70f;   // a space keeps at least 70% of its advance
+                bool tmpJustify = settings.tmpJustification;
+                float justifyPerSpace = 0f;    // extra advance added at each whitespace glyph
+                float justifyPerCluster = 0f;  // extra advance added after each visible cluster (TMP only)
+                if ((hAlign == HorizontalAlignment.Justified || hAlign == HorizontalAlignment.Flush)
+                    && hasFiniteWidth && !isRtlLine) // RTL lines never justify here (base direction skip)
+                {
+                    bool isLastLineOfParagraph =
+                        i == lineCount - 1 || EndsAtHardBreak(in line, codepoints);
+                    bool justifyThisLine = hAlign == HorizontalAlignment.Flush || !isLastLineOfParagraph;
+                    if (justifyThisLine)
+                    {
+                        if (!tmpJustify)
+                        {
+                            // Legacy: word-gap-only, positive slack only (no overrun on this path).
+                            int gaps = CountWhitespaceGapsLegacy(in line, runs, glyphs, codepoints);
+                            if (gaps > 0 && lineWidth < availableWidth)
+                                justifyPerSpace = (availableWidth - lineWidth) / gaps;
+                        }
+                        else
+                        {
+                            CountJustifyTargets(in line, runs, glyphs, codepoints, glyphScale,
+                                out int spaces, out int visibleClusters, out float minSpaceAdvance);
+                            bool joining = LineHasJoiningScript(in line, codepoints);
+                            float gap = availableWidth - lineWidth; // + = spread, - = compress
+                            // Joining scripts: no character spreading — all slack to spaces.
+                            float ratio = joining ? 0f : WordWrappingRatio;
+                            if (spaces > 0 || visibleClusters > 0)
+                            {
+                                float spaceShare = spaces > 0 ? gap * (1f - ratio) : 0f;
+                                float clusterShare = visibleClusters > 0 ? gap * ratio : 0f;
+                                if (visibleClusters == 0 || joining) spaceShare = gap;
+                                if (spaces == 0) clusterShare = gap;
+
+                                justifyPerSpace = spaces > 0 ? spaceShare / spaces : 0f;
+                                justifyPerCluster = (!joining && visibleClusters > 0)
+                                    ? clusterShare / visibleClusters : 0f;
+
+                                // Floor: never shrink a space below MinSpaceFraction of its advance.
+                                if (justifyPerSpace < 0f && spaces > 0)
+                                {
+                                    float maxShrink = minSpaceAdvance * (1f - MinSpaceFraction);
+                                    if (-justifyPerSpace > maxShrink) justifyPerSpace = -maxShrink;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Track cluster boundaries so the per-cluster character share is applied once, after the
+                // LAST glyph of each visible cluster (never between a base and its marks).
+                int prevClusterApplied = int.MinValue;
+
                 for (var r = runStart; r < runEnd; r++)
                 {
                     ref readonly var run = ref runs[r];
@@ -299,6 +381,27 @@ namespace LightSide
                             bottom = boundsBottom
                         };
                         x += advanceScaled;
+                        // Apply the justification offsets:
+                        //  * whitespace glyph  -> the word-spacing share (justifyPerSpace).
+                        //  * visible cluster    -> the character-spacing share (justifyPerCluster),
+                        //    added ONCE after the cluster's LAST glyph. A cluster's last glyph is the
+                        //    one whose successor (next glyph in this run, or the run's end) starts a
+                        //    different cluster — so marks/conjunct parts that share the base's cluster
+                        //    never get an advance inserted between them.
+                        if (IsWhitespaceCluster(glyph.cluster, codepoints))
+                        {
+                            x += justifyPerSpace;
+                        }
+                        else if (justifyPerCluster != 0f)
+                        {
+                            bool lastGlyphOfCluster =
+                                (g + 1 >= glyphEnd) || glyphs[g + 1].cluster != glyph.cluster;
+                            if (lastGlyphOfCluster && glyph.cluster != prevClusterApplied)
+                            {
+                                x += justifyPerCluster;
+                                prevClusterApplied = glyph.cluster;
+                            }
+                        }
                     }
                 }
 
@@ -375,8 +478,148 @@ namespace LightSide
             {
                 HorizontalAlignment.Left => isRtlLine ? availableWidth - lineWidth : 0,
                 HorizontalAlignment.Right => isRtlLine ? 0 : availableWidth - lineWidth,
+                // Justified/Flush start flush with the leading edge; inter-word slack is distributed
+                // in the glyph loop so the line fills the width (handled there, not here).
+                HorizontalAlignment.Justified => isRtlLine ? availableWidth - lineWidth : 0,
+                HorizontalAlignment.Flush => isRtlLine ? availableWidth - lineWidth : 0,
                 _ => (availableWidth - lineWidth) * 0.5f
             };
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsWhitespaceCluster(int cluster, ReadOnlySpan<int> codepoints)
+        {
+            if (codepoints.IsEmpty || (uint)cluster >= (uint)codepoints.Length) return false;
+            int cp = codepoints[cluster];
+            // Breaking spaces that absorb justification slack. Deliberately excludes NBSP (U+00A0)
+            // and newline/tab (not inter-word gaps on a laid-out line).
+            return cp == ' ' || cp == 0x2000 || cp == 0x2001 || cp == 0x2002 || cp == 0x2003
+                || cp == 0x2004 || cp == 0x2005 || cp == 0x2006 || cp == 0x2008 || cp == 0x2009
+                || cp == 0x205F || cp == 0x3000;
+        }
+
+        /// <summary>Counts the TMP-justification targets on a line: inter-word whitespace gaps (one per
+        /// whitespace glyph, minus a trailing wrap space) and visible GRAPHEME CLUSTERS (distinct
+        /// non-whitespace cluster ids, not glyphs — so a base+marks counts once), plus the smallest
+        /// whitespace advance (scaled) used to floor how far a space may compress.</summary>
+        private static void CountJustifyTargets(in TextLine line, ReadOnlySpan<ShapedRun> runs,
+            ReadOnlySpan<ShapedGlyph> glyphs, ReadOnlySpan<int> codepoints, float glyphScale,
+            out int spaces, out int visibleClusters, out float minSpaceAdvance)
+        {
+            spaces = 0; visibleClusters = 0; minSpaceAdvance = float.MaxValue;
+            if (codepoints.IsEmpty) { minSpaceAdvance = 0f; return; }
+            int runEnd = line.runStart + line.runCount;
+            int lastCountedCluster = int.MinValue;
+            for (int r = line.runStart; r < runEnd; r++)
+            {
+                ref readonly var run = ref runs[r];
+                int gEnd = run.glyphStart + run.glyphCount;
+                for (int g = run.glyphStart; g < gEnd; g++)
+                {
+                    int cl = glyphs[g].cluster;
+                    if (IsWhitespaceCluster(cl, codepoints))
+                    {
+                        spaces++;
+                        float adv = glyphs[g].advanceX * glyphScale;
+                        if (adv < minSpaceAdvance) minSpaceAdvance = adv;
+                        lastCountedCluster = int.MinValue; // reset so a new visible cluster is counted
+                    }
+                    else if (cl != lastCountedCluster)
+                    {
+                        visibleClusters++;
+                        lastCountedCluster = cl;
+                    }
+                }
+            }
+            // A trailing space at the line's wrap point should not stretch the visible line end; drop
+            // one gap when the line's last glyph is whitespace so the last word still lands at the edge.
+            if (spaces > 0 && runEnd > line.runStart)
+            {
+                ref readonly var lastRun = ref runs[runEnd - 1];
+                if (lastRun.glyphCount > 0)
+                {
+                    int lastG = lastRun.glyphStart + lastRun.glyphCount - 1;
+                    if (IsWhitespaceCluster(glyphs[lastG].cluster, codepoints)) spaces--;
+                }
+            }
+            // TMP gives the LAST cluster on the line no trailing advance (it lands at the edge).
+            if (visibleClusters > 1) visibleClusters -= 1;
+            if (minSpaceAdvance == float.MaxValue) minSpaceAdvance = 0f;
+        }
+
+        /// <summary>Legacy (non-TMP) count: inter-word whitespace gaps on a line, excluding a trailing
+        /// wrap space. This is the exact pre-Round-2.1 behaviour plain UniText keeps.</summary>
+        private static int CountWhitespaceGapsLegacy(in TextLine line, ReadOnlySpan<ShapedRun> runs,
+            ReadOnlySpan<ShapedGlyph> glyphs, ReadOnlySpan<int> codepoints)
+        {
+            if (codepoints.IsEmpty) return 0;
+            int gaps = 0;
+            int runEnd = line.runStart + line.runCount;
+            for (int r = line.runStart; r < runEnd; r++)
+            {
+                ref readonly var run = ref runs[r];
+                int gEnd = run.glyphStart + run.glyphCount;
+                for (int g = run.glyphStart; g < gEnd; g++)
+                    if (IsWhitespaceCluster(glyphs[g].cluster, codepoints)) gaps++;
+            }
+            if (gaps > 0 && runEnd > line.runStart)
+            {
+                ref readonly var lastRun = ref runs[runEnd - 1];
+                if (lastRun.glyphCount > 0)
+                {
+                    int lastG = lastRun.glyphStart + lastRun.glyphCount - 1;
+                    if (IsWhitespaceCluster(glyphs[lastG].cluster, codepoints)) gaps--;
+                }
+            }
+            return gaps;
+        }
+
+        /// <summary>True when any codepoint on the line belongs to a cursive JOINING script (Arabic,
+        /// Syriac, N'Ko, Mongolian, Arabic Presentation Forms, Mandaic, ...). On such a line the
+        /// character-spacing share is skipped — inserting advance between joined letters would break the
+        /// cursive connection — so all slack goes to the inter-word spaces instead.</summary>
+        private static bool LineHasJoiningScript(in TextLine line, ReadOnlySpan<int> codepoints)
+        {
+            if (codepoints.IsEmpty) return false;
+            int start = line.range.start;
+            int end = line.range.End;
+            for (int i = start; i < end; i++)
+            {
+                if ((uint)i >= (uint)codepoints.Length) break;
+                int cp = codepoints[i];
+                // Arabic 0600-06FF, Syriac 0700-074F, Arabic Supplement 0750-077F, Thaana 0780-07BF,
+                // N'Ko 07C0-07FF, Mandaic/Samaritan 0800-083F, Arabic Extended-A 08A0-08FF,
+                // Mongolian 1800-18AF, Arabic Presentation Forms-A FB50-FDFF and -B FE70-FEFF.
+                if ((cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0700 && cp <= 0x074F)
+                    || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x07C0 && cp <= 0x07FF)
+                    || (cp >= 0x0800 && cp <= 0x083F) || (cp >= 0x08A0 && cp <= 0x08FF)
+                    || (cp >= 0x1800 && cp <= 0x18AF)
+                    || (cp >= 0xFB50 && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>True when the line ends at a hard line break (newline) — i.e. it is the last line
+        /// of its paragraph, which Justified (but not Flush) leaves un-justified.</summary>
+        private static bool EndsAtHardBreak(in TextLine line, ReadOnlySpan<int> codepoints)
+        {
+            if (codepoints.IsEmpty) return true;
+            int end = line.range.End;
+            // Scan the codepoint just before the line's end (and the end position itself) for a newline.
+            int idx = end - 1;
+            if ((uint)idx < (uint)codepoints.Length)
+            {
+                int cp = codepoints[idx];
+                if (cp == '\n' || cp == '\r' || cp == 0x2028 || cp == 0x2029) return true;
+            }
+            if ((uint)end < (uint)codepoints.Length)
+            {
+                int cp = codepoints[end];
+                if (cp == '\n' || cp == '\r' || cp == 0x2028 || cp == 0x2029) return true;
+            }
+            // No newline at/after the line end means a soft wrap — not a paragraph end.
+            return end >= codepoints.Length;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
