@@ -37,9 +37,8 @@ namespace LightSide
         {
             Cat.Meow($"[UniText] OnPreprocessBuild, platform: {report.summary.platformGroup}");
 
-            EnsureShaderIncluded("UniText/shader", "unified renderer will be unavailable in the player");
-            // UniTextAppearance resolves the MSDF material for MSDF fonts via Shader.Find("UniText/MSDF SSD").
-            EnsureShaderIncluded("UniText/MSDF SSD", "MSDF fonts will have no shader in the player");
+            foreach (var (shaderName, consequence) in RuntimeFoundShaders)
+                EnsureShaderIncluded(shaderName, consequence);
             CheckSettingsAssetPresent();
 
             if (report.summary.platformGroup == BuildTargetGroup.WebGL)
@@ -66,6 +65,12 @@ namespace LightSide
                 if (path.Contains("/Resources/") && path.EndsWith("/Resources/UniTextSettings.asset"))
                 {
                     Cat.Meow($"[UniText] Found project UniTextSettings at {path}; it will be used in the build.");
+                    // Components without their own Font Stack/Appearance fall back to these at runtime.
+                    var so = new SerializedObject(AssetDatabase.LoadMainAssetAtPath(path));
+                    if (so.FindProperty("defaultFontStack")?.objectReferenceValue == null ||
+                        so.FindProperty("defaultAppearance")?.objectReferenceValue == null)
+                        Debug.LogWarning($"[OpenGlyph] {path} has no default Font Stack and/or Appearance. Any UniText " +
+                                         "without its own (e.g. created from code) will not render in this build.");
                     return;
                 }
             }
@@ -80,6 +85,15 @@ namespace LightSide
                 "Resources folder, or open Edit > Project Settings > UniText.");
         }
 
+        /// <summary>Shaders the runtime loads with Shader.Find. ShaderBuildInclusionTests checks that every
+        /// name resolves: a typo here (it once read "UniText/shader") silently ships builds without it.</summary>
+        internal static readonly (string name, string consequence)[] RuntimeFoundShaders =
+        {
+            ("UniText/Uber", "the unified renderer and GlyphMeshPro will draw white quads in the player"),
+            // UniTextAppearance resolves the MSDF material for MSDF fonts via Shader.Find("UniText/MSDF SSD").
+            ("UniText/MSDF SSD", "MSDF fonts will have no shader in the player"),
+        };
+
         // Shaders instantiated at runtime via Shader.Find (no material asset references them) would be
         // dropped by Unity's build-time shader stripping, so the runtime silently falls back to
         // UI/Default. Pin them into GraphicsSettings' Always-Included Shaders so they ship in every
@@ -89,7 +103,7 @@ namespace LightSide
             var shader = Shader.Find(shaderName);
             if (shader == null)
             {
-                Debug.LogWarning($"[OpenGlyph] {shaderName} not found at build time; {consequence}.");
+                Debug.LogError($"[OpenGlyph] {shaderName} not found at build time; {consequence}.");
                 return;
             }
 
