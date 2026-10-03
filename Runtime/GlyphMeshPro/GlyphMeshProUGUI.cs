@@ -683,20 +683,40 @@ namespace OpenGlyph
         protected override void OnEnable()
         {
             base.OnEnable();
-            // Re-apply TMP-named adapter state onto the engine after (de)serialization.
-            ApplyAlignment(m_alignment);
-            FontWeight = (m_fontStyle & FontStyles.Bold) != 0 ? 700 : 400;
-            FontStyleAxis = (m_fontStyle & FontStyles.Italic) != 0 ? StyleAxis.Italic : StyleAxis.Normal;
-            WordWrap = m_textWrappingMode == TextWrappingModes.Normal
-                       || m_textWrappingMode == TextWrappingModes.PreserveWhitespace;
             // m_rawText is the serialized source of truth. Legacy components (saved before this
             // field existed) have base.Text set but m_rawText empty — migrate once, treating the
             // persisted engine text as the raw source. Then always compose from m_rawText so the
             // engine sees the style-wrapped form.
             if (string.IsNullOrEmpty(m_rawText) && !string.IsNullOrEmpty(base.Text))
                 m_rawText = base.Text;
-            ApplyStyledSource();
+            RefreshFromSerializedState();
             ApplyPlainFaceDefault();
+        }
+
+#if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+            // Inspector edits, undo/redo and prefab reverts write the serialized fields directly.
+            if (isActiveAndEnabled) RefreshFromSerializedState();
+        }
+#endif
+
+        /// <summary>
+        /// Re-applies every TMP-named serialized field onto the engine and requests a full rebuild.
+        /// The Inspector writes the serialized fields directly, bypassing the property setters (whose
+        /// same-value checks then make re-assigning a no-op), so before this a Font Style or other
+        /// Inspector change only showed after the component was disabled and re-enabled.
+        /// </summary>
+        public void RefreshFromSerializedState()
+        {
+            ApplyAlignment(m_alignment);
+            FontWeight = (m_fontStyle & FontStyles.Bold) != 0 ? 700 : 400;
+            FontStyleAxis = (m_fontStyle & FontStyles.Italic) != 0 ? StyleAxis.Italic : StyleAxis.Normal;
+            WordWrap = m_textWrappingMode == TextWrappingModes.Normal
+                       || m_textWrappingMode == TextWrappingModes.PreserveWhitespace;
+            ApplyStyledSource();
+            SetDirty(DirtyFlags.All);
         }
 
         /// <summary>When <see cref="m_plainFaceStyle"/> is set (the default), force a plain face —
