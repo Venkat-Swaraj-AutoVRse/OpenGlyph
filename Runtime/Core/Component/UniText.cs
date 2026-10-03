@@ -617,6 +617,9 @@ namespace LightSide
         /// <see cref="TextOverflow.Truncate"/> / <see cref="TextOverflow.Ellipsis"/> drop the lines that do not
         /// fit (after auto-size has shrunk the text, when enabled); <see cref="TextOverflow.Clip"/> keeps the
         /// layout and clips the drawn pixels to the rect.
+        /// <para>Notes: <see cref="preferredHeight"/> still reports the FULL text height, so a ContentSizeFitter /
+        /// LayoutGroup grows the rect to fit and truncation then never triggers. For <see cref="HorizontalAlignment.Justified"/>
+        /// the kept last line of a truncated/ellipsized text is treated as the paragraph's last line (not justified).</para>
         /// </remarks>
         public TextOverflow Overflow
         {
@@ -1053,6 +1056,18 @@ namespace LightSide
             crossFadeStartFrame = Time.frameCount;
         }
 
+#if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+            // Undo, prefab revert and the Inspector write the serialized overflow field directly,
+            // bypassing the setter: re-lay out and re-apply the clip.
+            if (!isActiveAndEnabled) return;
+            SetDirty(DirtyFlags.Layout);
+            RefreshOverflowClip();
+        }
+#endif
+
         private void Update()
         {
             if (syncingCanvasColor)
@@ -1073,7 +1088,7 @@ namespace LightSide
                 }
             }
 
-            if (overflow == TextOverflow.Clip) RefreshOverflowClip();
+            if (overflow == TextOverflow.Clip || hasAppliedClip) RefreshOverflowClip();
             highlighter?.Update();
             var c = canvas;
             
@@ -1571,9 +1586,13 @@ namespace LightSide
         {
             if (subMeshRenderers.Count == 0) return;
             var valid = TryGetEffectiveClip(out var clip);
-            if (valid == hasAppliedClip && (!valid || clip == lastAppliedClip)) return;
+            if (valid == hasAppliedClip && (!valid || ClipApproximatelyEqual(clip, lastAppliedClip))) return;
             ApplyClipToRenderers(false);
         }
+
+        private static bool ClipApproximatelyEqual(Rect a, Rect b) =>
+            Mathf.Abs(a.xMin - b.xMin) < 0.01f && Mathf.Abs(a.yMin - b.yMin) < 0.01f &&
+            Mathf.Abs(a.xMax - b.xMax) < 0.01f && Mathf.Abs(a.yMax - b.yMax) < 0.01f;
 
         private Rect lastAppliedClip;
         private bool hasAppliedClip;

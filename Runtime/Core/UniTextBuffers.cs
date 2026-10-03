@@ -179,6 +179,18 @@ namespace LightSide
         /// <summary>Indicates whether <see cref="glyphDataCache"/> contains valid data.</summary>
         public bool hasValidGlyphCache;
 
+        /// <summary>
+        /// Grows <see cref="glyphDataCache"/> to hold <paramref name="required"/> entries. Growth swaps in a fresh,
+        /// uncleared array (PooledBuffer.Grow copies only <c>count</c>, which stays 0 here), so any growth
+        /// invalidates <see cref="hasValidGlyphCache"/> and the cache is rebuilt instead of read as garbage.
+        /// </summary>
+        internal void EnsureGlyphCacheCapacity(int required)
+        {
+            if (glyphDataCache.Capacity >= required) return;
+            hasValidGlyphCache = false;
+            glyphDataCache.EnsureCapacity(required);
+        }
+
         /// <summary>Indicates whether buffers are currently rented from the pool.</summary>
         public bool isRented;
 

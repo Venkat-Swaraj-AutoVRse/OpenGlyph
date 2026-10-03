@@ -1716,24 +1716,28 @@ namespace LightSide
 
             var runsLength = buf.orderedRuns.count;
             var glyphsLength = buf.shapedGlyphs.count;
-            var ellipsisApplied = false;
-            if (wantsEllipsis && visibleLines < lineCount)
-                ellipsisApplied = BeginEllipsisOnLine(visibleLines - 1, settings, ref runsLength, ref glyphsLength);
-
             var glyphCnt = buf.positionedGlyphs.count;
-            Layout.Layout(
-                buf.lines.data.AsSpan(0, visibleLines),
-                buf.orderedRuns.data.AsSpan(0, runsLength),
-                buf.shapedGlyphs.data.AsSpan(0, glyphsLength),
-                buf.perLineAdvances.Span,
-                layoutHeight,
-                buf.positionedGlyphs.data, ref glyphCnt,
-                out resultWidth, out resultHeight,
-                buf.codepoints.Span);
-            buf.positionedGlyphs.count = glyphCnt;
+            try
+            {
+                if (wantsEllipsis && visibleLines < lineCount)
+                    BeginEllipsisOnLine(visibleLines - 1, settings, ref runsLength, ref glyphsLength);
 
-            if (ellipsisApplied)
+                Layout.Layout(
+                    buf.lines.data.AsSpan(0, visibleLines),
+                    buf.orderedRuns.data.AsSpan(0, runsLength),
+                    buf.shapedGlyphs.data.AsSpan(0, glyphsLength),
+                    buf.perLineAdvances.Span,
+                    layoutHeight,
+                    buf.positionedGlyphs.data, ref glyphCnt,
+                    out resultWidth, out resultHeight,
+                    buf.codepoints.Span);
+                buf.positionedGlyphs.count = glyphCnt;
+            }
+            finally
+            {
+                // Always restore the patched line/runs, even if layout throws.
                 EndEllipsisOnLine();
+            }
 
             UniTextDebug.EndSample();
         }
