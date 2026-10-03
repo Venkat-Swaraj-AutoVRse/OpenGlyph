@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace LightSide
 {
@@ -86,7 +87,7 @@ namespace LightSide
 
             if (param[param.Length - 1] == '%')
             {
-                if (float.TryParse(param.Slice(0, param.Length - 1), out var percent))
+                if (float.TryParse(param.Slice(0, param.Length - 1), NumberStyles.Float, CultureInfo.InvariantCulture, out var percent))
                 {
                     value = percent / 100f;
                     isAbsolute = false;
@@ -97,7 +98,7 @@ namespace LightSide
 
             if (param.Length > 2 && param.EndsWith("em".AsSpan(), StringComparison.OrdinalIgnoreCase))
             {
-                if (float.TryParse(param.Slice(0, param.Length - 2), out var emValue))
+                if (float.TryParse(param.Slice(0, param.Length - 2), NumberStyles.Float, CultureInfo.InvariantCulture, out var emValue))
                 {
                     value = emValue;
                     isAbsolute = false;
@@ -106,7 +107,7 @@ namespace LightSide
                 return false;
             }
 
-            if (float.TryParse(param, out var numValue))
+            if (float.TryParse(param, NumberStyles.Float, CultureInfo.InvariantCulture, out var numValue))
             {
                 value = numValue;
                 isAbsolute = true;

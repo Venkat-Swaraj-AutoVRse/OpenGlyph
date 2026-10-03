@@ -1,4 +1,8 @@
-﻿using System;
+﻿// UnicodeDataBuilder is an EDITOR-ONLY asset-building tool (parses UCD text files into the binary
+// runtime data). It is not used at runtime by anything in Runtime/, so it is compiled only for the
+// editor to keep it out of player builds. Verified: no Runtime/Editor reference exists outside this file.
+#if UNITY_EDITOR
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -1551,3 +1555,4 @@ namespace LightSide
         }
     }
 }
+#endif
