@@ -197,6 +197,14 @@ namespace LightSide.Tests
             p.SetValue(o, value);
         }
 
+        private static int PageCount(GlyphMeshProUGUI c)
+        {
+            var info = c.textInfo;
+            var f = info.GetType().GetField("pageCount", BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(f, "GlyphTextInfo.pageCount is missing.");
+            return (int)f.GetValue(info);
+        }
+
         private static long StaticCounter(Type t, string name)
         {
             var f = t.GetField(name, BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
@@ -537,6 +545,7 @@ namespace LightSide.Tests
             var plain = Make("aaa bbb ccc", w);
             var nobr = Make("aaa <nobr>bbb ccc</nobr>", w);
             var lp = Lines(plain); var ln = Lines(nobr);
+            Assert.AreEqual(11, nobr.ResultGlyphs.Length, "the <nobr> tags are parsed, not shown");
             Debug.Log($"[GMP3] nobr: plain lines={lp.Count} line2 start={lp[1].firstCluster}; nobr lines={ln.Count} line2 start={ln[1].firstCluster}");
             Assert.AreEqual(8, lp[1].firstCluster, "plain: breaks before ccc");
             Assert.AreEqual(4, ln[1].firstCluster, "nobr: 'bbb ccc' moves to the next line together");
@@ -635,7 +644,7 @@ namespace LightSide.Tests
             var p2 = Lines(c);
             Assert.AreEqual(s.IndexOf("Charlie", StringComparison.Ordinal), p2[0].firstCluster, "page 2 starts with Charlie");
             Assert.AreEqual(Lines(Make(s, 600, h))[0].y, p2[0].y, 0.05f, "the page is laid out from the top");
-            Assert.AreEqual(3, c.textInfo.pageCount, "6 lines / 2 per page");
+            Assert.AreEqual(3, PageCount(c), "6 lines / 2 per page");
             SetProp(c, "pageToDisplay", 99);
             Render();
             Assert.AreEqual(s.IndexOf("Echo", StringComparison.Ordinal), Lines(c)[0].firstCluster, "past the end clamps to the last page");
@@ -646,7 +655,7 @@ namespace LightSide.Tests
                 var pi = tmp.textInfo.pageInfo[1];
                 Debug.Log($"[GMP3] page 2: GMP first char={p2[0].firstCluster} lines={p2.Count}; TMP pages={tmp.textInfo.pageCount} page2 first char={pi.firstCharacterIndex} last={pi.lastCharacterIndex}");
                 Assert.AreEqual(pi.firstCharacterIndex, p2[0].firstCluster, "same page start as TMP");
-                Assert.AreEqual(tmp.textInfo.pageCount, c.textInfo.pageCount, "same page count as TMP");
+                Assert.AreEqual(tmp.textInfo.pageCount, PageCount(c), "same page count as TMP");
             }
         }
 
@@ -681,9 +690,23 @@ namespace LightSide.Tests
         [Test]
         public void OverflowScrollRect_BehavesAsOverflow_WithoutWarning()
         {
-            var c = Make("Alpha\nBravo\nCharlie", 600, 20f, Legacy, g => g.overflowMode = TextOverflowModes.ScrollRect);
-            Assert.AreEqual(3, Lines(c).Count, "all lines laid out (overflow)");
-            UnityEngine.TestTools.LogAssert.NoUnexpectedReceived();
+            // main warned once per session (static guard); reset it so an earlier test cannot hide the warning.
+            typeof(GlyphMeshProUGUI).GetField("s_warnedUnsupportedOverflow", BindingFlags.NonPublic | BindingFlags.Static)?.SetValue(null, false);
+            var warnings = new List<string>();
+            void OnLog(string msg, string stack, LogType type) { if (type == LogType.Warning) warnings.Add(msg); }
+            Application.logMessageReceived += OnLog;
+            try
+            {
+                // Each mode on a fresh component (a one-time-per-session warning would hide in a shared one).
+                foreach (var mode in new[] { TextOverflowModes.ScrollRect, TextOverflowModes.Page, TextOverflowModes.Linked })
+                {
+                    var c = Make("Alpha\nBravo\nCharlie", 600, 20f, Legacy, g => g.overflowMode = mode);
+                    if (mode == TextOverflowModes.ScrollRect)
+                        Assert.AreEqual(3, Lines(c).Count, "ScrollRect lays out all lines (overflow)");
+                }
+            }
+            finally { Application.logMessageReceived -= OnLog; }
+            Assert.IsFalse(warnings.Exists(w => w.Contains("overflowMode")), "no 'not supported' fallback warning: " + string.Join(" | ", warnings));
         }
     }
 }
