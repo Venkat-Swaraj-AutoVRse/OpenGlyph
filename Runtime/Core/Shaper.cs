@@ -81,19 +81,28 @@ namespace LightSide
             private readonly FastIntDictionary<int> advanceCache = new();
             private readonly object cacheLock = new();
 
-            private readonly IntPtr unmanagedData;
+            // The raw font array is PINNED and handed to HarfBuzz in read-only mode instead of being
+            // copied into a fresh native allocation. Every entry for the same font (the base entry,
+            // each variable-font instance in variationCache, the fontId-keyed entry) used to make its
+            // own full Marshal.AllocHGlobal copy of the file; now they all reference the one managed
+            // array the font already holds (which FreeType also pins). The GCHandle keeps that array
+            // alive and immovable for as long as the hb_blob exists, even if the font later swaps its
+            // stored bytes (Compress/Decompress/SetFontData).
+            private GCHandle pinnedData;
             private readonly IntPtr hbBlob;
             private readonly IntPtr hbFace;
 
             public FontCacheEntry(byte[] fontData, int faceIndex = 0)
             {
                 int dataLength = fontData.Length;
-                unmanagedData = Marshal.AllocHGlobal(dataLength);
-                Marshal.Copy(fontData, 0, unmanagedData, dataLength);
+                pinnedData = GCHandle.Alloc(fontData, GCHandleType.Pinned);
 
-                hbFont = HB.CreateFont(IntPtr.Zero, unmanagedData, dataLength, out hbBlob, out hbFace, out upem, faceIndex);
+                hbFont = HB.CreateFont(IntPtr.Zero, pinnedData.AddrOfPinnedObject(), dataLength, out hbBlob, out hbFace, out upem, faceIndex);
                 if (hbFont == IntPtr.Zero)
+                {
+                    pinnedData.Free();
                     throw new Exception("[HarfBuzz] Failed to create font");
+                }
             }
 
             /// <summary>
@@ -114,9 +123,12 @@ namespace LightSide
                 if (isDisposed) return;
                 isDisposed = true;
                 HB.DestroyFont(hbFont, hbBlob, hbFace);
-                if (unmanagedData != IntPtr.Zero)
-                    Marshal.FreeHGlobal(unmanagedData);
+                if (pinnedData.IsAllocated)
+                    pinnedData.Free();
             }
+
+            /// <summary>The managed font array HarfBuzz reads from (pinned, never copied). Test/diagnostic hook.</summary>
+            internal byte[] SharedFontData => pinnedData.IsAllocated ? (byte[])pinnedData.Target : null;
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public bool TryGetGlyph(uint codepoint, out uint glyphIndex)

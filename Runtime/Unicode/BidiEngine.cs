@@ -231,6 +231,33 @@ namespace LightSide
 
         private const int MaxExplicitLevel = 125;
 
+        /// <summary>Bidi classes whose presence requires full UAX #9 resolution: strong RTL (R, AL),
+        /// Arabic numbers (AN, raised by I1 even at level 0) and all explicit embedding / override /
+        /// isolate controls. Text with none of these resolves to all-zero levels.</summary>
+        private const uint RequiresFullResolutionMask =
+            (1u << (int)BidiClass.RightToLeft) |
+            (1u << (int)BidiClass.ArabicLetter) |
+            (1u << (int)BidiClass.ArabicNumber) |
+            (1u << (int)BidiClass.LeftToRightEmbedding) |
+            (1u << (int)BidiClass.RightToLeftEmbedding) |
+            (1u << (int)BidiClass.LeftToRightOverride) |
+            (1u << (int)BidiClass.RightToLeftOverride) |
+            (1u << (int)BidiClass.PopDirectionalFormat) |
+            (1u << (int)BidiClass.LeftToRightIsolate) |
+            (1u << (int)BidiClass.RightToLeftIsolate) |
+            (1u << (int)BidiClass.FirstStrongIsolate) |
+            (1u << (int)BidiClass.PopDirectionalIsolate);
+
+        /// <summary>Test hook: forces the full resolution path so tests can compare it against the
+        /// LTR fast path.</summary>
+        internal static bool DisableLtrFastPath;
+
+        private static int ltrFastPathCount;
+
+        /// <summary>Number of <see cref="Process(ReadOnlySpan{int}, BidiParagraphDirection)"/> calls
+        /// that took the all-LTR fast path (process-wide, for tests/diagnostics).</summary>
+        internal static int LtrFastPathCount => Volatile.Read(ref ltrFastPathCount);
+
         private readonly UnicodeDataProvider unicodeData;
 
         [ThreadStatic] private static EmbeddingState[]? embeddingStack;
@@ -535,6 +562,7 @@ namespace LightSide
             var bidiClasses = BidiClassesBuffer;
             var originalClasses = OriginalBidiClassesBuffer;
 
+            uint classMask = 0;
             for (var i = 0; i < length; i++)
             {
                 var cp = codePoints[i];
@@ -544,6 +572,7 @@ namespace LightSide
                 var bc = unicodeData.GetBidiClass(cp);
                 bidiClasses[i] = bc;
                 originalClasses[i] = bc;
+                classMask |= 1u << (int)bc;
             }
 
             var paragraphList = ParagraphsBuffer;
@@ -557,6 +586,23 @@ namespace LightSide
             var levels = levelsBuffer!;
             Array.Clear(levels, 0, length);
             var paragraphCount = paragraphList.Count;
+
+            // LTR fast path. With no R/AL/AN and no explicit embedding/override/isolate controls,
+            // every paragraph's base level is 0 (P2/P3 finds only L or nothing), X1-X8 never raise a
+            // level, W7 turns every EN into L (sos is L and there is no R/AL to precede it), and I1
+            // raises nothing at even level once EN is L and AN is absent; L1 resets to the base
+            // level 0. So the full UAX #9 resolution yields all-zero levels — which `levels` already
+            // holds. Skip it. A forced RTL paragraph level is never fast-pathed.
+            if ((classMask & RequiresFullResolutionMask) == 0 &&
+                (!forcedParagraphLevel.HasValue || forcedParagraphLevel.Value == 0) &&
+                !DisableLtrFastPath)
+            {
+                Interlocked.Increment(ref ltrFastPathCount);
+                EnsureParagraphsResultCapacity(paragraphCount);
+                for (var i = 0; i < paragraphCount; i++)
+                    paragraphsResultBuffer![i] = paragraphList[i];
+                return new BidiResult(levels, length, paragraphsResultBuffer!, paragraphCount);
+            }
 
             for (var pIndex = 0; pIndex < paragraphCount; pIndex++)
             {
