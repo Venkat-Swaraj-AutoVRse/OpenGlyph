@@ -31,7 +31,7 @@ namespace OpenGlyph.EditorTools
         private SerializedProperty _characterSpacing, _wordSpacing, _lineSpacing, _paragraphSpacing, _margin;
         private SerializedProperty _maxVisibleCharacters, _maxVisibleWords, _maxVisibleLines, _richText;
 
-        private void OnEnable()
+        protected virtual void OnEnable()
         {
             _fontStyle = serializedObject.FindProperty("m_fontStyle");
             _alignment = serializedObject.FindProperty("m_alignment");

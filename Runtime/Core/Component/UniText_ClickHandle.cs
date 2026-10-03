@@ -56,13 +56,13 @@ namespace LightSide
         /// <inheritdoc/>
         public void OnPointerClick(PointerEventData eventData)
         {
-            var camera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
-                ? canvas.worldCamera
-                : null;
-
-            var result = HitTestScreen(eventData.position, camera);
+            var result = HitTestPointer(eventData);
             if (!result.hit) return;
+            RaiseClick(result);
+        }
 
+        private void RaiseClick(TextHitResult result)
+        {
             Cat.MeowFormat("[UniText] Click: cluster={0}, distance={1:F1}", result.cluster, result.distance);
 
             TextClicked?.Invoke(result);
@@ -119,11 +119,7 @@ namespace LightSide
 
         private void UpdateHover(PointerEventData eventData)
         {
-            var camera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
-                ? canvas.worldCamera
-                : null;
-
-            var result = HitTestScreen(eventData.position, camera);
+            var result = HitTestPointer(eventData);
 
             var registry = InteractiveRangeRegistry.Get(buffers);
             InteractiveRange newRange = default;
@@ -176,6 +172,64 @@ namespace LightSide
             lastHoverResult = result;
             lastHoverRange = newRange;
             lastHoverProvider = newProvider;
+        }
+
+        /// <summary>
+        /// Hit test for an EventSystem pointer event. Canvas text converts the screen position with the
+        /// canvas camera. World text (<see cref="IsWorldText"/>) uses the raycast hit point when the event's
+        /// raycast hit this object (PhysicsRaycaster / XRI TrackedDevicePhysicsRaycaster report the 3D point,
+        /// which also works for tracked-device rays that have no meaningful screen position), else a ray
+        /// from the event camera through the screen position, intersected with the text plane.
+        /// </summary>
+        public TextHitResult HitTestPointer(PointerEventData eventData)
+        {
+            if (eventData == null) return TextHitResult.None;
+            if (RendersToMeshRenderer)
+            {
+                var rr = eventData.pointerCurrentRaycast;
+                if (!rr.isValid || rr.gameObject != gameObject) rr = eventData.pointerPressRaycast;
+                if (rr.isValid && rr.gameObject == gameObject &&
+                    (rr.worldPosition != Vector3.zero || rr.worldNormal != Vector3.zero))
+                    return HitTestWorld(rr.worldPosition);
+                var cam = eventData.enterEventCamera != null ? eventData.enterEventCamera
+                    : eventData.pressEventCamera != null ? eventData.pressEventCamera : Camera.main;
+                return cam != null ? HitTestScreen(eventData.position, cam) : TextHitResult.None;
+            }
+
+            var camera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+                ? canvas.worldCamera
+                : null;
+            return HitTestScreen(eventData.position, camera);
+        }
+
+        /// <summary>Hit test at a world-space point (projected onto the text plane).</summary>
+        public TextHitResult HitTestWorld(Vector3 worldPoint, float maxDistance = DefaultMaxClickDistance)
+        {
+            var local = rectTransform.InverseTransformPoint(worldPoint);
+            return HitTest(new Vector2(local.x, local.y), maxDistance);
+        }
+
+        /// <summary>
+        /// Hit test along a world-space ray (e.g. an XR controller ray), intersected with the text plane.
+        /// Returns <see cref="TextHitResult.None"/> when the ray is parallel to or points away from the text.
+        /// </summary>
+        public TextHitResult HitTestRay(Ray ray, float maxDistance = DefaultMaxClickDistance)
+        {
+            var plane = new Plane(rectTransform.forward, rectTransform.position);
+            if (!plane.Raycast(ray, out var enter) || enter < 0f) return TextHitResult.None;
+            return HitTestWorld(ray.GetPoint(enter), maxDistance);
+        }
+
+        /// <summary>
+        /// Raises the click events (<see cref="TextClicked"/>, <see cref="RangeClicked"/>, the range
+        /// handler) for a world-space point, as an EventSystem click would. For custom XR pointers that
+        /// do not go through the EventSystem. Returns the hit.
+        /// </summary>
+        public TextHitResult ClickAtWorldPoint(Vector3 worldPoint)
+        {
+            var result = HitTestWorld(worldPoint);
+            if (result.hit) RaiseClick(result);
+            return result;
         }
 
         /// <summary>Performs hit testing in local coordinates.</summary>

@@ -89,6 +89,7 @@ namespace LightSide
             BoundState.Clear();
             SharedStyles.Reset();
             StencilCopies.Clear();
+            UniTextWorldMaterials.Reset();
             DestroySharedGroups();
         }
 
