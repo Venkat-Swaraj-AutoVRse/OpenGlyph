@@ -16,6 +16,7 @@ through phase 1c.
 - **Unified renderer is now the project default** (`UniTextSettings.useUnifiedRenderer = true`, shipped asset and runtime default). Opt out per component with `UnifiedRenderer = ForceOff` or project-wide in settings. Test runs: `UNITEXT_FORCE_UNIFIED=1` / `UNITEXT_FORCE_LEGACY=1` pin each mode.
 
 #### Added
+- **System CJK font fallback** (`SystemFontFallback`, `UniTextSettings.useSystemFontFallback`, default on): CJK code points not covered by the font stack lazily use the OS CJK font. TTC face index is now honoured by `CreateFontAsset(..., faceIndex)` and shaping. See `Documentation/SystemFontFallback.md`.
 - **Phase 0 — Native MSDF pipeline.** Clean-room native font core
   (`unitext_native`) built from source for all platforms (Windows, macOS, Linux,
   Android, iOS, tvOS, WebGL), FreeType outline extraction, and a from-scratch

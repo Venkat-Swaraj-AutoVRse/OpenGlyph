@@ -170,6 +170,24 @@ namespace LightSide
         /// </summary>
         public static bool UseUnifiedRenderer => Instance != null && Instance.useUnifiedRenderer;
 
+        [SerializeField]
+        [Tooltip("When ON (default), a code point that no font in the component's font stack covers and " +
+                 "that is Chinese/Japanese/Korean falls back at runtime to the operating system's CJK " +
+                 "font (Windows msyh/YuGothM/malgun, macOS PingFang, Android NotoSansCJK, Linux Noto CJK). " +
+                 "Loaded lazily on first use, on the main thread, cached process-wide. If no system font " +
+                 "is found, CJK renders as missing-glyph boxes with one warning. See " +
+                 "Documentation/SystemFontFallback.md.")]
+        private bool useSystemFontFallback = true;
+
+        /// <summary>Project-wide switch for the lazy system CJK font fallback (default true).</summary>
+        public static bool UseSystemFontFallback => Instance == null || Instance.useSystemFontFallback;
+
+        /// <summary>TEST ONLY: toggles the system font fallback on the current instance.</summary>
+        internal static void SetUseSystemFontFallbackForTests(bool value)
+        {
+            if (Instance != null) { Instance.useSystemFontFallback = value; Changed?.Invoke(); }
+        }
+
         /// <summary>TEST ONLY: forces the project-wide unified-renderer default on the current instance.</summary>
         internal static void SetUseUnifiedRendererForTests(bool value)
         {
