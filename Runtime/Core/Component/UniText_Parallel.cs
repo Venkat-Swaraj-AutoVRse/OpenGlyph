@@ -660,6 +660,7 @@ namespace LightSide
             PrepareStyleModifiers();
 
             textProcessor.EnsureFirstPass(textSpan, settings);
+            if (overflow == TextOverflow.Ellipsis) textProcessor.RegisterOverflowEllipsisGlyphs();
         }
 
         // Ensures the registered BoldModifier/ItalicModifier are initialized (subscribed) when the
@@ -780,6 +781,7 @@ namespace LightSide
                         resultWidth = textProcessor.ResultWidth;
                         resultHeight = textProcessor.ResultHeight;
                     }
+                    RefreshOverflowClip();
                     dirtyFlags = DirtyFlags.None;
                     return;
                 }
