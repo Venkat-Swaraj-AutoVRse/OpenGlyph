@@ -510,7 +510,7 @@ namespace OpenGlyph
             EnsureEngineFirstPass();
             if (TextProcessor == null || !TextProcessor.HasValidFirstPassData) return Vector2.zero;
 
-            var m = m_margin;
+            var m = TextAreaInsets; // TMP margin + UniText padding
             float innerW = width > 0 ? Mathf.Max(0f, width - m.x - m.z) : TextProcessSettings.FloatMax;
             float fs = AutoSize ? MaxFontSize : FontSize;
             float w = TextProcessor.GetPreferredWidth(fs);

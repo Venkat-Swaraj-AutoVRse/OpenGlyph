@@ -161,9 +161,9 @@ namespace LightSide
                 minFontSize, maxFontSize, width, height, settings, autoSizeStep);
         }
 
-        // TMP adds only POSITIVE margins to the preferred (rendered) size.
-        private float PositiveMarginsX { get { var m = LayoutMargins; return Mathf.Max(0f, m.x) + Mathf.Max(0f, m.z); } }
-        private float PositiveMarginsY { get { var m = LayoutMargins; return Mathf.Max(0f, m.y) + Mathf.Max(0f, m.w); } }
+        // TMP adds only POSITIVE margins to the preferred (rendered) size. Padding is never negative.
+        private float PositiveMarginsX { get { var m = TextAreaInsets; return Mathf.Max(0f, m.x) + Mathf.Max(0f, m.z); } }
+        private float PositiveMarginsY { get { var m = TextAreaInsets; return Mathf.Max(0f, m.y) + Mathf.Max(0f, m.w); } }
 
         private void InvalidateLayoutCache()
         {
