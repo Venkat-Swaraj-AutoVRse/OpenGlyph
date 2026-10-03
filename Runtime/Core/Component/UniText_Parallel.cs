@@ -486,6 +486,12 @@ namespace LightSide
                 // DictionarySegmenter (which resolves dictionaries via TextAsset.bytes — main-thread
                 // only); forcing it here guarantees a worker never triggers that build off-thread.
                 _ = SharedPipelineComponents.LineBreakAlgorithm;
+                // First-pass modifiers read materials too (BoldModifier.OnShaped -> GetMaterials for the
+                // weight delta), so resolve them here as well, not only before mesh generation.
+                for (var i = 0; i < count; i++)
+                    componentsBuffer[i].fontProvider?.PrepareMaterials();
+                // GradientModifier resolves UniTextSettings.Gradients (Resources load) on workers: warm it.
+                UniTextSettings.Gradients?.TryGetGradient(string.Empty, out _);
                 UniTextWorkerPool.Execute(componentsBuffer.data, count, static comp => comp.DoFirstPass());
             }
             else

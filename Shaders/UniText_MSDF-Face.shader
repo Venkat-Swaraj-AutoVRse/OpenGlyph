@@ -209,7 +209,8 @@ SubShader {
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 
-			half d = UniTextSampleMSDF(_MainTex, input.atlas.xy) * input.param.x;  // * scale
+			half rawD = UniTextSampleMSDF(_MainTex, input.atlas.xy);  // raw distance (unscaled), for UniTextFieldGate
+			half d = rawD * input.param.x;  // * scale
 
 			float scale = input.param.x;
 			float bias = input.param.y;
@@ -222,7 +223,7 @@ SubShader {
 			faceColor *= tex2D(_FaceTex, input.faceUV + float2(_FaceUVSpeedX, _FaceUVSpeedY) * _Time.y);
 			faceColor.rgb *= faceColor.a;
 
-			half4 result = SDFLayer(d, bias, faceColor);
+			half4 result = SDFLayer(d, bias, faceColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 
 			#if BEVEL_ON
 			// Calculate sd for bevel (using normFactor for independence from atlas settings)

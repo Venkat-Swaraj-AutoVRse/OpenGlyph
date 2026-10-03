@@ -68,6 +68,49 @@ namespace LightSide
             foreach (var m in SharedMaterials.Values) if (m != null) UnityEngine.Object.DestroyImmediate(m);
             SharedMaterials.Clear();
             SharedStyles.Reset();
+            StencilCopies.Clear();
+        }
+
+        // Mask (stencil) copies of the shared materials. StencilMaterial.Add copies a material ONCE and
+        // caches it, but the shared material's array/style bindings change on every Build (the array is
+        // reallocated as pages are added, the style texture as rows are added). Without re-syncing, a
+        // masked component samples a stale/destroyed array and draws nothing.
+        private static readonly List<(Material shared, Material copy)> StencilCopies = new();
+
+        /// <summary>True when <paramref name="mat"/> is one of the shared unified (Uber) materials.</summary>
+        public static bool IsSharedMaterial(Material mat)
+        {
+            if (mat == null) return false;
+            foreach (var m in SharedMaterials.Values) if (m == mat) return true;
+            return false;
+        }
+
+        /// <summary>Registers a stencil copy of a shared material so later Builds keep its bindings current.</summary>
+        public static void TrackStencilCopy(Material shared, Material copy)
+        {
+            if (shared == null || copy == null || shared == copy) return;
+            CopyBindings(shared, copy);
+            foreach (var (_, c) in StencilCopies) if (c == copy) return;
+            StencilCopies.Add((shared, copy));
+        }
+
+        private static void SyncStencilCopies(Material shared)
+        {
+            for (int i = StencilCopies.Count - 1; i >= 0; i--)
+            {
+                var (s, c) = StencilCopies[i];
+                if (s == null || c == null) { StencilCopies.RemoveAt(i); continue; } // released by StencilMaterial
+                if (s == shared) CopyBindings(s, c);
+            }
+        }
+
+        private static void CopyBindings(Material src, Material dst)
+        {
+            dst.SetTexture(MainTexArray, src.GetTexture(MainTexArray));
+            dst.SetTexture(StyleTex, src.GetTexture(StyleTex));
+            dst.SetFloat(StyleTexWidth, src.GetFloat(StyleTexWidth));
+            dst.SetFloat(StyleTexHeight, src.GetFloat(StyleTexHeight));
+            dst.SetFloat(AtlasSize, src.GetFloat(AtlasSize));
         }
 
         private sealed class Group
@@ -177,6 +220,7 @@ namespace LightSide
                 mat.SetFloat(StyleTexWidth, SharedStyles.Width);
                 mat.SetFloat(StyleTexHeight, Mathf.Max(1, SharedStyles.Count));
                 mat.SetFloat(AtlasSize, g.pageSize > 0 ? g.pageSize : 1024);
+                SyncStencilCopies(mat);
 
                 // Array bound via material _MainTexArray; CanvasRenderer texture MUST be null (a
                 // Texture2DArray trips a native kTexDim2D assert in CanvasRenderer.SetTexture).

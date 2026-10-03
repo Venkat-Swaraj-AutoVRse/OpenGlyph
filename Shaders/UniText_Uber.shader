@@ -74,6 +74,7 @@ Shader "UniText/Uber"
                 fixed4 color    : COLOR;
                 float4 uv0      : TEXCOORD0; // xy = atlas UV, z = gradientScale, w = xScale(signed=bold)
                 float4 uv1      : TEXCOORD1; // x = spreadRatio, y = sliceIdx, z = glyphMode, w = styleIdx
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct v2f
@@ -84,11 +85,15 @@ Shader "UniText/Uber"
                 float4 uv1      : TEXCOORD1;
                 float4 worldPos : TEXCOORD2;
                 float4 cov      : TEXCOORD3; // x=baseWeight, y=normFactor, z=baseScale (projection-derived, legacy)
+                UNITY_VERTEX_OUTPUT_STEREO // single-pass instanced / multiview (Quest), as the legacy shaders
             };
 
             v2f vert(appdata v)
             {
                 v2f o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_OUTPUT(v2f, o);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
                 o.worldPos = v.vertex;
                 float4 vPosition = UnityObjectToClipPos(v.vertex);
                 o.vertex = vPosition;
@@ -145,6 +150,11 @@ Shader "UniText/Uber"
                 // --- COLR / premultiplied color emoji (mode 3): sample is the final color. --------
                 if (mode == 3)
                 {
+                    #ifndef UNITY_COLORSPACE_GAMMA
+                    // The shared RGBA32 array is linear (it also holds MSDF data), but emoji pixels are
+                    // sRGB-encoded like the legacy sRGB page: decode here (un-premultiply first).
+                    if (texel.a > 0) texel.rgb = GammaToLinearSpace(texel.rgb / texel.a) * texel.a;
+                    #endif
                     half4 c = texel * i.color.a; // modulate by vertex alpha only; emoji keep own color
                     c.rgb *= c.a <= 0 ? 0 : 1;   // guard
                     half2 cp = UnityGet2DClipping(i.worldPos.xy, _ClipRect);
