@@ -1,0 +1,35 @@
+{
+    "name": "OpenGlyph.Localization.Tests.Editor",
+    "rootNamespace": "OpenGlyph.Localization.Tests",
+    "references": [
+        "LightSide.UniText",
+        "OpenGlyph.Localization",
+        "Unity.Localization",
+        "Unity.Addressables",
+        "Unity.ResourceManager",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "OPENGLYPH_LOCALIZATION"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.localization",
+            "expression": "1.0.0",
+            "define": "OPENGLYPH_LOCALIZATION"
+        }
+    ],
+    "noEngineReferences": false
+}
