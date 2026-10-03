@@ -1648,17 +1648,11 @@ namespace LightSide
             var lineCnt = buf.lines.count;
             var orderedRunCnt = buf.orderedRuns.count;
 
-            // TMP parity: justified/flush lines may overrun the box by up to 5% before wrapping, so a
-            // word that nearly fits is kept on the line and pulled back by inter-word justification
-            // (matching TextMeshPro's `widthOfTextArea * 1.05f` wrap test). Every other alignment keeps
-            // the exact box width (tolerance 1), so plain Left/Center/Right layout is byte-identical.
-            var hAlign = firstPassHAlign;
-            // Only the opt-in TMP-parity path (GlyphMeshPro) gets the 5% wrap overrun; plain UniText
-            // keeps tolerance 1.0 (exact box width) so its Justified/Flush line breaks are unchanged.
-            var widthTolerance =
-                (firstPassTmpJustify &&
-                 (hAlign == HorizontalAlignment.Justified || hAlign == HorizontalAlignment.Flush))
-                    ? 1.05f : 1f;
+            // Line breaking is IDENTICAL for every alignment (exact box width, tolerance 1): justification
+            // only EXPANDS inter-word space on a line that already fits. (An earlier TMP-emulation allowed
+            // Justified/Flush lines to overrun by 5% and then squeezed the spaces below their natural width,
+            // which differed from Left wrapping and from plain UniText Justified. Removed, QA B11.)
+            const float widthTolerance = 1f;
 
             LineBreaker.BreakLines(
                 buf.codepoints.Span,
