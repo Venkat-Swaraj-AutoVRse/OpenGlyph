@@ -664,6 +664,8 @@ namespace LightSide
         {
             _cells.Clear();
             _pages.Clear();
+            _pageSlices.Clear();
+            _pageRevisions.Clear();
             _frame = 0;
         }
 
@@ -696,34 +698,76 @@ namespace LightSide
         // (u,v) + sliceIndex addresses it. This copies a source page's pixels into a dedicated slice
         // once, cached by an opaque page key (e.g. the Texture2D instance id), and returns the slice.
         private readonly Dictionary<int, int> _pageSlices = new(); // pageKey -> slice
+        // Revision last COPIED into each published page's slice (pageKey -> revision). A legacy atlas
+        // page is mutated in place, so when the host reports a newer revision than what we copied, the
+        // slice is stale and must be re-copied (same slice, marked dirty) before it is sampled.
+        private readonly Dictionary<int, int> _pageRevisions = new();
 
         /// <summary>
         /// Publishes an entire legacy atlas page texture as a slice of this shared array, returning the
-        /// slice index. Cached by <paramref name="pageKey"/> so a page is copied once. The source must
-        /// be the array's dimensions and channel-compatible; a channel-expanding copy (Alpha8-&gt;RGBA32,
-        /// RGB24-&gt;RGBA32) is performed when needed. Returns false if the source is null/unreadable or
-        /// the dimensions do not match. Main-thread only; call <see cref="Apply"/> after a batch.
+        /// slice index. Cached by <paramref name="pageKey"/>. When the same page is published again
+        /// with a HIGHER <paramref name="revision"/> than was last copied, its pixels are re-copied
+        /// into the SAME slice (marked dirty, no new slice) — this is what keeps glyphs added to a
+        /// legacy page AFTER its first copy from drawing blank under the unified renderer. The source
+        /// must be the array's dimensions and channel-compatible; a channel-expanding copy
+        /// (Alpha8-&gt;RGBA32, RGB24-&gt;RGBA32) is performed when needed. Returns false if the source is
+        /// null/unreadable or the dimensions do not match. Main-thread only; call <see cref="Apply"/>
+        /// after a batch.
         /// </summary>
-        public bool AddPage(int pageKey, Texture2D srcPage, out int slice)
+        public bool AddPage(int pageKey, Texture2D srcPage, int revision, out int slice)
         {
             slice = -1;
-            if (_pageSlices.TryGetValue(pageKey, out slice))
-                return true;
             if (srcPage == null || srcPage.width != _size || srcPage.height != _size)
+            {
+                // Source gone/mismatched: drop any stale mapping so a future valid page re-publishes
+                // cleanly rather than resolving to an orphaned slice.
+                if (srcPage == null) RemovePage(pageKey);
                 return false;
+            }
 
             int srcCh = srcPage.format == TextureFormat.RGBA32 ? 4 : srcPage.format == TextureFormat.RGB24 ? 3 : 1;
-            Unity.Collections.NativeArray<byte> raw;
-            try { raw = srcPage.GetRawTextureData<byte>(); }
+
+            bool alreadyPublished = _pageSlices.TryGetValue(pageKey, out slice);
+            if (alreadyPublished)
+            {
+                _pageRevisions.TryGetValue(pageKey, out int copiedRev);
+                if (revision <= copiedRev)
+                    return true; // slice already holds this (or a newer) revision — nothing to do
+
+                // Stale: re-copy the page's current pixels into the EXISTING slice.
+                if (!CopyPageInto(_pages[slice], srcPage, srcCh)) return false;
+                _pageRevisions[pageKey] = revision;
+                return true;
+            }
+
+            Unity.Collections.NativeArray<byte> probe;
+            try { probe = srcPage.GetRawTextureData<byte>(); }
             catch { return false; }
-            if (!raw.IsCreated || raw.Length == 0) return false;
+            if (!probe.IsCreated || probe.Length == 0) return false;
 
             var page = new Page { sliceIndex = _pages.Count, cpu = new byte[_size * _size * _channels], dirty = true };
             _pages.Add(page);
             EnsureArrayCapacity();
             slice = page.sliceIndex;
 
-            // Copy with channel expansion matching the shared format.
+            if (!CopyPageInto(page, srcPage, srcCh)) { _pages.RemoveAt(_pages.Count - 1); slice = -1; return false; }
+            _pageSlices[pageKey] = slice;
+            _pageRevisions[pageKey] = revision;
+            return true;
+        }
+
+        /// <summary>Back-compat overload: publishes/refreshes at revision 0 (copies once, never re-copies).</summary>
+        public bool AddPage(int pageKey, Texture2D srcPage, out int slice) => AddPage(pageKey, srcPage, 0, out slice);
+
+        // Copies a legacy page's current pixels into the given shared-array page's CPU buffer with
+        // channel expansion to match this array's format, and marks it dirty for the next Apply.
+        private bool CopyPageInto(Page page, Texture2D srcPage, int srcCh)
+        {
+            Unity.Collections.NativeArray<byte> raw;
+            try { raw = srcPage.GetRawTextureData<byte>(); }
+            catch { return false; }
+            if (!raw.IsCreated || raw.Length == 0) return false;
+
             int px = _size * _size;
             for (int i = 0; i < px; i++)
             {
@@ -738,8 +782,21 @@ namespace LightSide
                     else { page.cpu[d] = raw[s]; page.cpu[d + 1] = raw[s + 1]; page.cpu[d + 2] = raw[s + 2]; page.cpu[d + 3] = raw[s + 3]; }
                 }
             }
-            _pageSlices[pageKey] = slice;
+            page.dirty = true;
             return true;
+        }
+
+        /// <summary>
+        /// Removes a published page's slice mapping (e.g. its source legacy atlas texture was
+        /// destroyed/cleared). The slice itself is left allocated but orphaned — a later publish with
+        /// the SAME key re-copies into a fresh slice. Prevents the <c>_pageSlices</c> leak where a
+        /// destroyed page's key would forever resolve to a stale slice. Returns true if a mapping was
+        /// removed.
+        /// </summary>
+        public bool RemovePage(int pageKey)
+        {
+            _pageRevisions.Remove(pageKey);
+            return _pageSlices.Remove(pageKey);
         }
 
         /// <summary>Slice a published page occupies, or -1 if that page key is not published.</summary>
@@ -749,6 +806,8 @@ namespace LightSide
         {
             _cells.Clear();
             _pages.Clear();
+            _pageSlices.Clear();
+            _pageRevisions.Clear();
             if (_array != null)
             {
                 UnityEngine.Object.DestroyImmediate(_array);
