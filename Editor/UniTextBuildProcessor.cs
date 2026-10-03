@@ -37,7 +37,9 @@ namespace LightSide
         {
             Cat.Meow($"[UniText] OnPreprocessBuild, platform: {report.summary.platformGroup}");
 
-            EnsureUberShaderIncluded();
+            EnsureShaderIncluded("UniText/shader", "unified renderer will be unavailable in the player");
+            // UniTextAppearance resolves the MSDF material for MSDF fonts via Shader.Find("UniText/MSDF SSD").
+            EnsureShaderIncluded("UniText/MSDF SSD", "MSDF fonts will have no shader in the player");
             CheckSettingsAssetPresent();
 
             if (report.summary.platformGroup == BuildTargetGroup.WebGL)
@@ -78,16 +80,16 @@ namespace LightSide
                 "Resources folder, or open Edit > Project Settings > UniText.");
         }
 
-        // The UniText/Uber shader is instantiated at runtime via Shader.Find (no material asset
-        // references it), so Unity's build-time shader stripping would drop it from the player and
-        // the unified renderer would silently fall back to UI/Default. Pin it into GraphicsSettings'
-        // Always-Included Shaders so it ships in every build. Idempotent.
-        private static void EnsureUberShaderIncluded()
+        // Shaders instantiated at runtime via Shader.Find (no material asset references them) would be
+        // dropped by Unity's build-time shader stripping, so the runtime silently falls back to
+        // UI/Default. Pin them into GraphicsSettings' Always-Included Shaders so they ship in every
+        // build. Idempotent.
+        private static void EnsureShaderIncluded(string shaderName, string consequence)
         {
-            var uber = Shader.Find("UniText/Uber");
-            if (uber == null)
+            var shader = Shader.Find(shaderName);
+            if (shader == null)
             {
-                Cat.MeowWarnFormat("[UniText] UniText/Uber not found at build time; unified renderer will be unavailable in the player.");
+                Debug.LogWarning($"[OpenGlyph] {shaderName} not found at build time; {consequence}.");
                 return;
             }
 
@@ -97,17 +99,17 @@ namespace LightSide
             if (arr == null) return;
 
             for (int i = 0; i < arr.arraySize; i++)
-                if (arr.GetArrayElementAtIndex(i).objectReferenceValue == uber)
+                if (arr.GetArrayElementAtIndex(i).objectReferenceValue == shader)
                 {
-                    Cat.Meow("[UniText] UniText/Uber already in Always-Included Shaders.");
+                    Cat.Meow($"[UniText] {shaderName} already in Always-Included Shaders.");
                     return;
                 }
 
             int idx = arr.arraySize;
             arr.InsertArrayElementAtIndex(idx);
-            arr.GetArrayElementAtIndex(idx).objectReferenceValue = uber;
+            arr.GetArrayElementAtIndex(idx).objectReferenceValue = shader;
             so.ApplyModifiedProperties();
-            Cat.Meow("[UniText] Added UniText/Uber to Always-Included Shaders for the build.");
+            Cat.Meow($"[UniText] Added {shaderName} to Always-Included Shaders for the build.");
         }
 
         private static void ValidateWebGLSettings()
