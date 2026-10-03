@@ -216,7 +216,10 @@ namespace LightSide
             {
                 if (unifiedRendererMode == value) return;
                 unifiedRendererMode = value;
-                SetVerticesDirty();
+                // Changing the render path must re-run mesh generation (the unified builder re-shades
+                // glyphs). SetVerticesDirty() routes to UniText's empty Rebuild() and does nothing, so
+                // drive UniText's own dirty/rebuild path instead (same as text/fontSize/appearance).
+                SetDirty(DirtyFlags.Material);
             }
         }
 
@@ -257,7 +260,8 @@ namespace LightSide
             {
                 if (overrideStyle == value) return;
                 overrideStyle = value;
-                SetVerticesDirty();
+                // Re-shade via UniText's own rebuild path, not the inherited no-op Rebuild().
+                SetDirty(DirtyFlags.Material);
             }
         }
 
@@ -273,7 +277,9 @@ namespace LightSide
             {
                 if (style.Equals(value)) return;
                 style = value;
-                if (overrideStyle) SetVerticesDirty();
+                // Re-generate the mesh so the new style re-shades (unified path). The inherited
+                // SetVerticesDirty() goes to UniText's empty Rebuild(); use the real dirty path.
+                if (overrideStyle) SetDirty(DirtyFlags.Material);
             }
         }
 
@@ -293,7 +299,7 @@ namespace LightSide
         public UniTextStyleSheet StyleSheet
         {
             get => styleSheet;
-            set { if (styleSheet == value) return; styleSheet = value; SetVerticesDirty(); }
+            set { if (styleSheet == value) return; styleSheet = value; SetDirty(DirtyFlags.Material); }
         }
 
         /// <summary>R2 sub-task 2: per-component collector mapping composed per-span styles to local ids (0 = base).</summary>

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace LightSide
 {
@@ -66,7 +67,7 @@ namespace LightSide
 
             if (param.Length > 2 && param.EndsWith("em", StringComparison.OrdinalIgnoreCase))
             {
-                if (float.TryParse(param.AsSpan(0, param.Length - 2), out var emValue))
+                if (float.TryParse(param.AsSpan(0, param.Length - 2), NumberStyles.Float, CultureInfo.InvariantCulture, out var emValue))
                 {
                     spacing = emValue * baseSize;
                     return true;
@@ -74,7 +75,7 @@ namespace LightSide
                 return false;
             }
 
-            if (float.TryParse(param, out var pxValue))
+            if (float.TryParse(param, NumberStyles.Float, CultureInfo.InvariantCulture, out var pxValue))
             {
                 spacing = pxValue;
                 return true;
