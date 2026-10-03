@@ -852,12 +852,19 @@ Emoji are rendered as color bitmaps in a separate atlas. The emoji font is check
 | `color` | Color | white | Base text color |
 | `BaseDirection` | TextDirection | Auto | LTR, RTL, or Auto |
 | `WordWrap` | bool | true | Enable/disable word wrapping |
-| `HorizontalAlignment` | HorizontalAlignment | Left | Left, Center, Right |
+| `HorizontalAlignment` | HorizontalAlignment | Left | Left, Center, Right, Justified, Flush. Left/Right are the paragraph's start/end edge (see note) |
 | `VerticalAlignment` | VerticalAlignment | Top | Top, Middle, Bottom |
 | `AutoSize` | bool | false | Auto-fit text to container |
 | `MinFontSize` | float | 10 | Auto-size minimum |
 | `MaxFontSize` | float | 72 | Auto-size maximum |
 | `Highlighter` | TextHighlighter | DefaultTextHighlighter | Interaction visual feedback |
+
+> **Alignment is direction-relative.** `HorizontalAlignment.Left` means the paragraph's *start*
+> edge (left for LTR, right for RTL) and `Right` its *end* edge, resolved per paragraph. An Arabic or
+> Hebrew paragraph with `Left` therefore renders flush right; mixed-direction text aligns each
+> paragraph to its own start. `Justified` keeps the paragraph's last line start-aligned.
+> `GlyphMeshProUGUI` (TMP parity) instead uses **physical** alignment like TextMeshPro: `Left` is
+> always the rect's left edge.
 
 ### Read-Only Properties
 

@@ -85,13 +85,13 @@ namespace LightSide
             private readonly IntPtr hbBlob;
             private readonly IntPtr hbFace;
 
-            public FontCacheEntry(byte[] fontData)
+            public FontCacheEntry(byte[] fontData, int faceIndex = 0)
             {
                 int dataLength = fontData.Length;
                 unmanagedData = Marshal.AllocHGlobal(dataLength);
                 Marshal.Copy(fontData, 0, unmanagedData, dataLength);
 
-                hbFont = HB.CreateFont(IntPtr.Zero, unmanagedData, dataLength, out hbBlob, out hbFace, out upem);
+                hbFont = HB.CreateFont(IntPtr.Zero, unmanagedData, dataLength, out hbBlob, out hbFace, out upem, faceIndex);
                 if (hbFont == IntPtr.Zero)
                     throw new Exception("[HarfBuzz] Failed to create font");
             }
@@ -102,8 +102,8 @@ namespace LightSide
             /// passthrough. Used for the per-(face,VariationKey) cache so wght 400 and wght 700 shape
             /// with genuinely different advances. Non-variable fonts simply ignore the variations.
             /// </summary>
-            public FontCacheEntry(byte[] fontData, uint[] tags, float[] values)
-                : this(fontData)
+            public FontCacheEntry(byte[] fontData, uint[] tags, float[] values, int faceIndex = 0)
+                : this(fontData, faceIndex)
             {
                 if (tags != null && values != null && tags.Length == values.Length && tags.Length > 0)
                     FTVar.SetHbVariations(hbFont, tags, values);
@@ -176,7 +176,7 @@ namespace LightSide
 
                 if (!fontCache.TryGetValue(fontHash, out var entry))
                 {
-                    entry = new FontCacheEntry(fontData);
+                    entry = new FontCacheEntry(fontData, font.FaceInfo.faceIndex);
                     fontCache[fontHash] = entry;
                 }
 
@@ -215,7 +215,7 @@ namespace LightSide
                 if (fontData == null || fontData.Length == 0)
                     return null;
 
-                var entry = new FontCacheEntry(fontData, tags, values);
+                var entry = new FontCacheEntry(fontData, tags, values, font.FaceInfo.faceIndex);
                 variationCache[ck] = entry;
                 return entry;
             }
@@ -327,7 +327,7 @@ namespace LightSide
         }
 
         /// <summary>Gets upem directly from font data without caching.</summary>
-        public static int GetUpemFromFontData(byte[] fontData)
+        public static int GetUpemFromFontData(byte[] fontData, int faceIndex = 0)
         {
             if (fontData == null || fontData.Length == 0)
             {
@@ -337,7 +337,7 @@ namespace LightSide
 
             try
             {
-                var entry = new FontCacheEntry(fontData);
+                var entry = new FontCacheEntry(fontData, faceIndex);
                 var upem = entry.upem;
                 entry.Dispose();
                 return upem;
@@ -448,7 +448,7 @@ namespace LightSide
                     if (!fontCache.TryGetValue(fontId, out fontEntry))
                     {
                         var fontData = fontProvider.GetFontData(fontId);
-                        fontEntry = new FontCacheEntry(fontData);
+                        fontEntry = new FontCacheEntry(fontData, fontProvider.GetFontAsset(fontId)?.FaceInfo.faceIndex ?? 0);
                         fontCache[fontId] = fontEntry;
                     }
                 }

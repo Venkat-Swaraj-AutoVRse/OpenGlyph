@@ -183,6 +183,10 @@ namespace LightSide
             cachedTransformData.pixelSnapPhaseY = snapPhase.y;
 
             PrepareModifiersForParallel();
+
+            // Main thread: load the system CJK font (file IO + asset creation) before any worker runs.
+            if (UniTextSettings.UseSystemFontFallback)
+                SystemFontFallback.PrepareForText(sourceText.Span, fontProvider?.FontStackAsset);
         }
         
 

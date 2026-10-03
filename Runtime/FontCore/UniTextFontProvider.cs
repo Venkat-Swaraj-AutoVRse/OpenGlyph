@@ -60,6 +60,8 @@ namespace LightSide
             FontSize = size;
         }
 
+        internal UniTextFontStack FontStackAsset => fontStackAsset;
+
         /// <summary>Gets the main (primary) font asset.</summary>
         public UniTextFont MainFont => mainFont;
         /// <summary>Gets the unique identifier for the main font.</summary>
@@ -271,6 +273,13 @@ namespace LightSide
 
             var unicode = (uint)codepoint;
             var foundFont = fontStackAsset?.FindFontForCodepoint(unicode, searchedFontAssets);
+
+            if (foundFont == null && UniTextSettings.UseSystemFontFallback && SystemFontFallback.IsCjkCodepoint(unicode))
+            {
+                // System CJK fallback: loads lazily on the main thread; a worker only sees loaded fonts
+                // (the main-thread prepare step pre-loads for the component text).
+                foundFont = SystemFontFallback.Resolve(unicode);
+            }
 
             if (foundFont == null)
                 return mainFontId;

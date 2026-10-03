@@ -52,6 +52,17 @@ namespace LightSide
         public bool tmpJustification;
 
         /// <summary>
+        /// Opt-in PHYSICAL horizontal alignment (TextMeshPro semantics). When FALSE (the default, and
+        /// the behaviour plain <c>UniText</c> keeps), <see cref="HorizontalAlignment.Left"/> and
+        /// <see cref="HorizontalAlignment.Right"/> are paragraph-relative START / END edges: an RTL
+        /// paragraph aligned Left renders flush RIGHT. When TRUE (set only by the TMP-parity components
+        /// <c>GlyphMeshProUGUI</c>/<c>GlyphMeshPro</c>), Left/Right are the physical left/right edges of
+        /// the rect for every paragraph, whatever its direction (Left/Right are swapped per RTL
+        /// paragraph). Center/Justified/Flush are unaffected.
+        /// </summary>
+        public bool physicalAlignment;
+
+        /// <summary>
         /// Gets the default layout settings with unlimited dimensions and top-left alignment.
         /// </summary>
         public static LayoutSettings Default => new()
@@ -65,7 +76,8 @@ namespace LightSide
             overEdge = TextOverEdge.Ascent,
             underEdge = TextUnderEdge.Descent,
             leadingDistribution = LeadingDistribution.HalfLeading,
-            tmpJustification = false
+            tmpJustification = false,
+            physicalAlignment = false
         };
     }
 
@@ -236,7 +248,8 @@ namespace LightSide
             float maxLineWidth = 0;
 
             var availableWidth = settings.maxWidth;
-            var hAlign = settings.horizontalAlignment;
+            var baseHAlign = settings.horizontalAlignment;
+            var physicalAlign = settings.physicalAlignment;
             var hasFiniteWidth = !float.IsInfinity(availableWidth) && availableWidth > 0;
 
             for (var i = 0; i < lineCount; i++)
@@ -250,6 +263,9 @@ namespace LightSide
 
                 float x;
                 var isRtlLine = (line.paragraphBaseLevel & 1) == 1;
+                // Left/Right are paragraph-relative (start/end) in the engine. Physical alignment
+                // (TMP parity) swaps them for RTL paragraphs so Left always means the rect's left edge.
+                var hAlign = physicalAlign && isRtlLine ? ToPhysical(baseHAlign) : baseHAlign;
                 if (hasFiniteWidth)
                     x = ComputeLineStartX(lineWidth, isRtlLine, availableWidth, hAlign);
                 else
@@ -469,6 +485,16 @@ namespace LightSide
 
             return topTrim + bottomTrim;
         }
+
+        /// <summary>Maps a physical Left/Right to the engine's start/end meaning for an RTL paragraph
+        /// (physical left = end, physical right = start). Other alignments pass through.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static HorizontalAlignment ToPhysical(HorizontalAlignment alignment) => alignment switch
+        {
+            HorizontalAlignment.Left => HorizontalAlignment.Right,
+            HorizontalAlignment.Right => HorizontalAlignment.Left,
+            _ => alignment
+        };
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float ComputeLineStartX(float lineWidth, bool isRtlLine, float availableWidth,

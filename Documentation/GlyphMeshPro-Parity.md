@@ -146,6 +146,14 @@ OpenGlyph engine supports `HorizontalAlignment {Left,Center,Right}` ×
 | `Capline*` (V=Capline) | adapter | mapped to `OverEdge=CapHeight` + V=Top approximation. |
 | `Midline*` (V=Geometry) | adapter | mapped to V=Middle. |
 
+**Physical vs logical Left/Right (B23).** TMP's Left/Right are physical: `TopLeft` hugs the rect's
+left edge even for an Arabic/Hebrew paragraph. The core engine's `HorizontalAlignment.Left/Right`
+are paragraph-relative start/end edges (an RTL paragraph with Left is flush right — the plain
+`UniText` behaviour, unchanged). `GlyphMeshProUGUI` overrides `UsePhysicalAlignment => true`, which
+sets `LayoutSettings.physicalAlignment` (carried in `TextProcessSettings.PhysicalAlignment`); the
+layout pass then swaps Left/Right for each RTL paragraph, so GlyphMeshPro matches TMP. Center,
+Justified and Flush are unaffected. Tests: `HorizontalAlignmentSemanticsTests`.
+
 **Round 2 (verified):** Justified/Flush are now really justified � the engine layout pass
 distributes inter-word slack. Justified fills every line but the paragraph's last (last line
 ragged, matching TMP); Flush justifies the last line too. GPU evidence:
