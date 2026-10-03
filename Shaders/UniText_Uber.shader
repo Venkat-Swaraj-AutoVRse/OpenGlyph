@@ -145,6 +145,11 @@ Shader "UniText/Uber"
                 // --- COLR / premultiplied color emoji (mode 3): sample is the final color. --------
                 if (mode == 3)
                 {
+                    #ifndef UNITY_COLORSPACE_GAMMA
+                    // The shared RGBA32 array is linear (it also holds MSDF data), but emoji pixels are
+                    // sRGB-encoded like the legacy sRGB page: decode here (un-premultiply first).
+                    if (texel.a > 0) texel.rgb = GammaToLinearSpace(texel.rgb / texel.a) * texel.a;
+                    #endif
                     half4 c = texel * i.color.a; // modulate by vertex alpha only; emoji keep own color
                     c.rgb *= c.a <= 0 ? 0 : 1;   // guard
                     half2 cp = UnityGet2DClipping(i.worldPos.xy, _ClipRect);
