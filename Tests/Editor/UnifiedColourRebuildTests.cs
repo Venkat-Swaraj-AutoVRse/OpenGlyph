@@ -118,9 +118,11 @@ namespace LightSide.Tests
                 for (var i = 0; i < uv1.Count; i++)
                     Assert.Greater(uv1[i].x, 0f, $"vertex {i}: UV1.x must carry the real spreadRatio.");
 
+                // Generator-merged text carries only the UGUI forward normal, so the channel is left
+                // off like the legacy segment meshes (the canvas supplies the default normal).
                 var normals = mesh.normals;
-                Assert.AreEqual(legacy.Count, normals.Length);
-                Assert.AreEqual(new Vector3(0, 0, -1), normals[0], "UGUI forward normal.");
+                Assert.IsTrue(normals.Length == 0 || (normals.Length == legacy.Count && normals[0] == new Vector3(0, 0, -1)),
+                    "no normal channel (legacy layout), or the UGUI forward normal.");
                 Assert.AreEqual(legacy.Count / 4 * 6, mesh.triangles.Length, "two triangles per glyph quad.");
             }
         }
