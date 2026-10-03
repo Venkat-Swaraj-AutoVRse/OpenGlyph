@@ -164,6 +164,7 @@ namespace LightSide
 
         private TextProcessor textProcessor;
         private UniTextFontProvider fontProvider;
+        [NonSerialized] private bool loggedMissingFonts;
         private UniTextMeshGenerator meshGenerator;
         private AttributeParser attributeParser;
         private UniTextBuffers buffers;
@@ -1202,7 +1203,10 @@ namespace LightSide
         {
             ReInitModifiers();
         }
+    #endif
 
+        // Editor AND player: a component with no font stack / appearance of its own falls back to the
+        // project defaults in UniTextSettings. (Editor-only, the player threw every frame instead.)
         private bool TryInitFontsAndAppearance()
         {
             var changed = false;
@@ -1228,11 +1232,12 @@ namespace LightSide
                 if (fontProvider.Appearance != appearance) fontProvider.Appearance = appearance;
             }
 
-            if (changed) UnityEditor.EditorUtility.SetDirty(this);
+    #if UNITY_EDITOR
+            if (changed && !Application.isPlaying) UnityEditor.EditorUtility.SetDirty(this);
+    #endif
 
             return fontStack != null && appearance != null;
         }
-    #endif
 
         private void OnConfigChanged()
         {
@@ -1250,13 +1255,18 @@ namespace LightSide
         {
             UniTextDebug.BeginSample("UniText.ValidateAndInitialize");
 
-    #if UNITY_EDITOR
             if (!TryInitFontsAndAppearance())
             {
+                if (!loggedMissingFonts)
+                {
+                    loggedMissingFonts = true;
+                    Debug.LogError($"[OpenGlyph] '{name}' has no Font Stack/Appearance and the project UniTextSettings " +
+                                   "defines no default, so it cannot render. Assign one on the component or set the " +
+                                   "defaults in UniTextSettings.", this);
+                }
                 UniTextDebug.EndSample();
                 return false;
             }
-    #endif
 
             buffers ??= new UniTextBuffers();
             buffers.EnsureRentBuffers(sourceText.Length);
