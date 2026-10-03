@@ -1,4 +1,4 @@
-# GlyphMeshPro ↔ TextMeshPro Parity
+# GlyphMeshPro vs TextMeshPro Parity
 
 **Status: Round 2 (in progress).** This document maps TextMeshPro's API and rich-text
 tag surface onto OpenGlyph's `GlyphMeshProUGUI` (Canvas) and `GlyphMeshPro` (world-space).
@@ -19,8 +19,7 @@ Every row is kept in sync with ACTUAL behaviour; a non-"applied" status is a rea
 | 3D GlyphMeshPro (world-space MeshRenderer) | **not started** (Round-1 stub) | headless host + mesh emission |
 | Overflow Page / Linked / ScrollRect | **not started** | see overflow table |
 
-Each "done" row: deterministic headless test + full suite BOTH modes (renderer-off 232 pass/0 fail;
-unified-on 246 pass/0 fail; 247 total) + GPU side-by-side PNG verified against real TextMeshPro.
+Each "done" row: deterministic headless test + full suite BOTH modes (renderer-off 256 pass/0 fail; unified-on 272 pass/0 fail; 280 total) + GPU side-by-side PNG verified against real TextMeshPro.
 
 tag surface of Unity's TextMeshPro (`TMP_Text` / `TextMeshProUGUI`) onto the
 OpenGlyph components `GlyphMeshProUGUI` (Canvas, implemented in Round 1) and
@@ -102,7 +101,7 @@ parity · **stub** = present with TMP signature, TODO body (documented) ·
 | `float fontSize` | direct | → `UniText.FontSize`. |
 | `bool enableAutoSizing` | direct | → `UniText.AutoSize`. |
 | `float fontSizeMin` / `fontSizeMax` | direct | → `UniText.MinFontSize` / `MaxFontSize`. |
-| `FontStyles fontStyle` | adapter | Bold->FontWeight, Italic->StyleAxis. **Round 2 (applied):** Underline, Strikethrough, UpperCase, LowerCase, Superscript, Subscript � composed as engine span tags, auto-registering their backing modifiers. SmallCaps/Highlight stored and round-trip but **not applied** yet (no engine modifier; see font-style section). |
+| `FontStyles fontStyle` | adapter | Bold->FontWeight, Italic->StyleAxis. **Round 2 (applied):** Underline, Strikethrough, UpperCase, LowerCase, Superscript, Subscript � composed as engine span tags, auto-registering their backing modifiers. SmallCaps/Highlight stored and round-trip but **not applied** yet (no engine modifier; see font-style section). |
 | `Color color` | direct | → `UniText.color` (override). |
 | `bool enableVertexGradient` + `VertexGradient colorGradient` | adapter | 4-corner gradient applied as a per-span vertex-color modifier over the engine's gradient system. Feasible; see Gradient section. |
 | `TextAlignmentOptions alignment` | adapter | split into `HorizontalAlignment`+`VerticalAlignment`; Justified/Flush/Geometry/Baseline/Capline/Midline gaps documented below. |
@@ -147,7 +146,7 @@ OpenGlyph engine supports `HorizontalAlignment {Left,Center,Right}` ×
 | `Capline*` (V=Capline) | adapter | mapped to `OverEdge=CapHeight` + V=Top approximation. |
 | `Midline*` (V=Geometry) | adapter | mapped to V=Middle. |
 
-**Round 2 (verified):** Justified/Flush are now really justified � the engine layout pass
+**Round 2 (verified):** Justified/Flush are now really justified � the engine layout pass
 distributes inter-word slack. Justified fills every line but the paragraph's last (last line
 ragged, matching TMP); Flush justifies the last line too. GPU evidence:
 `scratch/gmp-round2/evidence/alignment_justified_flush.png` (lines fill the column, match TMP).
@@ -227,7 +226,7 @@ as supported.
 | `<smallcaps>` | **gap (R2)** | no engine rule; TODO. |
 | `<mark=#…>` | **gap (R2)** | no engine highlight rule; TODO (highlighter exists at the component level). |
 | `<sup>` / `<sub>` | **applied (R2)** | new `SuperscriptParseRule`/`SubscriptParseRule` + `SuperSubscriptModifier`. Verified by GPU PNG vs TMP. |
-| `<voffset=�>` | **applied (R2)** | new `VOffsetParseRule` + `VOffsetModifier` (per-span vertical shift of the glyph quad; em/px/% value). Verified by GPU PNG vs TMP. |
+| `<voffset=�>` | **applied (R2)** | new `VOffsetParseRule` + `VOffsetModifier` (per-span vertical shift of the glyph quad; em/px/% value). Verified by GPU PNG vs TMP. |
 | `<nobr>` | **gap (R2)** | no engine no-break rule; TODO. |
 | `<mspace=…>` | **gap (R2)** | no engine monospace rule; TODO. |
 | `<space=…>` | **gap (R2)** | no engine rule; TODO. |
@@ -274,3 +273,52 @@ Target: Quest / world-space text without a Canvas. Design:
   `<smallcaps>`, `<mark>`, `<nobr>`,
   `<mspace>`, `<space>`, `<width>`, `<indent>`, `<margin>` (inline), `<align>` (inline),
   `<alpha>`, `<font>` (inline). `<uppercase>` is the engine's `upper` (needs a name alias).
+
+
+## Round 2.1 — grey-text fix + justification line-break parity (PR #17 review follow-up)
+
+Two defects were found in the GPU side-by-side review images and fixed:
+
+### 1. Grey / heavier text (all GlyphMeshPro text, size-dependent)
+GlyphMeshPro rendered **grey, heavier, soft-edged** where TextMeshPro is crisp white.
+Measured from the pixels: at small font sizes (~30 pt) the glyph interior never
+saturated (peak luminance 244/255, 0 % near-white) and the ink spread ~65 % wider.
+A large glyph saturated fine — the bug was size-dependent, which is why no existing
+test caught it (the unified-vs-legacy pixel tests compare two OpenGlyph paths, not vs
+TMP).
+
+**Root cause:** the `UniText/Uber` shader derived the SDF coverage-ramp slope in the
+**fragment** from `ddx/ddy(uv0.y) * _AtlasSize * 0.75`. That approximation
+under-estimates the true screen pixel size at small sizes, so the ramp went shallow.
+
+**Fix:** compute `baseScale` in the **vertex** shader exactly as the legacy
+`UniText/SDF-Face` does — `rsqrt(dot(pixelSize, pixelSize)) * (_Sharpness+1)` with
+`pixelSize` from the clip-space `w` and `UNITY_MATRIX_P * _ScreenParams` (TMP's
+own method) — and carry it to the fragment (`cov.z`) for face, outline and underlay.
+This matches the legacy path the pixel-equivalence suite already validates, so those
+tests stay green. Guarded by `WhiteText_Face_ReachesNearWhite_LikeTMP` (30 pt white
+text must peak >= 98 % luminance; was 95.7 %, now 100 %).
+
+### 2. Justified / Flush line breaks now match TMP
+TMP keeps a near-fitting word on a justified line by allowing the line to overrun the
+box by up to **5 %** before wrapping, then compressing inter-word spacing to pull it
+back (in the review paragraph "quickly" stays on line 2 in TMP but moved to line 3 in
+ours). Mirrored exactly:
+
+- `LineBreaker` takes a `widthTolerance` (1.05 for Justified/Flush, 1.0 otherwise)
+  so plain Left/Center/Right wrapping is byte-identical; only Justified/Flush pack more.
+- `TextProcessor` captures the alignment and the live component re-breaks when the
+  alignment crosses the justify boundary (so a runtime Left->Justified switch re-wraps).
+- `TextLayout` justification distributes **negative** slack too (compress an overrun
+  line back into the box), not only positive (spread).
+
+Guarded by `Alignment_Justified_KeepsNearFittingWord_OnLine_NotWrapped` (deterministic)
+and `Compare_Justified_LineCount_MatchesTMP` (vs real TMP: 5 = 5 lines at the review
+width). Plain UniText layout is unchanged — the tolerance only engages for Justified/Flush.
+
+**Known follow-up (not a regression):** on a line kept via the 5 % tolerance, OpenGlyph
+compresses only the inter-word gaps (clamped so they never collapse below 35 % of a
+space), whereas TMP also shrinks glyph widths (`charWidthAdjDelta`). So a
+tolerance-packed justified line is slightly tighter in OpenGlyph than in TMP. The line
+BREAKS match; full spacing parity needs a character-width-scaling pass, tracked as a
+Round-3 item.
