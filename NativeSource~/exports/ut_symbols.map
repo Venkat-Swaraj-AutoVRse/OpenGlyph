@@ -104,6 +104,7 @@ OPENGLYPH_1.0 {
     ut_hb_buffer_set_content_type;
     ut_hb_buffer_set_direction;
     ut_hb_buffer_set_flags;
+    ut_hb_buffer_set_language;
     ut_hb_buffer_set_script;
     ut_hb_face_create;
     ut_hb_face_destroy;
