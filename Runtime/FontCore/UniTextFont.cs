@@ -1691,9 +1691,10 @@ namespace LightSide
         /// <param name="spreadStrength">SDF spread as fraction of point size (0-1). Padding = PointSize * SpreadStrength.</param>
         /// <param name="renderMode">Glyph rendering mode (SDF, bitmap, etc.).</param>
         /// <param name="atlasSize">Atlas texture size (square).</param>
+        /// <param name="faceIndex">Face index within a TTC/OTC collection (0 for single-face fonts).</param>
         /// <returns>New font asset, or null if creation failed.</returns>
         public static UniTextFont CreateFontAsset(byte[] fontBytes, int samplingPointSize = 90, float spreadStrength = 0.1f,
-            UniTextRenderMode renderMode = UniTextRenderMode.SDF, int atlasSize = 1024)
+            UniTextRenderMode renderMode = UniTextRenderMode.SDF, int atlasSize = 1024, int faceIndex = 0)
         {
             if (fontBytes == null || fontBytes.Length == 0)
             {
@@ -1702,7 +1703,7 @@ namespace LightSide
             }
 
             if (!FT.IsInitialized) FT.Initialize();
-            var face = FT.LoadFace(fontBytes, 0);
+            var face = FT.LoadFace(fontBytes, faceIndex);
             if (face == IntPtr.Zero)
             {
                 Debug.LogError("UniTextFontAsset: Failed to load font face from byte array.");
@@ -1712,8 +1713,11 @@ namespace LightSide
             var fontAsset = CreateInstance<UniTextFont>();
             fontAsset.fontData = fontBytes;
             fontAsset.fontDataHash = ComputeFontDataHash(fontBytes);
+            // Faces of one collection share the same bytes: fold the face index into the hash so each
+            // face gets its own font id / shaping cache.
+            if (faceIndex != 0) fontAsset.fontDataHash = unchecked(fontAsset.fontDataHash * 31 + faceIndex);
 
-            int realUpem = Shaper.GetUpemFromFontData(fontBytes);
+            int realUpem = Shaper.GetUpemFromFontData(fontBytes, faceIndex);
             fontAsset.unitsPerEm = realUpem;
 
             fontAsset.faceInfo = BuildFullFaceInfo(face, samplingPointSize);
