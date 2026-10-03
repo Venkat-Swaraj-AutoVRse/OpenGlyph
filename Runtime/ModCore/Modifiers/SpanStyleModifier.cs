@@ -14,6 +14,11 @@ namespace LightSide
     /// component base style, dedups it to a local id, and writes that id into the glyph's UV1.w (which
     /// <see cref="UnifiedRenderBuilder"/> maps to a shared <see cref="StyleTable"/> row). Keeping the
     /// vertex stamp in ONE place (not N modifiers) means a glyph is composed exactly once.
+    /// <para>
+    /// LIMITATION: span styles render ONLY with the unified renderer (<see cref="UniText.UseUnifiedRenderer"/>).
+    /// The legacy renderer draws per font material and ignores them; a component that renders via the
+    /// legacy path and carries span styles logs one warning per instance.
+    /// </para>
     /// </remarks>
     [Serializable]
     [TypeGroup("Appearance", 3)]
