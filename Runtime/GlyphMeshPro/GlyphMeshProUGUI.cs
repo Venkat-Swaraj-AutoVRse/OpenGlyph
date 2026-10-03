@@ -493,7 +493,7 @@ namespace OpenGlyph
             float fs = AutoSize ? MaxFontSize : FontSize;
             float w = TextProcessor.GetPreferredWidth(fs);
             float measureWidth = width > 0 ? width : TextProcessSettings.FloatMax;
-            TextProcessor.EnsureLines(measureWidth, fs, WordWrap);
+            TextProcessor.EnsureLines(measureWidth, fs, WordWrap, HorizontalAlignment);
             float h = TextProcessor.GetPreferredHeight(fs, 0f, OverEdge, UnderEdge, LeadingDistribution);
             return new Vector2(w, h);
         }
@@ -572,7 +572,7 @@ namespace OpenGlyph
             if (TextProcessor.HasValidFirstPassData)
             {
                 float fs = AutoSize ? MaxFontSize : FontSize;
-                TextProcessor.EnsureLines(measureW, fs, WordWrap);
+                TextProcessor.EnsureLines(measureW, fs, WordWrap, HorizontalAlignment);
             }
         }
 

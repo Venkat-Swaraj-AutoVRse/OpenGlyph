@@ -74,7 +74,7 @@ namespace LightSide
             cachedLayoutHeight = height;
             hasValidLayoutCache = true;
 
-            textProcessor.EnsureLines(rect.width, cachedEffectiveFontSize, wordWrap);
+            textProcessor.EnsureLines(rect.width, cachedEffectiveFontSize, wordWrap, horizontalAlignment);
 
             cachedPreferredHeight = (autoSize && wordWrap)
                 ? textProcessor.GetPreferredHeight(maxFontSize, 0f, overEdge, underEdge, leadingDistribution)
@@ -111,7 +111,7 @@ namespace LightSide
             var rect = rectTransform.rect;
             if (rect.width <= 0 || rect.height <= 0) return;
 
-            textProcessor.EnsureLines(rect.width, maxFontSize, wordWrap);
+            textProcessor.EnsureLines(rect.width, maxFontSize, wordWrap, horizontalAlignment);
             var preferredH = textProcessor.GetPreferredHeight(maxFontSize, 0f, overEdge, underEdge, leadingDistribution);
 
             if (rect.height < preferredH - 0.01f)
@@ -130,7 +130,7 @@ namespace LightSide
 
                 cachedEffectiveFontSize = textProcessor.FindOptimalFontSize(
                     minFontSize, maxFontSize, rect.width, rect.height, settings);
-                textProcessor.EnsureLines(rect.width, cachedEffectiveFontSize, wordWrap);
+                textProcessor.EnsureLines(rect.width, cachedEffectiveFontSize, wordWrap, horizontalAlignment);
             }
         }
 
