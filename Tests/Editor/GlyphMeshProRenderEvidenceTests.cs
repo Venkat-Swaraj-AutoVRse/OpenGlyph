@@ -154,6 +154,79 @@ namespace LightSide.Tests
             }
         }
 
+        [Test]
+        public void WhiteText_Face_ReachesNearWhite_LikeTMP()
+        {
+            // The review image showed GlyphMeshPro rendering GREY (dim, heavier, soft edge) where TMP
+            // is crisp white. Measured from the pixels, the grey only appears at SMALL font sizes: a
+            // big glyph saturates to white, but at ~30pt the uber SDF coverage ramp is too shallow so
+            // even the glyph's brightest pixel peaks at ~242/255 (never white) — the reported grey.
+            // This renders white text at the SAME small size as the review image through the unified
+            // renderer and asserts the brightest pixel reaches near-white. It FAILS at the dim ~242
+            // peak and passes once the small-size coverage ramp saturates like TMP.
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+                Assert.Ignore("No real graphics device (-nographics/NullGfxDevice); brightness parity skipped.");
+            string notoPath = FindNoto();
+            if (notoPath == null) Assert.Ignore("NotoSans-Regular.ttf fixture not found.");
+            var ogFont = UniTextFont.CreateFontAsset(File.ReadAllBytes(notoPath));
+            if (ogFont == null) Assert.Ignore("UniTextFont build failed (native backend).");
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>();
+            stack.fonts.Add(ogFont);
+
+            var rt = new RenderTexture(512, 256, 24, RenderTextureFormat.ARGB32) { antiAliasing = 1 };
+            rt.Create();
+            var gos = new System.Collections.Generic.List<GameObject>();
+            try
+            {
+                var canvasGo = new GameObject("BCanvas", typeof(Canvas)); gos.Add(canvasGo);
+                var canvas = canvasGo.GetComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace;
+                ((RectTransform)canvasGo.transform).sizeDelta = new Vector2(512, 256);
+                var camGo = new GameObject("BCam", typeof(Camera)); gos.Add(camGo);
+                var cam = camGo.GetComponent<Camera>();
+                cam.orthographic = true; cam.orthographicSize = 128; cam.aspect = 2f;
+                cam.transform.position = new Vector3(0, 0, -10);
+                cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = new Color(0.10f, 0.10f, 0.12f, 1f);
+                cam.targetTexture = rt; canvas.worldCamera = cam;
+
+                var go = new GameObject("og", typeof(RectTransform)); go.transform.SetParent(canvasGo.transform, false);
+                var r = (RectTransform)go.transform; r.sizeDelta = new Vector2(480, 220);
+                var c = go.AddComponent<GlyphMeshProUGUI>();
+                c.FontStack = stack; c.fontSize = 30f; c.color = Color.white;   // SMALL size — reproduces the grey
+                c.alignment = OpenGlyph.TextAlignmentOptions.TopLeft;
+                c.UnifiedRenderer = UniText.UnifiedRendererMode.ForceOn; // the TMP-parity render path
+                c.text = "The quick brown fox jumps\nover the lazy dog. HAMBURGER";
+                c.ForceMeshUpdate(ignoreActiveState: true); gos.Add(go);
+
+                Canvas.ForceUpdateCanvases(); cam.Render();
+                var prev = RenderTexture.active; RenderTexture.active = rt;
+                var tex = new Texture2D(512, 256, TextureFormat.RGBA32, false);
+                tex.ReadPixels(new Rect(0, 0, 512, 256), 0, 0); tex.Apply(); RenderTexture.active = prev;
+
+                float peak = 0f; int nearWhite = 0, fg = 0;
+                var pixels = tex.GetPixels();
+                foreach (var p in pixels)
+                {
+                    float lum = 0.299f * p.r + 0.587f * p.g + 0.114f * p.b;
+                    if (p.r + p.g + p.b > 0.6f) { fg++; if (lum > peak) peak = lum; if (lum >= 0.98f) nearWhite++; }
+                }
+                Object.DestroyImmediate(tex);
+                Debug.Log($"[Brightness] GMP small white text peak={peak:F3} nearWhite={nearWhite} fg={fg}");
+                Assert.Greater(fg, 100, "The text drew too few foreground pixels to measure.");
+                Assert.GreaterOrEqual(peak, 0.98f,
+                    $"GlyphMeshPro white text peaked at {peak:P0} luminance at 30pt — it must reach " +
+                    "near-white (>=98%) like TMP. A dim peak at small sizes is the grey-text bug " +
+                    "(SDF coverage ramp not saturating at small font sizes).");
+            }
+            finally
+            {
+                foreach (var g in gos) { if (g != null) { var cc = g.GetComponent<Camera>(); if (cc != null) cc.targetTexture = null; } }
+                rt.Release(); Object.DestroyImmediate(rt);
+                foreach (var g in gos) if (g != null) Object.DestroyImmediate(g);
+                if (stack != null) Object.DestroyImmediate(stack);
+                if (ogFont != null) Object.DestroyImmediate(ogFont);
+            }
+        }
+
         private static string FindNoto()
         {
             string[] candidates =
