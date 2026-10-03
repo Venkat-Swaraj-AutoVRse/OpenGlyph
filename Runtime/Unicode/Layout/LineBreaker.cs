@@ -33,7 +33,8 @@ namespace LightSide
             ref int lineCount,
             ref ShapedRun[] orderedRunsOut,
             ref int orderedRunCount,
-            ReadOnlySpan<float> startMargins)
+            ReadOnlySpan<float> startMargins,
+            float widthTolerance = 1f)
         {
             tempLines = linesOut;
             tempLineCount = 0;
@@ -47,7 +48,7 @@ namespace LightSide
                 return;
             }
 
-            WrapLines(codepoints, runs, glyphs, cpWidths, breakTypes, maxWidth, startMargins);
+            WrapLines(codepoints, runs, glyphs, cpWidths, breakTypes, maxWidth, startMargins, widthTolerance);
             ReorderRunsPerLine(paragraphs);
 
             linesOut = tempLines;
@@ -76,11 +77,20 @@ namespace LightSide
             ReadOnlySpan<float> cpWidths,
             ReadOnlySpan<LineBreakType> breakTypes,
             float maxWidth,
-            ReadOnlySpan<float> startMargins)
+            ReadOnlySpan<float> startMargins,
+            float widthTolerance = 1f)
         {
             searchStartRunIdx = 0;
 
             var cpCount = codepoints.Length;
+
+            // TMP parity: in justified/flush modes a line may EXCEED the box by a small factor
+            // (TMP uses 1.05) before it wraps, so a word that nearly fits stays on the line and is
+            // pulled back by inter-word justification — rather than wrapping to the next line. For
+            // all other alignments widthTolerance is 1 (identical behaviour to before). Infinite
+            // widths stay infinite. See Documentation/GlyphMeshPro-Parity.md (justification).
+            var tolerance = widthTolerance > 0f ? widthTolerance : 1f;
+            var toleranceWidth = float.IsInfinity(maxWidth) ? maxWidth : maxWidth * tolerance;
 
             var lineStartCp = 0;
             float lineWidth = 0;
@@ -88,7 +98,7 @@ namespace LightSide
             float widthAtLastBreak = 0;
 
             var rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
-            var effectiveMaxWidth = maxWidth - rawMargin;
+            var effectiveMaxWidth = toleranceWidth - rawMargin;
 
             for (var cpIdx = 0; cpIdx < cpCount; cpIdx++)
             {
@@ -105,7 +115,7 @@ namespace LightSide
                         lastBreakCp = -1;
                         widthAtLastBreak = 0;
                         rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
-                        effectiveMaxWidth = maxWidth - rawMargin;
+                        effectiveMaxWidth = toleranceWidth - rawMargin;
                     }
                     else if (cpIdx > lineStartCp)
                     {
@@ -115,7 +125,7 @@ namespace LightSide
                         lastBreakCp = -1;
                         widthAtLastBreak = 0;
                         rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
-                        effectiveMaxWidth = maxWidth - rawMargin;
+                        effectiveMaxWidth = toleranceWidth - rawMargin;
                     }
                     else
                     {
@@ -130,7 +140,7 @@ namespace LightSide
                     lastBreakCp = -1;
                     widthAtLastBreak = 0;
                     rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
-                    effectiveMaxWidth = maxWidth - rawMargin;
+                    effectiveMaxWidth = toleranceWidth - rawMargin;
                     continue;
                 }
 
