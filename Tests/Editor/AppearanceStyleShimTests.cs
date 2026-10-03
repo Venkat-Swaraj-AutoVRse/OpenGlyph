@@ -47,10 +47,12 @@ namespace LightSide.Tests
 
             var s = AppearanceStyleShim.StyleFromMaterials(new[] { _m });
 
+            // Tolerance, not exact Color equality: in Linear colour space Material.Set/GetColor round
+            // trips through a gamma conversion and drifts by a few ULPs.
             if (_m.HasProperty("_FaceColor"))
-                Assert.AreEqual(new Color(0.2f, 0.4f, 0.6f, 1f), s.faceColor, "face colour mapped");
+                AssertColor(new Color(0.2f, 0.4f, 0.6f, 1f), s.faceColor, "face colour mapped");
             if (_m.HasProperty("_OutlineColor"))
-                Assert.AreEqual(new Color(1f, 0f, 0f, 1f), s.outlineColor, "outline colour mapped");
+                AssertColor(new Color(1f, 0f, 0f, 1f), s.outlineColor, "outline colour mapped");
             if (_m.HasProperty("_OutlineWidth"))
                 Assert.AreEqual(0.25f, s.outlineWidth, 1e-5f, "outline width mapped");
             if (_m.HasProperty("_FaceDilate"))
@@ -76,6 +78,14 @@ namespace LightSide.Tests
                     Assert.AreEqual(Color.green, s.outlineColor, "outline colour comes from the 1st (outline) material");
             }
             finally { Object.DestroyImmediate(outlineMat); Object.DestroyImmediate(faceMat); }
+        }
+
+        private static void AssertColor(Color expected, Color actual, string message)
+        {
+            Assert.AreEqual(expected.r, actual.r, 1e-4f, message + " (r)");
+            Assert.AreEqual(expected.g, actual.g, 1e-4f, message + " (g)");
+            Assert.AreEqual(expected.b, actual.b, 1e-4f, message + " (b)");
+            Assert.AreEqual(expected.a, actual.a, 1e-4f, message + " (a)");
         }
     }
 }

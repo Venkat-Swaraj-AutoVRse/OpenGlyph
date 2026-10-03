@@ -1642,7 +1642,10 @@ namespace LightSide
             if (IsCoverageBitmapMode)
                 texFormat = TextureFormat.Alpha8;
 
-            var texture = new Texture2D(atlasSize, atlasSize, texFormat, false);
+            // MSDF stores distance DATA in RGB: it must be linear, or in Linear colour space the GPU
+            // sRGB-decodes it and the median lands far from 0.5 (glyphs render as grey blocks).
+            // Colour glyphs (emoji) stay sRGB; Alpha8 is unaffected by the flag.
+            var texture = new Texture2D(atlasSize, atlasSize, texFormat, false, linear: mode == UniTextRenderMode.Msdf);
 
             // Filtering: Mono and pixel-perfect require Point (no bilinear blur, crisp integer scale);
             // Smooth (AA coverage) uses the default Bilinear so its gradients interpolate smoothly.
