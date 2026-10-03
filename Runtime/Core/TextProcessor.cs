@@ -84,6 +84,17 @@ namespace LightSide
         }
 
         /// <summary>
+        /// Opt-in TextMeshPro-compatible justification (5% wrap overrun + word/character spacing split).
+        /// Only the TMP-parity components set this; plain UniText leaves it false for identical legacy
+        /// Justified/Flush layout. See <see cref="LayoutSettings.tmpJustification"/>.
+        /// </summary>
+        public bool TmpJustification
+        {
+            get => layout.tmpJustification;
+            set => layout.tmpJustification = value;
+        }
+
+        /// <summary>
         /// Gets or sets the vertical text alignment.
         /// </summary>
         public VerticalAlignment VerticalAlignment
@@ -283,6 +294,8 @@ namespace LightSide
         private float lastLinesWidth = -1;
         private float lastLinesFontSize = -1;
         private bool lastLinesWordWrap;
+        private HorizontalAlignment lastLinesHAlign = HorizontalAlignment.Left;
+        private bool lastLinesTmpJustify;
         private bool hasValidLinesData;
 
         private float lastLayoutMaxHeight = -1;
@@ -291,6 +304,14 @@ namespace LightSide
         private bool hasValidPositionedGlyphs;
 
         private TextProcessSettings lastSettings;
+
+        /// <summary>Horizontal alignment captured at the last first pass. Line breaking reads it to pick
+        /// the justified/flush wrap tolerance (TMP parity); it is set before any BreakLines call.</summary>
+        private HorizontalAlignment firstPassHAlign = HorizontalAlignment.Left;
+
+        /// <summary>Whether TMP-compatible justification was requested at the last first pass. Gates the
+        /// 5% wrap tolerance so plain UniText (flag false) keeps the exact box width.</summary>
+        private bool firstPassTmpJustify;
 
         private float cachedRawHeight;
         private float cachedHeightFontSize = -1;
@@ -460,6 +481,11 @@ namespace LightSide
             }
 
             fontProvider.SetFontSize(settings.fontSize);
+            // Capture the horizontal alignment for line breaking: justified/flush use a wider wrap
+            // threshold (TMP parity), and BreakLines runs from EnsureLines which is not handed the
+            // settings. Line breaking always follows a first pass, so this is set before it is read.
+            firstPassHAlign = settings.HorizontalAlignment;
+            firstPassTmpJustify = settings.TmpJustification;
             DoFirstPass(text, settings);
 
             UniTextDebug.EndSample();
@@ -481,8 +507,17 @@ namespace LightSide
             return hasValidLinesData &&
                    Math.Abs(lastLinesWidth - width) < 0.001f &&
                    Math.Abs(lastLinesFontSize - fontSize) < 0.001f &&
-                   lastLinesWordWrap == wordWrap;
+                   lastLinesWordWrap == wordWrap &&
+                   // Justified/flush break at a wider tolerance, so a change into or out of that class
+                   // (or of the TMP-justification opt-in itself) must re-break even when width/size/wrap
+                   // are unchanged (TMP parity).
+                   IsJustifyClass(lastLinesHAlign) == IsJustifyClass(firstPassHAlign) &&
+                   lastLinesTmpJustify == firstPassTmpJustify;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsJustifyClass(HorizontalAlignment a)
+            => a == HorizontalAlignment.Justified || a == HorizontalAlignment.Flush;
 
         /// <summary>
         /// Determines whether cached glyph positions can be reused for the specified parameters.
@@ -517,9 +552,17 @@ namespace LightSide
         /// If parameters match cached values, returns immediately.
         /// </para>
         /// </remarks>
-        public void EnsureLines(float width, float fontSize, bool wordWrap)
+        public void EnsureLines(float width, float fontSize, bool wordWrap, HorizontalAlignment? hAlign = null,
+            bool? tmpJustify = null)
         {
             if (!hasValidFirstPassData) return;
+            // The alignment that drives the justified/flush wrap tolerance. When the caller knows it
+            // (the live component passes its current alignment), it overrides the value captured at the
+            // first pass — the component can change alignment without re-running the first pass, so the
+            // first-pass capture alone would be stale. The test/direct path omits it and uses the
+            // first-pass capture. tmpJustify (opt-in TMP parity) rides the same path.
+            if (hAlign.HasValue) firstPassHAlign = hAlign.Value;
+            if (tmpJustify.HasValue) firstPassTmpJustify = tmpJustify.Value;
             if (CanReuseLines(width, fontSize, wordWrap)) return;
 
             UniTextDebug.BeginSample("TextProcessor.EnsureLines");
@@ -1460,6 +1503,8 @@ namespace LightSide
             lastLinesWidth = width;
             lastLinesFontSize = fontSize;
             lastLinesWordWrap = wordWrap;
+            lastLinesHAlign = firstPassHAlign;
+            lastLinesTmpJustify = firstPassTmpJustify;
             hasValidLinesData = true;
 
             ComputeLineHeights(fontSize, 0f);
@@ -1589,6 +1634,18 @@ namespace LightSide
             var lineCnt = buf.lines.count;
             var orderedRunCnt = buf.orderedRuns.count;
 
+            // TMP parity: justified/flush lines may overrun the box by up to 5% before wrapping, so a
+            // word that nearly fits is kept on the line and pulled back by inter-word justification
+            // (matching TextMeshPro's `widthOfTextArea * 1.05f` wrap test). Every other alignment keeps
+            // the exact box width (tolerance 1), so plain Left/Center/Right layout is byte-identical.
+            var hAlign = firstPassHAlign;
+            // Only the opt-in TMP-parity path (GlyphMeshPro) gets the 5% wrap overrun; plain UniText
+            // keeps tolerance 1.0 (exact box width) so its Justified/Flush line breaks are unchanged.
+            var widthTolerance =
+                (firstPassTmpJustify &&
+                 (hAlign == HorizontalAlignment.Justified || hAlign == HorizontalAlignment.Flush))
+                    ? 1.05f : 1f;
+
             LineBreaker.BreakLines(
                 buf.codepoints.Span,
                 buf.shapedRuns.Span,
@@ -1599,7 +1656,8 @@ namespace LightSide
                 buf.bidiParagraphs.Span,
                 ref linesArr, ref lineCnt,
                 ref orderedRunsArr, ref orderedRunCnt,
-                buf.startMargins.data.AsSpan(0, buf.codepoints.count));
+                buf.startMargins.data.AsSpan(0, buf.codepoints.count),
+                widthTolerance);
 
             buf.lines.data = linesArr;
             buf.orderedRuns.data = orderedRunsArr;
@@ -1636,7 +1694,8 @@ namespace LightSide
                 buf.perLineAdvances.Span,
                 cachedRawHeight,
                 buf.positionedGlyphs.data, ref glyphCnt,
-                out resultWidth, out resultHeight);
+                out resultWidth, out resultHeight,
+                buf.codepoints.Span);
             buf.positionedGlyphs.count = glyphCnt;
 
             UniTextDebug.EndSample();

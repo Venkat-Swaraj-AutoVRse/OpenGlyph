@@ -83,7 +83,7 @@ Shader "UniText/Uber"
                 float4 uv0      : TEXCOORD0;
                 float4 uv1      : TEXCOORD1;
                 float4 worldPos : TEXCOORD2;
-                float4 cov      : TEXCOORD3; // x=baseWeight, y=normFactor (scale is computed in frag)
+                float4 cov      : TEXCOORD3; // x=baseWeight, y=normFactor, z=baseScale (projection-derived, legacy)
             };
 
             v2f vert(appdata v)
@@ -96,13 +96,27 @@ Shader "UniText/Uber"
                 o.uv0 = v.uv0;
                 o.uv1 = v.uv1;
 
-                // baseWeight + normFactor (legacy coverage); `scale` is derived in the fragment from
-                // ddx/ddy of the atlas UV, matching UniText/SDF-SSD (the combined display shader).
+                // baseWeight + normFactor (legacy coverage).
                 float bold = step(v.uv0.w, 0);
                 float spreadRatio = v.uv1.x;
                 float normFactor = 0.1 /*REFERENCE_SPREAD_RATIO*/ / max(spreadRatio, 0.001);
                 float baseWeight = lerp(_WeightNormal, _WeightBold, bold) / 4.0 * 1.0 /*_ScaleRatioA*/ * 0.5;
-                o.cov = float4(baseWeight, normFactor, 0, 0);
+
+                // baseScale: the SDF coverage ramp slope in distance-units-per-pixel. Ported VERBATIM
+                // from the legacy UniText/SDF-Face vertex shader (TMP's method): derive the true screen
+                // pixel size from the clip-space w and the projection matrix, NOT from a fragment
+                // ddx/ddy approximation. The old uber port used ddx/ddy(uv0.y)*_AtlasSize*0.75, which
+                // UNDER-estimates the scale at small font sizes — the ramp went shallow so thin strokes
+                // never saturated to full white (the reported grey/heavier text at ~30pt). This matches
+                // the legacy path the unified-vs-legacy pixel-equivalence tests validate against.
+                float2 pixelSize = vPosition.w;
+                pixelSize /= float2(_ScaleX, _ScaleY) * abs(mul((float2x2)UNITY_MATRIX_P, _ScreenParams.xy));
+                float baseScale = rsqrt(dot(pixelSize, pixelSize)) * (_Sharpness + 1);
+                if (UNITY_MATRIX_P[3][3] == 0)
+                    baseScale = lerp(abs(baseScale) * (1 - _PerspectiveFilter), baseScale,
+                        abs(dot(UnityObjectToWorldNormal(v.normal.xyz), normalize(WorldSpaceViewDir(v.vertex)))));
+
+                o.cov = float4(baseWeight, normFactor, baseScale, 0);
                 return o;
             }
 
@@ -169,12 +183,12 @@ Shader "UniText/Uber"
                 {
                     // Faithful port of legacy UniText/SDF-Face (face) + SDF-Base (outline):
                     //   d = sample * scale;  coverage = saturate(d - bias)  [linear ramp, SDFLayer]
-                    // scale is derived in-frag EXACTLY as UniText/SDF-SSD: baseScale from the atlas-UV
-                    // screen-space derivative, times per-vertex xScaleVal (UV0.w) and gradientScale (UV0.z).
+                    // baseScale is the projection-derived slope computed in the VERTEX shader (legacy
+                    // method), NOT a fragment ddx/ddy approximation — the latter went shallow at small
+                    // font sizes and left thin strokes grey instead of white.
                     float baseWeight = i.cov.x;
                     float normFactor = i.cov.y;
-                    float pxSize = (abs(ddx(i.uv0.y)) + abs(ddy(i.uv0.y))) * _AtlasSize * 0.75;
-                    float baseScale = (1.0 / max(pxSize, 1e-8)) * (_Sharpness + 1);
+                    float baseScale = i.cov.z;
                     float xScaleVal = abs(i.uv0.w);
                     float gradientScale = i.uv0.z;
                     float scale = baseScale * xScaleVal * gradientScale;
@@ -226,9 +240,8 @@ Shader "UniText/Uber"
                 if (underlayColor.a > 0 && mode != 2)
                 {
                     float baseWeight = i.cov.x; float normFactor = i.cov.y;
-                    float pxSize = (abs(ddx(i.uv0.y)) + abs(ddy(i.uv0.y))) * _AtlasSize * 0.75;
                     float gradientScale = i.uv0.z;
-                    float scale = (1.0 / max(pxSize, 1e-8)) * (_Sharpness + 1) * abs(i.uv0.w) * gradientScale;
+                    float scale = i.cov.z * abs(i.uv0.w) * gradientScale;
                     // Legacy ComputeUnderlayOffsetFactor(gradientScale, normFactor):
                     //   pointSizeApprox = sqrt(72 * gradientScale * normFactor / REFERENCE_SPREAD_RATIO)
                     //   offsetFactor    = pointSizeApprox / 9     (REFERENCE_SPREAD_RATIO = 0.1)

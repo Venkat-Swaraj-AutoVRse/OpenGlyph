@@ -597,8 +597,15 @@ namespace LightSide
             set
             {
                 if (horizontalAlignment == value) return;
+                // Justified/Flush use a wider line-break tolerance (TMP parity), so a change that
+                // crosses the justify/non-justify boundary must RE-BREAK lines, not just reposition
+                // glyphs. Other alignment changes only move glyphs on already-broken lines.
+                bool wasJustify = horizontalAlignment == HorizontalAlignment.Justified
+                                  || horizontalAlignment == HorizontalAlignment.Flush;
+                bool isJustify = value == HorizontalAlignment.Justified
+                                 || value == HorizontalAlignment.Flush;
                 horizontalAlignment = value;
-                SetDirty(DirtyFlags.Alignment);
+                SetDirty(wasJustify || isJustify ? DirtyFlags.Layout : DirtyFlags.Alignment);
             }
         }
 
@@ -1285,8 +1292,17 @@ namespace LightSide
             LeadingDistribution = leadingDistribution,
             fontSize = effectiveFontSize,
             baseDirection = baseDirection,
-            enableWordWrap = wordWrap
+            enableWordWrap = wordWrap,
+            TmpJustification = UseTmpJustification
         };
+
+        /// <summary>
+        /// Whether this component uses the opt-in TextMeshPro-compatible justification (5% wrap overrun
+        /// + word/character spacing split). Plain <c>UniText</c> returns false so its Justified/Flush
+        /// layout is unchanged; the TMP-parity components (<c>GlyphMeshProUGUI</c>/<c>GlyphMeshPro</c>)
+        /// override this to true.
+        /// </summary>
+        protected virtual bool UseTmpJustification => false;
 
         #endregion
 

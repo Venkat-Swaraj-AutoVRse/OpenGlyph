@@ -346,7 +346,15 @@ namespace LightSide
         Center = 1,
 
         /// <summary>Align text to the right edge.</summary>
-        Right = 2
+        Right = 2,
+
+        /// <summary>Justify: distribute inter-word slack so each line (except the last line of a
+        /// paragraph) fills the available width. The last line of a paragraph is left-aligned.</summary>
+        Justified = 3,
+
+        /// <summary>Flush: like <see cref="Justified"/> but justifies EVERY line, including the last
+        /// line of each paragraph.</summary>
+        Flush = 4
     }
 
 
