@@ -32,6 +32,21 @@ namespace LightSide
     {
         #region Cached Data for Parallel
 
+        /// <summary>
+        /// TEST INSTRUMENTATION: total number of real Unity mesh re-uploads performed by
+        /// <see cref="DoApplyMesh"/> (i.e. the number of times it reached
+        /// <c>meshGenerator.ApplyMeshesToUnity()</c> rather than taking the geometry-identity skip).
+        /// Lets a test prove the skip actually FIRED on an identical rebuild — the counter does not
+        /// advance — distinct from merely computing the fingerprint. <c>internal</c> (visible to the
+        /// test assembly via InternalsVisibleTo); a single increment on the already-expensive upload
+        /// path, so it carries no meaningful cost. Reset with <see cref="ResetMeshUploadCount"/>.
+        /// </summary>
+        internal static long MeshUploadCount;
+
+        /// <summary>TEST ONLY: zero the <see cref="MeshUploadCount"/> counter.</summary>
+        internal static void ResetMeshUploadCount() =>
+            System.Threading.Interlocked.Exchange(ref MeshUploadCount, 0);
+
         /// <summary>Cached transform data for parallel processing (avoids Unity API calls from worker threads).</summary>
         public struct CachedTransformData
         {
@@ -707,11 +722,24 @@ namespace LightSide
             }
 
             renderData = meshGenerator.ApplyMeshesToUnity();
+            System.Threading.Interlocked.Increment(ref MeshUploadCount);
     #if UNITEXT_TESTS
             CopyMeshesForTests();
     #endif
-            lastAppliedGeometryFingerprint = meshGenerator.GeometryFingerprint();
-            hasAppliedGeometry = true;
+            // Only pay for the full-geometry hash when the skip is enabled. With it off (the default)
+            // the fingerprint is never compared, and hashing every vertex channel on every upload
+            // costs a full extra pass over the mesh (measured +24% full rebuild, 2.4x mesh rebuild on
+            // Quest 3S). If the setting is switched on later, the next build uploads once and records.
+            if (UniTextSettings.SkipUnchangedGeometryUpload)
+            {
+                lastAppliedGeometryFingerprint = meshGenerator.GeometryFingerprint();
+                hasAppliedGeometry = true;
+            }
+            else
+            {
+                lastAppliedGeometryFingerprint = 0;
+                hasAppliedGeometry = false;
+            }
             meshGenerator.ReturnInstanceBuffers();
 
             if (textProcessor != null)

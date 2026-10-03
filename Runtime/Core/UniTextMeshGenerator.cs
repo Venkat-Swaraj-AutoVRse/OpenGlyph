@@ -137,6 +137,23 @@ namespace LightSide
         [ThreadStatic] private static UniTextMeshGenerator current;
 
         /// <summary>
+        /// TEST INSTRUMENTATION: total number of times <see cref="GeometryFingerprint"/> has been
+        /// invoked (every call, including the no-data fast-return). Lets a test prove that the
+        /// geometry fingerprint is NOT computed on the rebuild path when
+        /// <see cref="UniTextSettings.SkipUnchangedGeometryUpload"/> is OFF — the whole point of the
+        /// fix: the full-mesh hash is pure cost when the skip can never fire, so it must not run.
+        /// Reset with <see cref="ResetGeometryFingerprintCalls"/> before a measured window. The field
+        /// is a single interlocked increment on an already-expensive full-mesh hash, so it carries no
+        /// meaningful runtime cost; it is <c>internal</c> (visible to the test assembly via
+        /// InternalsVisibleTo) rather than behind a define so the stock package build exercises it.
+        /// </summary>
+        internal static long GeometryFingerprintCalls;
+
+        /// <summary>TEST ONLY: zero the <see cref="GeometryFingerprintCalls"/> counter.</summary>
+        internal static void ResetGeometryFingerprintCalls() =>
+            System.Threading.Interlocked.Exchange(ref GeometryFingerprintCalls, 0);
+
+        /// <summary>
         /// Gets the currently active mesh generator on this thread (set during mesh generation).
         /// </summary>
         /// <remarks>
@@ -354,6 +371,7 @@ namespace LightSide
         /// </summary>
         public ulong GeometryFingerprint()
         {
+            System.Threading.Interlocked.Increment(ref GeometryFingerprintCalls);
             if (!hasGeneratedData || vertexCount <= 0) return 0;
             const ulong fnvOffset = 14695981039346656037UL;
             const ulong fnvPrime = 1099511628211UL;
