@@ -484,5 +484,114 @@ namespace LightSide.Tests
             Assert.AreEqual(TextOverflow.Overflow, c.Overflow);
         }
 
+        // ------------------------------------------------------------------ review regressions
+
+        [TestCase(Legacy, TextOverflow.Truncate)]
+        [TestCase(Legacy, TextOverflow.Ellipsis)]
+        [TestCase(Unified, TextOverflow.Truncate)]
+        [TestCase(Unified, TextOverflow.Ellipsis)]
+        public void GetRangeBounds_OnTruncatedText_DoesNotThrow_AndStaysInsideVisibleLines(
+            UniText.UnifiedRendererMode mode, TextOverflow overflow)
+        {
+            const float h = 60f;
+            var t = Make(mode, Paragraph, 150f, h, overflow);
+            var visible = Baselines(t).Count;
+            Assert.Less(visible, 5, "test premise: the paragraph is truncated");
+
+            var rects = new List<Rect>();
+            Assert.DoesNotThrow(() => t.GetRangeBounds(0, int.MaxValue, rects));
+            Assert.AreEqual(visible, rects.Count, "one bounds rect per VISIBLE line");
+            var rt = (RectTransform)t.transform;
+            foreach (var r in rects)
+                Assert.GreaterOrEqual(r.yMin, rt.rect.yMax - h - Eps, "no rect below the visible area");
+        }
+
+        [TestCase(Legacy)]
+        [TestCase(Unified)]
+        public void GetRangeBounds_Ellipsis_UsesPositionedLayout_NotPatchedRuns(UniText.UnifiedRendererMode mode)
+        {
+            // A sub-range wholly inside the kept text must give the same rects with Ellipsis and Truncate.
+            var e = Make(mode, Paragraph, 150f, 60f, TextOverflow.Ellipsis);
+            var rects = new List<Rect>();
+            e.GetRangeBounds(0, 3, rects);
+            Assert.AreEqual(1, rects.Count);
+            Assert.AreEqual(((RectTransform)e.transform).rect.xMin, rects[0].xMin, 0.5f);
+        }
+
+        [Test]
+        public void GlyphCache_Growth_InvalidatesTheCache()
+        {
+            var buffers = new UniTextBuffers();
+            buffers.EnsureRentBuffers(4);
+            try
+            {
+                buffers.hasValidGlyphCache = true;
+                buffers.EnsureGlyphCacheCapacity(buffers.glyphDataCache.Capacity); // no growth
+                Assert.IsTrue(buffers.hasValidGlyphCache, "no growth keeps the cache");
+                buffers.EnsureGlyphCacheCapacity(buffers.glyphDataCache.Capacity + 1000);
+                Assert.IsFalse(buffers.hasValidGlyphCache, "growth swaps in an uncleared array: cache must be invalidated");
+            }
+            finally { buffers.EnsureReturnBuffers(); }
+        }
+
+        [TestCase(Legacy)]
+        [TestCase(Unified)]
+        public void Ellipsis_Cluster_IsTheLastKeptGlyph_NotTheFirstHiddenCodepoint(UniText.UnifiedRendererMode mode)
+        {
+            var t = Make(mode, Lines6, 300f, 70f, TextOverflow.Ellipsis);
+            var g = t.ResultGlyphs;
+            var e = g[g.Length - 1];
+            Assert.AreEqual(g[g.Length - 2].cluster, e.cluster,
+                "the ellipsis inherits the attributes of the last kept glyph (link/colour/gradient), not hidden text");
+        }
+
+        [TestCase(Legacy)]
+        [TestCase(Unified)]
+        public void Ellipsis_RestoresLinesAndRuns_AfterLayout(UniText.UnifiedRendererMode mode)
+        {
+            var t = Make(mode, Paragraph, 150f, 60f, TextOverflow.Ellipsis);
+            t.Overflow = TextOverflow.Overflow;
+            Canvas.ForceUpdateCanvases();
+            var fresh = Make(mode, Paragraph, 150f, 60f, TextOverflow.Overflow);
+            Assert.AreEqual(fresh.ResultGlyphs.Length, t.ResultGlyphs.Length);
+            for (var i = 0; i < fresh.ResultGlyphs.Length; i++)
+            {
+                Assert.AreEqual(fresh.ResultGlyphs[i].glyphId, t.ResultGlyphs[i].glyphId);
+                Assert.AreEqual(fresh.ResultGlyphs[i].x, t.ResultGlyphs[i].x, 1e-3f);
+            }
+        }
+
+        [TestCase(Legacy)]
+        [TestCase(Unified)]
+        public void RegisterOverflowEllipsisGlyphs_RegistersDotFallback_EvenWhenEllipsisAlreadyVirtual(UniText.UnifiedRendererMode mode)
+        {
+            var t = Make(mode, Paragraph, 150f, 60f, TextOverflow.Ellipsis);
+            var vc = t.Buffers.virtualCodepoints;
+            vc.count = 0;
+            vc.Add(0x2026);
+            t.Buffers.virtualCodepoints = vc;
+            t.TextProcessor.RegisterOverflowEllipsisGlyphs();
+            var found = false;
+            var after = t.Buffers.virtualCodepoints;
+            for (var i = 0; i < after.count; i++) if (after.data[i] == '.') found = true;
+            Assert.IsTrue(found, "'.' fallback registered although U+2026 was already virtual");
+            int ellipsisCount = 0;
+            for (var i = 0; i < after.count; i++) if (after.data[i] == 0x2026) ellipsisCount++;
+            Assert.AreEqual(1, ellipsisCount, "U+2026 not duplicated");
+        }
+
+        [TestCase(Legacy)]
+        [TestCase(Unified)]
+        public void Overflow_ChangedBypassingSetter_ReappliesClip(UniText.UnifiedRendererMode mode)
+        {
+            var t = Make(mode, Lines6, 200f, 70f, TextOverflow.Overflow);
+            Assert.IsFalse(t.AllSubMeshRenderersRectClippedForTests(out _));
+            var so = new UnityEditor.SerializedObject(t);
+            so.FindProperty("overflow").enumValueIndex = (int)TextOverflow.Clip;
+            so.ApplyModifiedProperties(); // undo / prefab revert / Inspector path: field written directly
+            Canvas.ForceUpdateCanvases();
+            Assert.AreEqual(TextOverflow.Clip, t.Overflow);
+            Assert.IsTrue(t.AllSubMeshRenderersRectClippedForTests(out _), "clip applied without going through the setter");
+        }
     }
 }

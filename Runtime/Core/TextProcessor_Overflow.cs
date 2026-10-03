@@ -35,12 +35,20 @@ namespace LightSide
         {
             if (!hasValidFirstPassData) return;
 
+            // Check each codepoint separately: another feature (the <ellipsis> tag) may already have
+            // registered U+2026 without the '.' fallback.
+            var hasEllipsis = false;
+            var hasDot = false;
             var vc = buf.virtualCodepoints;
             for (var i = 0; i < vc.count; i++)
-                if (vc.data[i] == EllipsisCodepoint) return;
+            {
+                if (vc.data[i] == EllipsisCodepoint) hasEllipsis = true;
+                else if (vc.data[i] == '.') hasDot = true;
+            }
+            if (hasEllipsis && hasDot) return;
 
-            buf.virtualCodepoints.Add(EllipsisCodepoint);
-            buf.virtualCodepoints.Add('.');
+            if (!hasEllipsis) buf.virtualCodepoints.Add(EllipsisCodepoint);
+            if (!hasDot) buf.virtualCodepoints.Add('.');
             hasValidGlyphsInAtlas = false;
         }
 
@@ -174,6 +182,7 @@ namespace LightSide
             for (var i = 0; i < rc; i++) lineWidth += runs[rs + i].width;
 
             var cut = -1;
+            var keptCluster = -1; // logical-last KEPT glyph: the ellipsis inherits its attributes
             while (true)
             {
                 // Logical-last remaining glyph of the line: highest cluster at a run's logical end.
@@ -187,7 +196,8 @@ namespace LightSide
                     var c = glyphs[g].cluster;
                     if (c > bestCluster) { bestCluster = c; bestRun = i; }
                 }
-                if (bestRun < 0) break;
+                if (bestRun < 0) { keptCluster = -1; break; }
+                keptCluster = bestCluster;
 
                 var isSpace = (uint)bestCluster < (uint)cpCount && IsOverflowWhitespace(codepoints[bestCluster]);
                 if (!isSpace && lineWidth <= available + OverflowEpsilon) break;
@@ -214,14 +224,17 @@ namespace LightSide
                 cut = gs;
             }
 
-            if (cut < 0) cut = line.range.End;
+            // Attribute cluster (link/colour/gradient/underline): the last kept glyph; when nothing is kept,
+            // the first removed grapheme (or the line start for an empty line).
+            if (keptCluster >= 0) cut = keptCluster;
+            else if (cut < 0) cut = line.range.start;
             if (cut >= cpCount) cut = cpCount - 1;
             if (cut < 0) cut = 0;
 
             // Ellipsis glyph slots just past the counted glyphs.
             var slotBase = buf.shapedGlyphs.count;
             buf.shapedGlyphs.EnsureCapacity(slotBase + EllipsisSlotCount);
-            buf.glyphDataCache.EnsureCapacity(slotBase + EllipsisSlotCount);
+            buf.EnsureGlyphCacheCapacity(slotBase + EllipsisSlotCount);
             glyphs = buf.shapedGlyphs.data;
             for (var j = 0; j < ellipsisGlyphCount; j++)
             {

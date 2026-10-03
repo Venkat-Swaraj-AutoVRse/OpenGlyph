@@ -277,69 +277,58 @@ namespace LightSide
             if (textProcessor == null)
                 return;
 
-            var lines = buffers.lines;
-            var runs = buffers.orderedRuns;
+            // Lines are derived from the layout OUTPUT (positioned glyphs), not from buffers.lines /
+            // orderedRuns: with Truncate/Ellipsis only the visible lines are positioned and the last
+            // line's runs are patched during layout, so their glyph counts no longer match. All glyphs
+            // of a line share the same `top`; a change of `top` starts a new line.
             var glyphs = textProcessor.PositionedGlyphs;
-
-            if (glyphs.Length == 0 || lines.count == 0)
+            var glyphCount = glyphs.Length;
+            if (glyphCount == 0)
                 return;
 
             var rect = cachedTransformData.rect;
 
-            var glyphIndex = 0;
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
+            var inGroup = false;
+            var lineTop = glyphs[0].top;
 
-            for (var lineIdx = 0; lineIdx < lines.count; lineIdx++)
+            for (var g = 0; g < glyphCount; g++)
             {
-                ref readonly var line = ref lines[lineIdx];
+                ref readonly var glyph = ref glyphs[g];
 
-                var lineGlyphCount = 0;
-                var runEnd = line.runStart + line.runCount;
-                for (var r = line.runStart; r < runEnd; r++)
-                    lineGlyphCount += runs[r].glyphCount;
-
-                float minX = float.MaxValue, maxX = float.MinValue;
-                float minY = float.MaxValue, maxY = float.MinValue;
-                var inGroup = false;
-
-                var lineGlyphEnd = glyphIndex + lineGlyphCount;
-                for (var g = glyphIndex; g < lineGlyphEnd; g++)
+                if (Mathf.Abs(glyph.top - lineTop) > 0.001f)
                 {
-                    ref readonly var glyph = ref glyphs[g];
-                    var inRange = glyph.cluster >= startCluster && glyph.cluster < endCluster;
-
-                    if (inRange)
+                    if (inGroup)
                     {
-                        if (glyph.left < minX) minX = glyph.left;
-                        if (glyph.right > maxX) maxX = glyph.right;
-                        if (glyph.top < minY) minY = glyph.top;
-                        if (glyph.bottom > maxY) maxY = glyph.bottom;
-                        inGroup = true;
-                    }
-                    else if (inGroup)
-                    {
-                        var rectLeft = rect.xMin + minX;
-                        var rectBottom = rect.yMax - maxY;
-                        var width = maxX - minX;
-                        var height = maxY - minY;
-                        results.Add(new Rect(rectLeft, rectBottom, width, height));
-
+                        results.Add(new Rect(rect.xMin + minX, rect.yMax - maxY, maxX - minX, maxY - minY));
                         minX = float.MaxValue; maxX = float.MinValue;
                         minY = float.MaxValue; maxY = float.MinValue;
                         inGroup = false;
                     }
+                    lineTop = glyph.top;
                 }
 
-                if (inGroup)
+                var inRange = glyph.cluster >= startCluster && glyph.cluster < endCluster;
+                if (inRange)
                 {
-                    var rectLeft = rect.xMin + minX;
-                    var rectBottom = rect.yMax - maxY;
-                    var width = maxX - minX;
-                    var height = maxY - minY;
-                    results.Add(new Rect(rectLeft, rectBottom, width, height));
+                    if (glyph.left < minX) minX = glyph.left;
+                    if (glyph.right > maxX) maxX = glyph.right;
+                    if (glyph.top < minY) minY = glyph.top;
+                    if (glyph.bottom > maxY) maxY = glyph.bottom;
+                    inGroup = true;
                 }
-
-                glyphIndex = lineGlyphEnd;
+                else if (inGroup)
+                {
+                    results.Add(new Rect(rect.xMin + minX, rect.yMax - maxY, maxX - minX, maxY - minY));
+                    minX = float.MaxValue; maxX = float.MinValue;
+                    minY = float.MaxValue; maxY = float.MinValue;
+                    inGroup = false;
+                }
             }
+
+            if (inGroup)
+                results.Add(new Rect(rect.xMin + minX, rect.yMax - maxY, maxX - minX, maxY - minY));
         }
 
         /// <summary>
