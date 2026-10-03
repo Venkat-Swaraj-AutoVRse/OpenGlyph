@@ -173,7 +173,7 @@ namespace LightSide
             cachedTransformData = new CachedTransformData
             {
                 rectTransform = rectTransform,
-                rect = rectTransform.rect,
+                rect = GetLayoutRect(rectTransform.rect),
                 lossyScale = scale,
                 hasWorldCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay,
                 pixelSnapDeviceScale = ComputePixelSnapDeviceScale(),
@@ -409,9 +409,23 @@ namespace LightSide
             if (component.isRegisteredDirty)
                 return;
 
+            // A component dirtied by ANOTHER component while meshes are being applied (TMP linked
+            // overflow pushes text into its linked component) would be dropped by the buffer clear at
+            // the end of this pass. Defer it and run it in a follow-up pass of the same frame.
+            if (isApplyingMeshes)
+            {
+                if (!deferredDirty.Contains(component)) deferredDirty.Add(component);
+                return;
+            }
+
             component.isRegisteredDirty = true;
             componentsBuffer.Add(component);
         }
+
+        private static bool isApplyingMeshes;
+        private static readonly List<UniText> deferredDirty = new();
+        private static int nestedRenderDepth;
+        private const int MaxNestedRenderPasses = 8;
 
         private static void UnregisterDirty(UniText component)
         {
@@ -614,9 +628,17 @@ namespace LightSide
 
             UniTextDebug.BeginSample("ApplyMeshes");
 
-            for (var i = 0; i < count; i++)
+            isApplyingMeshes = true;
+            try
             {
-                componentsBuffer[i].DoApplyMesh();
+                for (var i = 0; i < count; i++)
+                {
+                    componentsBuffer[i].DoApplyMesh();
+                }
+            }
+            finally
+            {
+                isApplyingMeshes = false;
             }
 
             MeshApplied?.Invoke();
@@ -629,7 +651,40 @@ namespace LightSide
 
             UniTextDebug.EndSample();
 
+            RunDeferredDirty();
+
             Cat.Meow("[UniText] OnWillRenderCanvases completed");
+        }
+
+        /// <summary>Re-registers components dirtied during mesh apply and processes them in the same frame
+        /// (bounded depth, so a long linked chain still terminates; anything left waits a frame).</summary>
+        private static void RunDeferredDirty()
+        {
+            if (deferredDirty.Count == 0) return;
+            var pending = deferredDirty.ToArray();
+            deferredDirty.Clear();
+            for (var i = 0; i < pending.Length; i++)
+                if (pending[i] != null) RegisterDirty(pending[i]);
+
+            if (nestedRenderDepth >= MaxNestedRenderPasses) return; // processed next frame
+            nestedRenderDepth++;
+            try
+            {
+                OnPreWillRenderCanvases();
+                // The canvas layout pass for this frame has already run, so lay the deferred components
+                // out now (line breaking happens in the layout callbacks).
+                for (var i = 0; i < pending.Length; i++)
+                {
+                    var c = pending[i];
+                    if (c != null && c.isActiveAndEnabled)
+                        LayoutRebuilder.ForceRebuildLayoutImmediate(c.rectTransform);
+                }
+                OnWillRenderCanvases();
+            }
+            finally
+            {
+                nestedRenderDepth--;
+            }
         }
 
         #endregion
@@ -757,6 +812,9 @@ namespace LightSide
             meshGenerator.SetRectOffset(cached.rect);
             meshGenerator.SetHorizontalAlignment(horizontalAlignment);
 
+            meshGenerator.ClusterHidden = null;
+            meshGenerator.GlyphHidden = null;
+            OnBeforeGenerateMeshData(meshGenerator);
             meshGenerator.GenerateMeshDataOnly(glyphs);
         }
 
@@ -788,6 +846,7 @@ namespace LightSide
                     }
                     RefreshOverflowClip();
                     dirtyFlags = DirtyFlags.None;
+                    OnAfterMeshApplied();
                     return;
                 }
             }
@@ -833,6 +892,7 @@ namespace LightSide
             }
 
             dirtyFlags = DirtyFlags.None;
+            OnAfterMeshApplied();
         }
 
         #endregion

@@ -1,4 +1,4 @@
-// OpenGlyph GlyphMeshPro — Round 2: fontStyle flag wiring.
+// OpenGlyph GlyphMeshPro — fontStyle flag wiring (Round 2, completed in Round 3).
 //
 // TextMeshPro's `fontStyle` is, semantically, markup applied to the whole run:
 // FontStyles.Underline == wrapping the text in <u>…</u>, Strikethrough == <s>…</s>,
@@ -10,18 +10,14 @@
 // Bold and Italic remain mapped to the engine's FontWeight / StyleAxis (a real or
 // synthetic face), matching Round 1; they are NOT wrapped as tags.
 //
-// IMPLEMENTED THIS COMMIT (engine modifier exists and renders):
-//   Underline      -> <u>…</u>   (engine UnderlineParseRule + UnderlineModifier)
-//   Strikethrough  -> <s>…</s>   (engine StrikethroughParseRule + StrikethroughModifier)
+// Flags realised as tags (each backed by an engine rule + modifier the component registers):
+//   Underline -> <u>, Strikethrough -> <s>, UpperCase -> <uppercase>, LowerCase -> <lowercase>,
+//   SmallCaps -> <smallcaps> (OpenType smcp or synthetic), Superscript -> <sup>, Subscript -> <sub>,
+//   Highlight -> <mark> (TMP default #FFFF0040).
+// richText = false wraps the raw run in a literal <og-raw> span (NoParseParseRule, last close).
 //
-// NOT YET WRAPPED — the engine has no modifier behind these, so emitting the tag
-// would leak literal text; added as each engine modifier lands (parity-doc gaps):
-//   UpperCase / LowerCase / SmallCaps  (need a case-transform modifier)
-//   Superscript / Subscript            (need a baseline-shift + scale modifier)
-//   Highlight                          (need a background-quad / <mark> modifier)
-//
-// The component auto-registers the u/s modifier pairs on itself so fontStyle "just
-// works" without the user wiring a ModRegister, matching TMP.
+// The component auto-registers these modifier pairs (and the TMP layout tags <nobr> <align>
+// <indent> <line-indent> <font> <noparse>) on itself, so they work without wiring a ModRegister.
 //
 // Clean-room: no TMP code copied; this mirrors TMP's documented fontStyle semantics
 // only. See Documentation/GlyphMeshPro-Parity.md.
@@ -39,18 +35,21 @@ namespace OpenGlyph
         [UnityEngine.SerializeField, UnityEngine.HideInInspector] private string m_rawText = string.Empty;
         private readonly StringBuilder m_styleBuffer = new StringBuilder(64);
 
-        /// <summary>True when any style flag that is realised through markup wrapping (and has a
-        /// working engine modifier) is set. This commit: Underline, Strikethrough. Other flags are
-        /// stored and round-trip but are not yet wrapped (their engine modifiers are Round-2 gaps).</summary>
+        /// <summary>Literal-run tag used when <c>richText</c> is off (closed at its LAST occurrence).</summary>
+        internal const string RawTagName = "og-raw";
+
+        /// <summary>True when the engine source needs a wrapper: a markup-realised style flag is set, or rich
+        /// text is off (the run is then wrapped in a literal span so its tags are shown verbatim).</summary>
         private bool HasWrappingStyle =>
+            !m_richText ||
             (m_fontStyle & (FontStyles.Underline | FontStyles.Strikethrough
-                            | FontStyles.UpperCase | FontStyles.LowerCase
-                            | FontStyles.Superscript | FontStyles.Subscript)) != 0;
+                            | FontStyles.UpperCase | FontStyles.LowerCase | FontStyles.SmallCaps
+                            | FontStyles.Superscript | FontStyles.Subscript | FontStyles.Highlight)) != 0;
 
         /// <summary>Composes the active style flags into a tag wrapper around <paramref name="raw"/>.
-        /// Order is outer-to-inner: case transform (outermost, so it applies to the whole run),
-        /// then baseline (sup/sub), then decoration (u/s), then highlight (innermost background).
-        /// Bold/Italic are intentionally excluded — they are engine weight/axis, not tags.</summary>
+        /// Order is outer-to-inner: case transform (outermost, so it applies to the whole run), small caps,
+        /// then baseline (sup/sub), then decoration (u/s), then highlight, then (richText off) the literal
+        /// span. Bold/Italic are intentionally excluded — they are engine weight/axis, not tags.</summary>
         private string ComposeStyledSource(string raw)
         {
             if (string.IsNullOrEmpty(raw) || !HasWrappingStyle)
@@ -59,32 +58,32 @@ namespace OpenGlyph
             var sb = m_styleBuffer;
             sb.Length = 0;
 
-            // Only emit tags whose engine parse rule is registered and renders. As each remaining
-            // rule lands (sup/sub/mark/smallcaps/lowercase — tracked in the parity doc) its flag is
-            // added here. Emitting a tag with no engine rule would leak the literal "<sup>" into the
-            // rendered run, so unsupported flags are intentionally NOT wrapped yet.
-
             // Opening tags, outermost first (case transform outermost so it covers the whole run).
             if ((m_fontStyle & FontStyles.UpperCase) != 0) sb.Append("<uppercase>");
             if ((m_fontStyle & FontStyles.LowerCase) != 0) sb.Append("<lowercase>");
+            if ((m_fontStyle & FontStyles.SmallCaps) != 0) sb.Append("<smallcaps>");
             if ((m_fontStyle & FontStyles.Superscript) != 0) sb.Append("<sup>");
             if ((m_fontStyle & FontStyles.Subscript) != 0) sb.Append("<sub>");
             if ((m_fontStyle & FontStyles.Underline) != 0) sb.Append("<u>");
             if ((m_fontStyle & FontStyles.Strikethrough) != 0) sb.Append("<s>");
+            if ((m_fontStyle & FontStyles.Highlight) != 0) sb.Append("<mark>");
+            if (!m_richText) sb.Append('<').Append(RawTagName).Append('>');
 
             sb.Append(raw);
 
             // Closing tags, innermost first (reverse order).
+            if (!m_richText) sb.Append("</").Append(RawTagName).Append('>');
+            if ((m_fontStyle & FontStyles.Highlight) != 0) sb.Append("</mark>");
             if ((m_fontStyle & FontStyles.Strikethrough) != 0) sb.Append("</s>");
             if ((m_fontStyle & FontStyles.Underline) != 0) sb.Append("</u>");
             if ((m_fontStyle & FontStyles.Subscript) != 0) sb.Append("</sub>");
             if ((m_fontStyle & FontStyles.Superscript) != 0) sb.Append("</sup>");
+            if ((m_fontStyle & FontStyles.SmallCaps) != 0) sb.Append("</smallcaps>");
             if ((m_fontStyle & FontStyles.LowerCase) != 0) sb.Append("</lowercase>");
             if ((m_fontStyle & FontStyles.UpperCase) != 0) sb.Append("</uppercase>");
 
             return sb.ToString();
         }
-
         /// <summary>Pushes the composed (style-wrapped) source into the engine. Called whenever the
         /// raw text or the style flags change.</summary>
         private void ApplyStyledSource()
@@ -139,7 +138,39 @@ namespace OpenGlyph
             // Markup-only TMP tags (no fontStyle flag) registered so <voffset=…> works out of the box.
             if (!HasRule<VOffsetParseRule>())
                 RegisterModifier(new ModRegister { Modifier = new VOffsetModifier(), Rule = new VOffsetParseRule() });
-            // SmallCaps/Highlight need engine modifiers added as each lands — parity-doc gaps.
+            // Round 3: small caps, highlight, literal runs and the TMP layout tags.
+            if (!HasRule<SmallCapsParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new SmallCapsModifier(), Rule = new SmallCapsParseRule() });
+            if (!HasRule<MarkParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new MarkModifier(), Rule = new MarkParseRule() });
+            if (!HasNoParseRule("noparse"))
+                RegisterModifier(new ModRegister { Modifier = new EmptyModifier(), Rule = new NoParseParseRule() });
+            if (!HasNoParseRule(RawTagName))
+                RegisterModifier(new ModRegister
+                {
+                    Modifier = new EmptyModifier(),
+                    Rule = new NoParseParseRule { TagName = RawTagName, CloseAtLastTag = true }
+                });
+            if (!HasRule<NoBreakParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new NoBreakModifier(), Rule = new NoBreakParseRule() });
+            if (!HasRule<AlignParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new AlignModifier(), Rule = new AlignParseRule() });
+            if (!HasRule<IndentParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new IndentModifier(false), Rule = new IndentParseRule() });
+            if (!HasRule<LineIndentParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new IndentModifier(true), Rule = new LineIndentParseRule() });
+            if (!HasRule<FontParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new FontModifier(), Rule = new FontParseRule() });
+        }
+
+        private bool HasNoParseRule(string tagName)
+        {
+            var mods = ModRegisters;
+            if (mods == null) return false;
+            for (int i = 0; i < mods.Count; i++)
+                if (mods[i]?.Rule is NoParseParseRule r && string.Equals(r.TagName, tagName, System.StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
         }
 
         private bool HasRule<T>() where T : IParseRule

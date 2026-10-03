@@ -60,6 +60,10 @@ namespace OpenGlyph
         public int characterCount;
         /// <summary>Number of laid-out lines.</summary>
         public int lineCount;
+        /// <summary>Number of words (TMP word rules: letters/digits/hyphens).</summary>
+        public int wordCount;
+        /// <summary>Number of pages (Overflow mode Page), else 1.</summary>
+        public int pageCount = 1;
         /// <summary>Per-character info (length may exceed characterCount).</summary>
         public GlyphCharacterInfo[] characterInfo = System.Array.Empty<GlyphCharacterInfo>();
         /// <summary>Per-line info (length may exceed lineCount).</summary>
@@ -70,6 +74,8 @@ namespace OpenGlyph
         {
             characterCount = 0;
             lineCount = 0;
+            wordCount = 0;
+            pageCount = 1;
         }
 
         internal void EnsureCharacterCapacity(int n)

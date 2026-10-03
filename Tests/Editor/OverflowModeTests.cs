@@ -472,16 +472,19 @@ namespace LightSide.Tests
         }
 
         [Test]
-        public void GlyphMesh_UnsupportedModes_FallBackToOverflow_WithOneWarning()
+        public void GlyphMesh_ScrollRectPageLinked_Map_WithoutWarning()
         {
+            // Round 3: these modes are implemented, so no fallback warning is logged (an unexpected
+            // warning would fail the test). ScrollRect = Overflow (as in TMP); Page pages lines in the
+            // engine on top of Overflow; Linked keeps the lines that fit (Truncate).
             var c = MakeGlyphMesh(Legacy, TextOverflowModes.Overflow, Lines6, 200f, 70f);
-            UnityEngine.TestTools.LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("not supported"));
+            c.overflowMode = TextOverflowModes.ScrollRect;
+            Assert.AreEqual(TextOverflow.Overflow, c.Overflow);
             c.overflowMode = TextOverflowModes.Page;
             Assert.AreEqual(TextOverflow.Overflow, c.Overflow);
-            // One-time: further unsupported modes do not warn again (an unexpected warning would fail the test).
-            c.overflowMode = TextOverflowModes.ScrollRect;
             c.overflowMode = TextOverflowModes.Linked;
-            Assert.AreEqual(TextOverflow.Overflow, c.Overflow);
+            Assert.AreEqual(TextOverflow.Truncate, c.Overflow);
+            UnityEngine.TestTools.LogAssert.NoUnexpectedReceived();
         }
 
         // ------------------------------------------------------------------ review regressions

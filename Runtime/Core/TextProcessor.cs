@@ -306,6 +306,75 @@ namespace LightSide
         private bool hasValidFirstPassData;
         private bool hasValidGlyphsInAtlas;
 
+        // ---- TextMeshPro-parity layout inputs (opt-in; all zero/off for plain UniText) ----------------
+
+        /// <summary>TMP <c>characterSpacing</c>: extra advance after every character, in em/100 of the
+        /// font size (TMP units). Applied after shaping; change requires a first-pass rebuild.</summary>
+        public float CharacterSpacingEm;
+
+        /// <summary>TMP <c>wordSpacing</c>: extra advance after each whitespace character, in em/100.</summary>
+        public float WordSpacingEm;
+
+        /// <summary>TMP <c>lineSpacing</c>: extra advance between lines, in em/100 (may be negative; not
+        /// clamped, so lines may overlap exactly as in TMP).</summary>
+        public float LineSpacingEm;
+
+        /// <summary>TMP <c>paragraphSpacing</c>: extra advance after a line ending in a paragraph break
+        /// (U+000A or U+2029), in em/100.</summary>
+        public float ParagraphSpacingEm;
+
+        /// <summary>TMP linked-overflow <c>firstVisibleCharacter</c>: lines start at this codepoint; earlier
+        /// codepoints are not laid out. 0 = off.</summary>
+        public int FirstVisibleCodepoint;
+
+        /// <summary>TMP <c>Page</c> overflow: 1-based page to lay out (lines grouped into pages that fit the
+        /// layout height). 0 = off.</summary>
+        public int PageToDisplay;
+
+        /// <summary>Number of pages from the last layout when <see cref="PageToDisplay"/> is on (else 1).</summary>
+        public int PageCount { get; private set; } = 1;
+
+        /// <summary>First laid-out line of the last layout (page start, or 0).</summary>
+        public int LayoutFirstLine { get; private set; }
+
+        /// <summary>Number of lines handed to the last layout (after Truncate/Ellipsis/Page).</summary>
+        public int LayoutLineCount { get; private set; }
+
+        /// <summary>First codepoint that did NOT fit in the last layout (Truncate/Ellipsis/Page), or -1.</summary>
+        public int FirstOverflowCodepoint { get; private set; } = -1;
+
+        /// <summary>TEST INSTRUMENTATION: number of first passes (shaping) and layouts performed.</summary>
+        internal static long FirstPassCount;
+        internal static long LayoutCount;
+
+        /// <summary>A TMP <c>&lt;indent&gt;</c> / <c>&lt;line-indent&gt;</c> span (codepoint range).</summary>
+        public struct IndentSpan
+        {
+            public int start;
+            public int end;
+            public float value;
+            /// <summary>0 = pixels, 1 = em (font size), 2 = percent of the layout width.</summary>
+            public byte unit;
+            /// <summary>True for <c>&lt;line-indent&gt;</c> (first line of each paragraph only).</summary>
+            public bool lineIndent;
+        }
+
+        private readonly System.Collections.Generic.List<IndentSpan> indentSpans = new();
+        private readonly System.Collections.Generic.List<UniTextFont> spanFonts = new();
+
+        /// <summary>Registers an indent span for this text (called by the indent modifiers while parsing).</summary>
+        public void AddIndentSpan(IndentSpan span) => indentSpans.Add(span);
+
+        /// <summary>Registers a font for a <c>&lt;font&gt;</c> span and returns its 1-based table index.</summary>
+        public int RegisterSpanFont(UniTextFont font)
+        {
+            if (font == null) return 0;
+            var i = spanFonts.IndexOf(font);
+            if (i >= 0) return i + 1;
+            spanFonts.Add(font);
+            return spanFonts.Count;
+        }
+
         internal UniTextFontProvider FontProviderForAtlas => fontProvider;
         internal bool HasValidGlyphsInAtlas { get => hasValidGlyphsInAtlas; set => hasValidGlyphsInAtlas = value; }
 
@@ -635,8 +704,11 @@ namespace LightSide
         private void DoFirstPass(ReadOnlySpan<char> text, TextProcessSettings settings)
         {
             UniTextDebug.Increment(ref UniTextDebug.TextProcessor_DoFullShapingCount);
+            System.Threading.Interlocked.Increment(ref FirstPassCount);
 
             buf.shapingFontSize = settings.fontSize;
+            indentSpans.Clear();
+            spanFonts.Clear();
 
             UniTextDebug.BeginSample("TextProcessor.Parse");
             Parse(text);
@@ -684,6 +756,10 @@ namespace LightSide
             UniTextDebug.BeginSample("TextProcessor.Shaped?.Invoke()");
             Shaped?.Invoke();
             UniTextDebug.EndSample();
+
+            // TMP-parity character/word spacing, after the modifiers so <size>/<sup> do not scale it
+            // (TMP adds it at the base em scale).
+            ApplyTmpSpacing();
 
             UniTextDebug.BeginSample("TextProcessor.ComputeCpWidths");
             ComputeCpWidths();
@@ -773,6 +849,9 @@ namespace LightSide
             var maxWidth = 0f;
             var currentWidth = 0f;
             var lineStartCp = 0;
+            // TMP measures a line up to the last character's advance WITHOUT its trailing
+            // characterSpacing (textWidth = xAdvance + glyph advance), so drop one spacing per line.
+            var trailingSpacing = CharacterSpacingEm * buf.shapingFontSize * 0.01f;
 
             for (var cp = 0; cp < cpCount; cp++)
             {
@@ -781,6 +860,7 @@ namespace LightSide
                 if (breakOps[cp + 1] == LineBreakType.Mandatory)
                 {
                     var lineMargin = lineStartCp < margins.Length ? margins[lineStartCp] : 0;
+                    if (currentWidth > 0f) currentWidth -= trailingSpacing;
                     if (currentWidth + lineMargin > maxWidth)
                         maxWidth = currentWidth + lineMargin;
 
@@ -789,6 +869,7 @@ namespace LightSide
                 }
             }
 
+            if (currentWidth > 0f) currentWidth -= trailingSpacing;
             var lastLineMargin = lineStartCp < margins.Length ? margins[lineStartCp] : 0;
             var lastLineWidth = currentWidth + lastLineMargin;
             if (lastLineWidth > maxWidth) maxWidth = lastLineWidth;
@@ -832,7 +913,9 @@ namespace LightSide
             var maxGlyphScale = maxSize / buf.shapingFontSize;
             var scaledUnwrappedWidth = unwrappedWidth * maxGlyphScale;
 
-            if (OnCalculateLineHeight == null && (!baseSettings.enableWordWrap || scaledUnwrappedWidth <= targetWidth))
+            if (OnCalculateLineHeight == null && LineSpacingEm == 0f && ParagraphSpacingEm == 0f &&
+                indentSpans.Count == 0 &&
+                (!baseSettings.enableWordWrap || scaledUnwrappedWidth <= targetWidth))
             {
                 var lineCount = 1;
                 var maxLineWidth = 0f;
@@ -949,7 +1032,7 @@ namespace LightSide
             buf.orderedRuns.count = 0;
             buf.positionedGlyphs.count = 0;
 
-            BreakLines(effectiveMaxWidth, buf.cpWidths.Span);
+            BreakLines(effectiveMaxWidth, buf.cpWidths.Span, glyphScale, targetWidth / glyphScale);
 
             lastLinesWidth = targetWidth;
             lastLinesFontSize = fontSize;
@@ -1097,6 +1180,10 @@ namespace LightSide
                 return;
             }
 
+            itemizeFontOverride = spanFonts.Count > 0
+                ? buf.GetAttributeData<PooledArrayAttribute<int>>(AttributeKeys.FontOverride)?.buffer.data
+                : null;
+
             buf.graphemeBreaks.EnsureCount(cpCount + 1);
             var graphemeBreaks = buf.graphemeBreaks.Span;
             GraphemeBreaker.GetBreakOpportunities(cpSpan, graphemeBreaks);
@@ -1207,6 +1294,11 @@ namespace LightSide
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int GetFontIdForCluster(Span<int> cpSpan, int start, int end, UniTextFontProvider fp)
         {
+            // TMP <font="Name"> span: the span's font wins for every cluster it has a glyph for; the
+            // rest of the cluster set falls through to the normal stack/fallback search.
+            if (itemizeFontOverride != null && TryGetSpanFont(cpSpan, start, fp, out var spanFontId))
+                return spanFontId;
+
             // Phase 2: when a styled run is requested (markup <b>/<i> or a weight/width/style spec),
             // resolve the real family face for this cluster's style. A different resolved font id
             // naturally splits the run. Only applies to non-emoji single text; emoji keep their path.
@@ -1364,6 +1456,7 @@ namespace LightSide
             var runCnt = buf.runs.count;
             var cp = buf.codepoints.Span;
             var runs = buf.runs;
+            var smcpFlags = buf.GetAttributeData<PooledArrayAttribute<byte>>(AttributeKeys.SmallCapsFeature)?.buffer.data;
 
             for (var i = 0; i < runCnt; i++)
             {
@@ -1373,6 +1466,10 @@ namespace LightSide
                 if (!run.variationKey.IsNone && fontProvider != null)
                     fontProvider.GetVariationCoords(run.fontId, run.styleSpec,
                         opszAuto ? buf.shapingFontSize : 0f, out vtags, out vcoords);
+
+                var featureCount = smcpFlags != null ? BuildSmallCapsFeatures(smcpFlags, run.range) : 0;
+                if (DisableLatinLigatures && IsLigatureFreeScript(run.script))
+                    featureCount = AppendNoLigatureFeatures(featureCount, run.range);
 
                 var result = Shaper.Shape(
                     cp,
@@ -1384,7 +1481,9 @@ namespace LightSide
                     run.Direction,
                     run.variationKey,
                     vtags,
-                    vcoords);
+                    vcoords,
+                    featureCount > 0 ? featureScratch : null,
+                    featureCount);
 
                 var glyphStart = buf.shapedGlyphs.count;
                 AddShapedGlyphs(result.Glyphs);
@@ -1525,7 +1624,7 @@ namespace LightSide
 
             var glyphScale = buf.GetGlyphScale(fontSize);
             var effectiveMaxWidth = wordWrap ? width / glyphScale : TextProcessSettings.FloatMax;
-            BreakLines(effectiveMaxWidth, cpWidths);
+            BreakLines(effectiveMaxWidth, cpWidths, glyphScale, width / glyphScale);
 
             lastLinesWidth = width;
             lastLinesFontSize = fontSize;
@@ -1613,6 +1712,16 @@ namespace LightSide
                 var minAdvance = maxDescDepth + nextAscHeight + lineSpacing;
                 advance = Math.Max(advance, minAdvance);
 
+                // TMP lineSpacing / paragraphSpacing (em/100 of the font size), added AFTER the minimum
+                // so negative values overlap lines exactly like TMP's lineOffset.
+                if (LineSpacingEm != 0f || ParagraphSpacingEm != 0f)
+                {
+                    var em = fontSize * 0.01f;
+                    advance += LineSpacingEm * em;
+                    if (ParagraphSpacingEm != 0f && LineEndsParagraph(in lines[i]))
+                        advance += ParagraphSpacingEm * em;
+                }
+
                 advances[i] = advance;
                 totalLineAdvances += advance;
             }
@@ -1650,7 +1759,8 @@ namespace LightSide
             }
         }
 
-        private void BreakLines(float maxWidth, ReadOnlySpan<float> cpWidths)
+        private void BreakLines(float maxWidth, ReadOnlySpan<float> cpWidths, float glyphScale = 1f,
+            float layoutWidth = -1f)
         {
             UniTextDebug.BeginSample("TextProcessor.BreakLines");
             buf.lines.count = 0;
@@ -1660,6 +1770,14 @@ namespace LightSide
             var orderedRunsArr = buf.orderedRuns.data;
             var lineCnt = buf.lines.count;
             var orderedRunCnt = buf.orderedRuns.count;
+
+            // TMP <indent>/<line-indent>: fold the spans into per-codepoint line-start margins and
+            // mid-line pen jumps (shaping units). No spans -> the original margins buffer, untouched.
+            var cpCount = buf.codepoints.count;
+            var margins = buf.startMargins.data.AsSpan(0, cpCount);
+            ReadOnlySpan<float> jumps = default;
+            if (indentSpans.Count > 0)
+                BuildIndentMargins(cpCount, glyphScale, layoutWidth > 0f ? layoutWidth : maxWidth, out margins, out jumps);
 
             // TMP parity: justified/flush lines may overrun the box by up to 5% before wrapping, so a
             // word that nearly fits is kept on the line and pulled back by inter-word justification
@@ -1683,8 +1801,11 @@ namespace LightSide
                 buf.bidiParagraphs.Span,
                 ref linesArr, ref lineCnt,
                 ref orderedRunsArr, ref orderedRunCnt,
-                buf.startMargins.data.AsSpan(0, buf.codepoints.count),
-                widthTolerance);
+                margins,
+                widthTolerance,
+                FirstVisibleCodepoint,
+                jumps,
+                firstPassTmpJustify);
 
             buf.lines.data = linesArr;
             buf.orderedRuns.data = orderedRunsArr;
@@ -1717,33 +1838,55 @@ namespace LightSide
             // Vertical overflow (Truncate / Ellipsis): lines past the last one that fits are simply not
             // handed to the layout. The cached line/run data is never shrunk, so a later relayout with a
             // different height still sees every line.
+            System.Threading.Interlocked.Increment(ref LayoutCount);
             var lineCount = buf.lines.count;
+            var firstLine = 0;
             var visibleLines = lineCount;
             var layoutHeight = cachedRawHeight;
-            if (settings.Overflow is TextOverflow.Truncate or TextOverflow.Ellipsis)
+            PageCount = 1;
+            if (PageToDisplay > 0)
+            {
+                // TMP Page overflow: lay out only the requested page's lines, top-aligned in the rect.
+                ResolvePage(settings, PageToDisplay, out firstLine, out visibleLines, out layoutHeight,
+                    out var pageFirstH, out var pageLastH);
+                Layout.SetEffectiveLineHeights(pageFirstH, pageLastH);
+            }
+            else if (settings.Overflow is TextOverflow.Truncate or TextOverflow.Ellipsis)
             {
                 visibleLines = FitVisibleLineCount(settings, out layoutHeight, out var lastLineHeight);
                 if (visibleLines < lineCount)
                     Layout.SetEffectiveLineHeights(cachedEffectiveFirstLineHeight, lastLineHeight);
             }
 
+            LayoutFirstLine = firstLine;
+            LayoutLineCount = visibleLines;
+            FirstOverflowCodepoint = firstLine + visibleLines < lineCount
+                ? buf.lines.data[firstLine + visibleLines].range.start
+                : -1;
+
+            var alignAttr = buf.GetAttributeData<PooledArrayAttribute<byte>>(AttributeKeys.LineAlignment);
+            var lineAlign = alignAttr?.buffer.data != null
+                ? new ReadOnlySpan<byte>(alignAttr.buffer.data, 0, Math.Min(alignAttr.buffer.data.Length, buf.codepoints.count))
+                : default;
+
             var runsLength = buf.orderedRuns.count;
             var glyphsLength = buf.shapedGlyphs.count;
             var glyphCnt = buf.positionedGlyphs.count;
             try
             {
-                if (wantsEllipsis && visibleLines < lineCount)
+                if (wantsEllipsis && visibleLines < lineCount && PageToDisplay <= 0)
                     BeginEllipsisOnLine(visibleLines - 1, settings, ref runsLength, ref glyphsLength);
 
                 Layout.Layout(
-                    buf.lines.data.AsSpan(0, visibleLines),
+                    buf.lines.data.AsSpan(firstLine, visibleLines),
                     buf.orderedRuns.data.AsSpan(0, runsLength),
                     buf.shapedGlyphs.data.AsSpan(0, glyphsLength),
-                    buf.perLineAdvances.Span,
+                    buf.perLineAdvances.Span.Slice(Math.Min(firstLine, buf.perLineAdvances.count)),
                     layoutHeight,
                     buf.positionedGlyphs.data, ref glyphCnt,
                     out resultWidth, out resultHeight,
-                    buf.codepoints.Span);
+                    buf.codepoints.Span,
+                    lineAlign);
                 buf.positionedGlyphs.count = glyphCnt;
             }
             finally

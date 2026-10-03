@@ -67,20 +67,25 @@ Create one from **GameObject > UI > OpenGlyph > GlyphMeshPro - Text**.
 
 - `text`, `SetText(string)`, `SetText(StringBuilder)`, `SetText(string, float…)` with `{0}`–`{7}` placeholders
 - `font` (a `UniTextFont`), `fontSize`, `enableAutoSizing`, `fontSizeMin`, `fontSizeMax`, `fontWeight`
-- `fontStyle`: Bold, Italic, Underline, Strikethrough, UpperCase, LowerCase, Superscript, Subscript
-- `color` (inherited from `Graphic`), `alignment` (incl. Justified and Flush), `textWrappingMode`, `enableWordWrapping`
-- `overflowMode`: Overflow, Ellipsis, Truncate, Masking
-- `isRightToLeftText`, `preferredWidth`/`preferredHeight`, `GetPreferredValues(…)`, `GetRenderedValues()`, `ForceMeshUpdate()`, `textInfo` (character/line subset)
-- Rich-text tags registered automatically: `<b> <i> <u> <s> <color> <size> <cspace> <line-height> <link> <uppercase> <lowercase> <sup> <sub> <voffset>`
+- `fontStyle`: Bold, Italic, Underline, Strikethrough, UpperCase, LowerCase, SmallCaps (OpenType `smcp` or synthetic), Superscript, Subscript, Highlight
+- `color` (inherited from `Graphic`), `enableVertexGradient`/`colorGradient`, `alignment` (incl. Justified and Flush), `textWrappingMode`, `enableWordWrapping`
+- `characterSpacing`, `wordSpacing`, `lineSpacing`, `paragraphSpacing` (TMP units: em/100), `margin`, `richText`
+- `maxVisibleCharacters`/`Words`/`Lines` (mesh-only update, so typewriter effects do not reshape or re-layout)
+- `overflowMode`: Overflow, Ellipsis, Truncate, Masking, ScrollRect, Page (`pageToDisplay`), Linked (`linkedTextComponent`)
+- `isRightToLeftText`, `preferredWidth`/`preferredHeight`, `GetPreferredValues(…)`, `GetRenderedValues()`, `ForceMeshUpdate()`, `textInfo` (character/line/word/page subset)
+- Rich-text tags registered automatically: `<b> <i> <u> <s> <color> <size> <cspace> <line-height> <link> <uppercase> <lowercase> <smallcaps> <sup> <sub> <voffset> <mark> <nobr> <noparse> <align> <indent> <line-indent> <font>`
 
-**Not full parity.** These TMP members exist so code compiles, but their values are only stored
-today: `characterSpacing`, `wordSpacing`, `lineSpacing`, `paragraphSpacing`, `margin`, `richText`,
-`enableVertexGradient`/`colorGradient`, and `maxVisibleCharacters/Words/Lines` (which only affect
-`textInfo` visibility). Not yet supported: `fontStyle` SmallCaps and Highlight; overflow ScrollRect,
-Page and Linked (fall back to Overflow with a warning); tags such as `<mark> <nobr> <font> <align>
-<indent> <sprite>`; and the world-space `GlyphMeshPro` (MeshRenderer) component, which is a stub.
+**Not full parity.** Not yet supported: `<sprite>` and other tags listed in the parity doc
+(`<mspace> <space> <width> <alpha>`, inline `<margin>`), `TMP_ColorGradient` presets, the
+PreserveWhitespace wrapping modes, and the world-space `GlyphMeshPro` (MeshRenderer) component, which is a stub.
 TMP font assets are not used — fonts are `UniTextFont` assets. Full mapping:
 [GlyphMeshPro-Parity.md](Documentation/GlyphMeshPro-Parity.md).
+
+![TextMesh Pro and GlyphMeshProUGUI side by side on a dark background: characterSpacing 12, lineSpacing 40, SmallCaps, a mark highlight, a hanging indent and maxVisibleCharacters 13 render the same in both columns](.github/assets/features/gmp-tmp-parity.png)
+
+![Typewriter animation: maxVisibleCharacters grows by one character per frame in TextMesh Pro (left) and GlyphMeshProUGUI (right)](.github/assets/features/gmp-typewriter.gif)
+
+The typewriter only rebuilds the mesh: changing `maxVisibleCharacters` never reshapes or re-lays out the text.
 
 ## Showcase
 

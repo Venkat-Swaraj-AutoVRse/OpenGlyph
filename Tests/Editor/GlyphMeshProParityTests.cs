@@ -488,14 +488,14 @@ namespace LightSide.Tests
                 comp.fontStyle = OpenGlyph.FontStyles.Normal;
                 Assert.AreEqual("Hello", comp.Text, "Clearing style flags must restore the raw engine source.");
 
-                // Flags with no engine modifier yet are stored (round-trip) but NOT wrapped — the
-                // engine source stays raw so no literal tag leaks into the rendered run.
+                // Round 3: SmallCaps and Highlight are wired too — composed as <smallcaps>/<mark>, whose
+                // rules the component registers, so the tags are parsed (no literal leak).
                 comp.fontStyle = OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Highlight;
                 Assert.AreEqual(
                     OpenGlyph.FontStyles.SmallCaps | OpenGlyph.FontStyles.Highlight,
-                    comp.fontStyle, "Not-yet-wired flags must still round-trip.");
-                Assert.AreEqual("Hello", comp.Text,
-                    "Not-yet-wired flags must NOT be wrapped (no literal tag leak). Engine Text=" + comp.Text);
+                    comp.fontStyle, "SmallCaps/Highlight flags must round-trip.");
+                Assert.AreEqual("<smallcaps><mark>Hello</mark></smallcaps>", comp.Text,
+                    "SmallCaps/Highlight compose their tags around the run.");
             }
             finally { DestroyComponent(comp); }
         }

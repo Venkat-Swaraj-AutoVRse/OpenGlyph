@@ -192,7 +192,7 @@ namespace LightSide
             if (glyphCount == 0)
                 return TextHitResult.None;
 
-            var rect = rectTransform.rect;
+            var rect = GetLayoutRect(rectTransform.rect);
             var textX = localPosition.x - rect.xMin;
             var textY = rect.yMax - localPosition.y;
 

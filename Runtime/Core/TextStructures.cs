@@ -244,6 +244,16 @@ namespace LightSide
 
         /// <summary>Left margin for this line (e.g., for list indentation).</summary>
         public float startMargin;
+
+        /// <summary>
+        /// Codepoint at which the pen jumps to <see cref="indentJumpX"/> mid-line (TMP <c>&lt;indent&gt;</c>
+        /// opened after the line start), or 0 for no jump (a jump is never at a line's first codepoint).
+        /// </summary>
+        public int indentJumpCp;
+
+        /// <summary>Absolute pen position (shaping units, measured from the line's left edge, margin
+        /// included) the pen jumps to at <see cref="indentJumpCp"/>.</summary>
+        public float indentJumpX;
     }
 
 

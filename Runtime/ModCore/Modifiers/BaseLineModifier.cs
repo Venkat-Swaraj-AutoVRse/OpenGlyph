@@ -162,7 +162,7 @@ namespace LightSide
                 if (glyph.cluster < 0 || glyph.cluster >= flagsBuffer.Length)
                     continue;
 
-                var hasFlag = flagsBuffer.HasFlag(glyph.cluster);
+                var hasFlag = flagsBuffer.HasFlag(glyph.cluster) && !gen.IsClusterHidden(glyph.cluster);
                 if (!hasFlag && !hasActiveLine) continue;
 
                 var baselineY = offsetY - glyph.y;

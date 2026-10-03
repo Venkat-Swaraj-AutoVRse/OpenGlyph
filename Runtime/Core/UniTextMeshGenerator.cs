@@ -250,6 +250,29 @@ namespace LightSide
         /// <summary>Current number of triangle indices in the mesh buffers.</summary>
         public int triangleCount;
 
+        /// <summary>
+        /// Optional per-cluster visibility mask (non-zero = hidden) set by the component before
+        /// generation (TMP <c>maxVisibleCharacters</c>/<c>Words</c>/<c>Lines</c>). Hidden glyphs emit no
+        /// quad; decoration modifiers skip them via <see cref="IsClusterHidden"/>. Null = all visible.
+        /// </summary>
+        public byte[] ClusterHidden;
+
+        /// <summary>
+        /// Optional per-positioned-glyph visibility mask (index into the positioned glyphs, non-zero =
+        /// hidden). When set it decides which glyph quads are emitted (so the glyphs of one cluster — a
+        /// base and its combining marks — can be revealed one by one); <see cref="ClusterHidden"/> still
+        /// drives decorations. Null = use <see cref="ClusterHidden"/>.
+        /// </summary>
+        public byte[] GlyphHidden;
+
+        /// <summary>True when <paramref name="cluster"/> is hidden by <see cref="ClusterHidden"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsClusterHidden(int cluster)
+        {
+            var h = ClusterHidden;
+            return h != null && (uint)cluster < (uint)h.Length && h[cluster] != 0;
+        }
+
         [ThreadStatic] private static FastIntDictionary<PooledList<int>> glyphsByAtlas;
 
         private PooledBuffer<Vector3> vertices;
@@ -931,6 +954,21 @@ namespace LightSide
             {
                 var glyphIndex = glyphIndices[i];
                 ref var glyph = ref positionedGlyphs[glyphIndex];
+
+                // TMP maxVisibleCharacters/Words/Lines: hidden clusters emit no geometry at all (no quad,
+                // no OnGlyph), so the typewriter effect is a mesh-only rebuild — no reshape, no relayout.
+                var hidden = ClusterHidden;
+                var glyphHidden = GlyphHidden;
+                if (glyphHidden != null
+                        ? (uint)glyphIndex < (uint)glyphHidden.Length && glyphHidden[glyphIndex] != 0
+                        : hidden != null && (uint)glyph.cluster < (uint)hidden.Length && hidden[glyph.cluster] != 0)
+                {
+                    // The cache is marked valid after this pass; an entry skipped here must not keep
+                    // stale data from a previous user of the pooled array.
+                    if (!useCache) glyphCache[glyph.shapedGlyphIndex].isValid = false;
+                    continue;
+                }
+
                 var cacheIndex = glyph.shapedGlyphIndex;
 
                 ref var cachedData = ref glyphCache[cacheIndex];
