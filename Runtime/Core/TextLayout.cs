@@ -313,7 +313,8 @@ namespace LightSide
                             CountJustifyTargets(in line, runs, glyphs, codepoints, glyphScale,
                                 out int spaces, out int visibleClusters, out float minSpaceAdvance);
                             bool joining = LineHasJoiningScript(in line, codepoints);
-                            float gap = availableWidth - lineWidth; // + = spread, - = compress
+                            // Spread only: never compress (a line wider than the box stays as-is; B11).
+                            float gap = Math.Max(0f, availableWidth - lineWidth);
                             // Joining scripts: no character spreading — all slack to spaces.
                             float ratio = joining ? 0f : WordWrappingRatio;
                             if (spaces > 0 || visibleClusters > 0)
