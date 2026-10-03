@@ -879,8 +879,14 @@ This section documents the user-facing surface that removes `Material` assets an
 `UniTextAppearance` in favour of styles configured **on the component**, with a
 migration tool and a deprecation window where old assets still load and render
 identically. All behaviour is behind `UniTextSettings.UseUnifiedRenderer`
-(default **off**) plus the per-component `UniText.UnifiedRenderer` override; the
+(default **on** since batch 5; set it off, or a component to `ForceOff`, to use the legacy path) plus the per-component `UniText.UnifiedRenderer` override; the
 legacy per-segment path is byte-for-byte unchanged when the flag is off.
+
+> **Running the suite in each renderer mode (batch 5).** The unified renderer is the project
+> default, so a plain run exercises unified. `UNITEXT_FORCE_UNIFIED=1` pins unified explicitly and
+> `UNITEXT_FORCE_LEGACY=1` pins the legacy per-segment path (see `UnifiedRendererSuiteFixture`);
+> the two are the distinct configurations that must both be green. Opt a single component out with
+> `UniText.UnifiedRenderer = ForceOff`, or the whole project via `UniTextSettings.useUnifiedRenderer`.
 
 ### 9.1 Component style API (`UniTextStyle`)
 

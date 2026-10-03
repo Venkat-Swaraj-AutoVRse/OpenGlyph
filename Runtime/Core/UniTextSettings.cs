@@ -157,15 +157,16 @@ namespace LightSide
         [Tooltip("Render Architecture R2: when ON, each UniText component draws through a SINGLE " +
                  "CanvasRenderer per draw group (at most two: SDF/coverage + MSDF/color) using the " +
                  "UniText/Uber shader, a shared Texture2DArray atlas and a float-texture style table, " +
-                 "instead of one child CanvasRenderer per font/atlas/pass. OFF (default) keeps the " +
-                 "legacy per-segment renderer path, byte-for-byte unchanged. A component may override " +
-                 "this per-instance.")]
-        private bool useUnifiedRenderer = false;
+                 "instead of one child CanvasRenderer per font/atlas/pass. ON is the DEFAULT. OFF " +
+                 "keeps the legacy per-segment renderer path, byte-for-byte unchanged. A component " +
+                 "may override this per-instance (UnifiedRenderer = ForceOff).")]
+        private bool useUnifiedRenderer = true;
 
         /// <summary>
-        /// Project-wide default for the Render-Architecture R2 unified single-renderer path. False
-        /// (default) keeps the legacy per-segment CanvasRenderer path unchanged. A
-        /// <c>UniText</c> component may override this per instance.
+        /// Project-wide default for the Render-Architecture R2 unified single-renderer path. True
+        /// (the default) draws each component through one CanvasRenderer per draw group; false keeps
+        /// the legacy per-segment CanvasRenderer path unchanged. A <c>UniText</c> component may
+        /// override this per instance via <c>UnifiedRenderer</c> (UseProjectSetting / ForceOn / ForceOff).
         /// </summary>
         public static bool UseUnifiedRenderer => Instance != null && Instance.useUnifiedRenderer;
 
