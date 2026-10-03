@@ -138,7 +138,11 @@ namespace LightSide
                 if (DiagLog)
                     Debug.Log($"[UnifiedRenderBuilder DIAG] seg fontId={seg.fontId} pageFormat={page.format} -> glyphMode={mode} dstArray={dstFormat} verts={seg.mesh.vertexCount}");
                 var arr = SharedGlyphAtlas.Get(dstFormat, page.width);
-                if (!arr.AddPage(page.GetInstanceID(), page, out int slice))
+                // Pass the page's current revision so a page mutated IN PLACE after its first copy
+                // (glyphs added later) is re-copied into its existing slice rather than drawing the
+                // stale (blank) copy. The revision is bumped by UniTextFont on every glyph upload.
+                int pageRev = UniTextFont.AtlasPageRevision(page);
+                if (!arr.AddPage(page.GetInstanceID(), page, pageRev, out int slice))
                     continue;
 
                 if (!_groups.TryGetValue(dstFormat, out var g)) { g = new Group(); _groups[dstFormat] = g; }
