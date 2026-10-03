@@ -302,6 +302,15 @@ namespace LightSide
         private bool spanStyleHooked;
         /// <summary>The component base GlyphStyle captured at generation start, that span overrides layer onto.</summary>
         private GlyphStyle spanBaseStyle;
+        /// <summary>
+        /// Threading: the base <see cref="GlyphStyle"/> resolved on the MAIN-THREAD prepare step
+        /// (<see cref="PrepareForMeshGenerationMainThread"/>). Synthesising it from the legacy
+        /// appearance reads Material properties (main-thread only), so it must not be computed inside
+        /// the worker-thread <c>OnSpanStyleBeforeMesh</c>. When <see cref="hasPreparedBaseStyle"/> is
+        /// set, the coordinator uses this instead of calling the shim on the worker.
+        /// </summary>
+        private GlyphStyle preparedBaseStyle;
+        private bool hasPreparedBaseStyle;
 
         private Rect cachedClipRect;
         private bool cachedValidClip;
@@ -1326,10 +1335,14 @@ namespace LightSide
                 EnsureSpanStyleHooked();
                 // R2 sub-task 1: prefer the component-authored style when Override Style is ON;
                 // otherwise fall back to the shim synthesising one from the legacy appearance/material
-                // (so old assets still render identically during the deprecation window).
-                var style = overrideStyle
-                    ? this.style.ToGlyphStyle()
-                    : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
+                // (so old assets still render identically during the deprecation window). Reuse the
+                // base style already synthesised on the main-thread prepare step when available (one
+                // source of truth; avoids a second Material-property read here on the main thread).
+                var style = hasPreparedBaseStyle
+                    ? preparedBaseStyle
+                    : (overrideStyle
+                        ? this.style.ToGlyphStyle()
+                        : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont));
                 // The collector was reset at OnBeforeMesh with the base style and populated per glyph
                 // (local ids in UV1.w). The builder maps each glyph's local id -> a shared StyleTable row.
                 unifiedBuilder.Build(renderData, style, spanStyleCollector, unifiedRenderData);
@@ -1371,9 +1384,16 @@ namespace LightSide
         private void OnSpanStyleBeforeMesh()
         {
             if (!UseUnifiedRenderer) return;
-            spanBaseStyle = overrideStyle
-                ? this.style.ToGlyphStyle()
-                : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
+            // Use the base style resolved on the MAIN-THREAD prepare step. Synthesising it from the
+            // legacy appearance reads Material properties, which is main-thread only — doing it here
+            // would run on a worker in the parallel path. hasPreparedBaseStyle is set by
+            // PrepareForMeshGenerationMainThread; fall back to a live resolve only on the serial path
+            // (e.g. a direct generation that bypassed the batch prepare), still on the main thread.
+            spanBaseStyle = hasPreparedBaseStyle
+                ? preparedBaseStyle
+                : (overrideStyle
+                    ? this.style.ToGlyphStyle()
+                    : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont));
             spanStyleCollector ??= new SpanStyleCollector();
             spanStyleCollector.Reset(spanBaseStyle);
         }
