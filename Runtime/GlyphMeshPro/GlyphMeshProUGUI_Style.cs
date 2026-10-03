@@ -107,6 +107,23 @@ namespace OpenGlyph
             if (m_styleModsRegistered) return;
             m_styleModsRegistered = true;
 
+            // Bold/Italic back both the <b>/<i> tags and the fontStyle Bold/Italic flags: the engine
+            // writes the property request into the same buffers these modifiers consume, so without
+            // them fontStyle = Bold rendered regular. The common TMP tags work out of the box too.
+            if (!HasRule<BoldParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new BoldModifier(), Rule = new BoldParseRule() });
+            if (!HasRule<ItalicParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new ItalicModifier(), Rule = new ItalicParseRule() });
+            if (!HasRule<ColorParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new ColorModifier(), Rule = new ColorParseRule() });
+            if (!HasRule<SizeParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new SizeModifier(), Rule = new SizeParseRule() });
+            if (!HasRule<CSpaceParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new LetterSpacingModifier(), Rule = new CSpaceParseRule() });
+            if (!HasRule<LineHeightParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new LineHeightModifier(), Rule = new LineHeightParseRule() });
+            if (!HasRule<LinkTagParseRule>())
+                RegisterModifier(new ModRegister { Modifier = new LinkModifier(), Rule = new LinkTagParseRule() });
             if (!HasRule<UnderlineParseRule>())
                 RegisterModifier(new ModRegister { Modifier = new UnderlineModifier(), Rule = new UnderlineParseRule() });
             if (!HasRule<StrikethroughParseRule>())
