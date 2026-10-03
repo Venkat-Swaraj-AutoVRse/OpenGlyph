@@ -1292,8 +1292,17 @@ namespace LightSide
             LeadingDistribution = leadingDistribution,
             fontSize = effectiveFontSize,
             baseDirection = baseDirection,
-            enableWordWrap = wordWrap
+            enableWordWrap = wordWrap,
+            TmpJustification = UseTmpJustification
         };
+
+        /// <summary>
+        /// Whether this component uses the opt-in TextMeshPro-compatible justification (5% wrap overrun
+        /// + word/character spacing split). Plain <c>UniText</c> returns false so its Justified/Flush
+        /// layout is unchanged; the TMP-parity components (<c>GlyphMeshProUGUI</c>/<c>GlyphMeshPro</c>)
+        /// override this to true.
+        /// </summary>
+        protected virtual bool UseTmpJustification => false;
 
         #endregion
 

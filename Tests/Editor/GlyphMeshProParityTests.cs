@@ -157,6 +157,7 @@ namespace LightSide.Tests
                 settings.HorizontalAlignment = halign;
                 settings.MaxWidth = width <= 0 ? TextProcessSettings.FloatMax : width;
                 settings.MaxHeight = TextProcessSettings.FloatMax;
+                settings.TmpJustification = true; // RunOpenGlyph represents the GlyphMeshPro engine path
 
                 tp.EnsureFirstPass(text, settings);
                 Assert.IsTrue(tp.HasValidFirstPassData, "OpenGlyph first pass produced no data.");
@@ -603,11 +604,189 @@ namespace LightSide.Tests
                 Assert.GreaterOrEqual(flushW[i], boxW * 0.90f, $"Flush line {i} should fill the box.");
         }
 
+        // ==================================================================
+        // Scoping: plain UniText (TmpJustification = false) keeps the LEGACY behaviour
+        // ==================================================================
+
+        [Test]
+        public void PlainUniText_Justified_And_Flush_KeepLegacyWordGapOnly_Layout()
+        {
+            // The TMP-parity justification (5% wrap overrun + word/character spacing split) must be
+            // scoped to GlyphMeshPro. Plain UniText (TmpJustification=false) must keep the exact
+            // pre-Round-2.1 behaviour: Justified/Flush wrap at the EXACT box width (no 1.05 overrun)
+            // and insert slack at WHITESPACE ONLY (no character spacing between visible glyphs).
+            // This fails if the gating is removed (the TMP path would overrun and letter-space here too).
+            const float boxW = 420f;
+
+            foreach (var halign in new[] { HorizontalAlignment.Justified, HorizontalAlignment.Flush })
+            {
+                // (a) Line breaks: plain-UniText justified wraps at the SAME count as Left (tolerance 1.0),
+                //     whereas the TMP path (tmpJustify=true) may pack more via the 5% overrun.
+                int leftLines = PositionedGlyphsFor(_stack, Paragraph, boxW, HorizontalAlignment.Left, tmpJustify: false).lineBreakCount;
+                int plainLines = PositionedGlyphsFor(_stack, Paragraph, boxW, halign, tmpJustify: false).lineBreakCount;
+                Assert.AreEqual(leftLines, plainLines,
+                    $"Plain UniText {halign} must wrap at the SAME line count as Left (no 1.05 overrun). " +
+                    $"Left={leftLines} {halign}={plainLines}.");
+
+                // (b) Character spacing: between two adjacent VISIBLE glyphs within a line, the advance
+                //     must equal their natural (unjustified) advance — plain UniText never letter-spaces.
+                var plain = PositionedGlyphsFor(_stack, Paragraph, boxW, halign, tmpJustify: false);
+                var natural = PositionedGlyphsFor(_stack, Paragraph, boxW, HorizontalAlignment.Left, tmpJustify: false);
+                AssertNoCharacterSpacingInserted(natural, plain, $"plain UniText {halign}");
+            }
+        }
+
+        // ==================================================================
+        // Cluster integrity: TMP character spacing must not split grapheme clusters
+        // ==================================================================
+
+        [Test]
+        public void Gmp_Justified_Thai_KeepsEveryMarkOffsetRelativeToItsBase()
+        {
+            string path = RealLayoutFixtures.FindThaiFontPath();
+            if (path == null) Assert.Ignore("NotoSansThai-Regular.ttf fixture not found.");
+            AssertIntraClusterOffsetsUnchangedUnderJustification(
+                path, "ตัวอย่างข้อความภาษาไทย ทดสอบ การ จัด ชิด ขอบ", "Thai");
+        }
+
+        [Test]
+        public void Gmp_Justified_Khmer_KeepsEveryMarkOffsetRelativeToItsBase()
+        {
+            string path = RealLayoutFixtures.FindComplexScriptFont(SegmentationScript.Khmer, out _);
+            if (path == null) Assert.Ignore("NotoSansKhmer-Regular.ttf fixture not found.");
+            AssertIntraClusterOffsetsUnchangedUnderJustification(
+                path, "ឧទាហរណ៍ នៃ អត្ថបទ ភាសា ខ្មែរ សម្រាប់ ការ តម្រឹម", "Khmer");
+        }
+
+        /// <summary>Shapes complex-script text with a dedicated font, lays it out UNJUSTIFIED and
+        /// JUSTIFIED (TMP path), and asserts that within every grapheme cluster each glyph's x offset
+        /// RELATIVE to the cluster's first glyph is identical in both — i.e. justification moved whole
+        /// clusters but never inserted advance between a base and its marks / conjunct parts.</summary>
+        private void AssertIntraClusterOffsetsUnchangedUnderJustification(string fontPath, string text, string label)
+        {
+            var bytes = File.ReadAllBytes(fontPath);
+            var font = UniTextFont.CreateFontAsset(bytes);
+            if (font == null) Assert.Ignore($"Could not build a UniTextFont from the {label} fixture (native backend).");
+            font.name = $"{label} (fixture)";
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>();
+            stack.fonts.Add(font);
+            try
+            {
+                float full = PositionedGlyphsFor(stack, text, 100000f, HorizontalAlignment.Left, tmpJustify: true).full.x;
+                float boxW = full * 0.80f; // force wrap + justification over multiple lines
+                var natural = PositionedGlyphsFor(stack, text, boxW, HorizontalAlignment.Left, tmpJustify: true).glyphs;
+                var just = PositionedGlyphsFor(stack, text, boxW, HorizontalAlignment.Justified, tmpJustify: true).glyphs;
+                Assert.AreEqual(natural.Count, just.Count, $"{label}: glyph count changed between layouts.");
+
+                // Group consecutive glyphs by (baseline y, cluster) and compare intra-cluster offsets.
+                int i0 = 0;
+                int multiGlyphClusters = 0;
+                while (i0 < natural.Count)
+                {
+                    int cl = natural[i0].cluster; float yb = natural[i0].y;
+                    int j = i0;
+                    while (j < natural.Count && natural[j].cluster == cl && Mathf.Approximately(natural[j].y, yb)) j++;
+                    int len = j - i0;
+                    if (len > 1)
+                    {
+                        multiGlyphClusters++;
+                        float baseNat = natural[i0].x, baseJust = just[i0].x;
+                        for (int k = i0 + 1; k < j; k++)
+                        {
+                            float offNat = natural[k].x - baseNat;
+                            float offJust = just[k].x - baseJust;
+                            Assert.AreEqual(offNat, offJust, 0.01f,
+                                $"{label}: cluster {cl} glyph +{k - i0} moved relative to its base under " +
+                                $"justification (natural offset {offNat:F3} vs justified {offJust:F3}) — " +
+                                "a mark/conjunct part was split from its base.");
+                        }
+                    }
+                    i0 = j;
+                }
+                Assert.Greater(multiGlyphClusters, 0,
+                    $"{label}: the sample produced no multi-glyph clusters, so cluster integrity was not exercised.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(stack);
+                Object.DestroyImmediate(font);
+            }
+        }
+
+        /// <summary>Asserts the x-advance between every pair of adjacent VISIBLE glyphs on a line is the
+        /// same in <paramref name="candidate"/> as in <paramref name="natural"/> — i.e. no character
+        /// spacing was inserted (only whitespace gaps changed).</summary>
+        private static void AssertNoCharacterSpacingInserted(
+            (System.Collections.Generic.List<PositionedGlyph> glyphs, Vector2 full, int lineBreakCount, int[] cps) natural,
+            (System.Collections.Generic.List<PositionedGlyph> glyphs, Vector2 full, int lineBreakCount, int[] cps) candidate,
+            string label)
+        {
+            Assert.AreEqual(natural.glyphs.Count, candidate.glyphs.Count, $"{label}: glyph count differs.");
+            var ng = natural.glyphs; var cg = candidate.glyphs; var cps = natural.cps;
+            for (int i = 1; i < ng.Count; i++)
+            {
+                if (!Mathf.Approximately(ng[i].y, ng[i - 1].y)) continue; // same line only
+                if (IsSpaceCp(ng[i - 1].cluster, cps) || IsSpaceCp(ng[i].cluster, cps)) continue; // whitespace may differ
+                float natAdv = ng[i].x - ng[i - 1].x;
+                float candAdv = cg[i].x - cg[i - 1].x;
+                Assert.AreEqual(natAdv, candAdv, 0.01f,
+                    $"{label} inserted character spacing between visible glyphs (natural advance {natAdv:F3} " +
+                    $"vs {candAdv:F3}); plain UniText must only widen whitespace gaps.");
+            }
+        }
+
+        private static bool IsSpaceCp(int cluster, int[] cps)
+        {
+            if (cps == null || (uint)cluster >= (uint)cps.Length) return false;
+            int cp = cps[cluster];
+            return cp == ' ' || cp == '\t' || cp == 0x00A0 || (cp >= 0x2000 && cp <= 0x200A)
+                || cp == 0x202F || cp == 0x205F || cp == 0x3000;
+        }
+
+        /// <summary>Runs the engine for a given stack/width/alignment/tmpJustify and returns the positioned
+        /// glyphs, the unwrapped preferred size, the resulting line count, and the codepoints. The single
+        /// place the tests drive the engine with an explicit TmpJustification setting.</summary>
+        private (System.Collections.Generic.List<PositionedGlyph> glyphs, Vector2 full, int lineBreakCount, int[] cps)
+            PositionedGlyphsFor(UniTextFontStack stack, string text, float width, HorizontalAlignment halign, bool tmpJustify)
+        {
+            var (tp, buffers) = RealLayoutFixtures.BuildProcessor(stack, _appearance);
+            try
+            {
+                var settings = new TextProcessSettings
+                {
+                    fontSize = FontSize,
+                    baseDirection = TextDirection.LeftToRight,
+                    enableWordWrap = width < 50000f,
+                };
+                settings.HorizontalAlignment = halign;
+                settings.MaxWidth = width <= 0 ? TextProcessSettings.FloatMax : width;
+                settings.MaxHeight = TextProcessSettings.FloatMax;
+                settings.TmpJustification = tmpJustify;
+
+                tp.EnsureFirstPass(text, settings);
+                Assert.IsTrue(tp.HasValidFirstPassData, "OpenGlyph first pass produced no data.");
+                float measureWidth = width <= 0 ? TextProcessSettings.FloatMax : width;
+                tp.EnsureLines(measureWidth, FontSize, settings.enableWordWrap);
+                tp.EnsurePositions(settings);
+
+                var list = new System.Collections.Generic.List<PositionedGlyph>();
+                var g = tp.PositionedGlyphs;
+                for (int i = 0; i < g.Length; i++) list.Add(g[i]);
+                var full = new Vector2(tp.GetPreferredWidth(FontSize), 0f);
+                int lines = tp.buf.lines.count;
+                var cpsSpan = tp.buf.codepoints.Span;
+                var cps = new int[cpsSpan.Length];
+                for (int i = 0; i < cpsSpan.Length; i++) cps[i] = cpsSpan[i];
+                return (list, full, lines, cps);
+            }
+            finally { buffers.EnsureReturnBuffers(); }
+        }
+
         /// <summary>Per-line widths computed from POSITIONED glyphs (max right − min left per baseline),
         /// which is where the layout justification pass has moved the glyphs. Uses the same engine path
         /// the component runs.</summary>
         private System.Collections.Generic.List<float> PositionedLineWidths(
-            string text, float width, bool wrap, HorizontalAlignment halign)
+            string text, float width, bool wrap, HorizontalAlignment halign, bool tmpJustify = true)
         {
             var (tp, buffers) = RealLayoutFixtures.BuildProcessor(_stack, _appearance);
             try
@@ -621,6 +800,7 @@ namespace LightSide.Tests
                 settings.HorizontalAlignment = halign;
                 settings.MaxWidth = width <= 0 ? TextProcessSettings.FloatMax : width;
                 settings.MaxHeight = TextProcessSettings.FloatMax;
+                settings.TmpJustification = tmpJustify;
 
                 tp.EnsureFirstPass(text, settings);
                 Assert.IsTrue(tp.HasValidFirstPassData, "OpenGlyph first pass produced no data.");
