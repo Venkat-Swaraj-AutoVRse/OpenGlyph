@@ -1,0 +1,2001 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-10-03T16:02:12.7309340Z",
+  "systemInfo": {
+    "deviceModel": "Oculus Quest 3S",
+    "deviceName": "Quest 3S",
+    "operatingSystem": "Android OS 14 / API-34 (UP1A.231005.007.A1/3814840036500610)",
+    "processorType": "ARM64 FP ASIMD AES",
+    "processorCount": 3,
+    "processorFrequency": 2361,
+    "systemMemorySize": 7757,
+    "graphicsDeviceName": "Adreno (TM) 740",
+    "graphicsDeviceType": "Vulkan",
+    "graphicsMemorySize": 8013,
+    "graphicsDeviceVersion": "Vulkan 1.1.0 [512.837.9 (0x80345009)]",
+    "screenWidth": 3664,
+    "screenHeight": 1920,
+    "screenDpi": 200.0,
+    "unityVersion": "6000.3.19f1",
+    "scriptingBackend": "IL2CPP",
+    "platform": "Android"
+  },
+  "config": {
+    "objectCount": 100,
+    "charsPerObject": 2405,
+    "iterations": 10,
+    "warmupIterations": 3
+  },
+  "textBenchmarks": {
+    "unitextSingleThreaded": {
+      "creation": {
+        "totalMs": 3055.31519,
+        "frameTimes": [
+          305.4911,
+          304.4538,
+          310.0166,
+          303.3892,
+          301.7308,
+          306.3022,
+          302.456,
+          300.6821,
+          310.644,
+          310.1491
+        ],
+        "median": 305.4911,
+        "min": 300.6821,
+        "max": 310.644,
+        "totalAlloc": 447795666,
+        "managedAlloc": 0,
+        "gc": [
+          2,
+          2,
+          2
+        ]
+      },
+      "destruction": {
+        "totalMs": 324.9941,
+        "frameTimes": [
+          31.1559,
+          31.2999,
+          36.5805,
+          33.9126,
+          30.538,
+          30.1024,
+          30.3381,
+          33.8803,
+          32.5627,
+          34.6237
+        ],
+        "median": 32.5627,
+        "min": 30.1024,
+        "max": 36.5805,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 2471.59521,
+        "frameTimes": [
+          251.8038,
+          229.7779,
+          204.3405,
+          245.4143,
+          209.4281,
+          246.874,
+          222.5052,
+          283.8663,
+          324.1002,
+          253.4848
+        ],
+        "median": 246.874,
+        "min": 204.3405,
+        "max": 324.1002,
+        "totalAlloc": 41224005,
+        "managedAlloc": 0,
+        "gc": [
+          1,
+          1,
+          1
+        ],
+        "inFrameWork": {
+          "genMeshCalls": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "glyphs": [
+            220100,
+            197200,
+            169700,
+            219800,
+            196900,
+            219200,
+            194500,
+            267700,
+            291700,
+            242600
+          ],
+          "verts": [
+            760400,
+            676800,
+            580800,
+            768000,
+            690400,
+            754800,
+            669600,
+            938400,
+            1034400,
+            862000
+          ],
+          "applyMesh": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "willRenderPasses": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "componentsSeen": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ]
+        }
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 864.972046,
+        "frameTimes": [
+          92.4269,
+          85.125,
+          85.2786,
+          87.5808,
+          84.0997,
+          83.8266,
+          86.1692,
+          87.4178,
+          86.0575,
+          86.9899
+        ],
+        "median": 86.1692,
+        "min": 83.8266,
+        "max": 92.4269,
+        "totalAlloc": 6873,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 1388.78174,
+        "frameTimes": [
+          110.9302,
+          93.9745,
+          154.7075,
+          143.0411,
+          141.0127,
+          142.7789,
+          149.4746,
+          151.9988,
+          152.9437,
+          147.9197
+        ],
+        "median": 147.9197,
+        "min": 93.9745,
+        "max": 154.7075,
+        "totalAlloc": 6488,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 860.9488,
+        "frameTimes": [
+          88.4491,
+          85.5001,
+          84.5883,
+          85.7993,
+          83.2984,
+          86.8227,
+          85.5521,
+          86.449,
+          86.224,
+          88.2658
+        ],
+        "median": 86.224,
+        "min": 83.2984,
+        "max": 88.4491,
+        "totalAlloc": 6713,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 994.926453,
+        "frameTimes": [
+          96.3659,
+          96.744,
+          102.9771,
+          96.615,
+          98.1546,
+          99.4356,
+          101.4653,
+          102.1083,
+          100.4237,
+          100.637
+        ],
+        "median": 100.4237,
+        "min": 96.3659,
+        "max": 102.9771,
+        "totalAlloc": 6488,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 1159.44714,
+        "frameTimes": [
+          115.9494,
+          95.986,
+          116.8621,
+          118.7666,
+          115.4185,
+          120.0751,
+          121.0161,
+          116.201,
+          119.68,
+          119.4923
+        ],
+        "median": 118.7666,
+        "min": 95.986,
+        "max": 121.0161,
+        "totalAlloc": 6385,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "validity": {
+        "measured": true,
+        "objectCount": 100,
+        "charsPerObject": 2405,
+        "expectedChars": 240500,
+        "observedChars": 240500,
+        "observedVerts": 842400,
+        "inFrameGenMeshCalls": 100,
+        "inFrameGlyphs": 219800,
+        "inFrameVerts": 760400,
+        "workInFrame": true,
+        "valid": true
+      }
+    },
+    "unitextParallel": {
+      "creation": {
+        "totalMs": 1799.49792,
+        "frameTimes": [
+          223.7098,
+          169.1733,
+          195.709,
+          174.7369,
+          174.9864,
+          166.1652,
+          166.3425,
+          201.6388,
+          160.7539,
+          166.2821
+        ],
+        "median": 174.7369,
+        "min": 160.7539,
+        "max": 223.7098,
+        "totalAlloc": 447796112,
+        "managedAlloc": 0,
+        "gc": [
+          1,
+          1,
+          1
+        ]
+      },
+      "destruction": {
+        "totalMs": 316.071472,
+        "frameTimes": [
+          31.8532,
+          29.9136,
+          31.9732,
+          31.512,
+          32.2582,
+          31.2769,
+          31.9369,
+          31.0291,
+          31.8013,
+          32.5171
+        ],
+        "median": 31.8532,
+        "min": 29.9136,
+        "max": 32.5171,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 1456.5564,
+        "frameTimes": [
+          136.9816,
+          123.8562,
+          122.9578,
+          142.8955,
+          137.0039,
+          153.7725,
+          123.5833,
+          159.0548,
+          198.3615,
+          158.0893
+        ],
+        "median": 142.8955,
+        "min": 122.9578,
+        "max": 198.3615,
+        "totalAlloc": 41236125,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ],
+        "inFrameWork": {
+          "genMeshCalls": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "glyphs": [
+            220100,
+            197200,
+            169700,
+            219800,
+            196900,
+            219200,
+            194500,
+            267700,
+            291700,
+            242600
+          ],
+          "verts": [
+            760400,
+            676800,
+            580800,
+            768000,
+            690400,
+            754800,
+            669600,
+            938400,
+            1034400,
+            862000
+          ],
+          "applyMesh": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "willRenderPasses": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "componentsSeen": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ]
+        }
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 793.136658,
+        "frameTimes": [
+          85.6848,
+          80.9691,
+          78.0164,
+          79.6702,
+          76.7457,
+          78.874,
+          79.6766,
+          76.5697,
+          79.6888,
+          77.2414
+        ],
+        "median": 79.6702,
+        "min": 76.5697,
+        "max": 85.6848,
+        "totalAlloc": 6313,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 1308.6864,
+        "frameTimes": [
+          103.6114,
+          84.9074,
+          143.8561,
+          135.0758,
+          134.5787,
+          135.0365,
+          141.9052,
+          145.1986,
+          145.0303,
+          139.4865
+        ],
+        "median": 139.4865,
+        "min": 84.9074,
+        "max": 145.1986,
+        "totalAlloc": 6288,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 782.3275,
+        "frameTimes": [
+          75.6107,
+          77.6903,
+          79.776,
+          76.8166,
+          77.5837,
+          78.1751,
+          79.3371,
+          78.7019,
+          77.9081,
+          80.728
+        ],
+        "median": 78.1751,
+        "min": 75.6107,
+        "max": 80.728,
+        "totalAlloc": 6377,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 934.665466,
+        "frameTimes": [
+          90.7573,
+          91.1639,
+          88.1762,
+          91.5484,
+          90.8285,
+          98.5393,
+          96.2929,
+          92.2922,
+          96.7557,
+          98.3111
+        ],
+        "median": 92.2922,
+        "min": 88.1762,
+        "max": 98.5393,
+        "totalAlloc": 6672,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 1098.76,
+        "frameTimes": [
+          111.5876,
+          92.5534,
+          113.2299,
+          113.3881,
+          112.2279,
+          111.9791,
+          110.5825,
+          111.4278,
+          110.8108,
+          110.9729
+        ],
+        "median": 111.5876,
+        "min": 92.5534,
+        "max": 113.3881,
+        "totalAlloc": 5305,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "validity": {
+        "measured": true,
+        "objectCount": 100,
+        "charsPerObject": 2405,
+        "expectedChars": 240500,
+        "observedChars": 240500,
+        "observedVerts": 842400,
+        "inFrameGenMeshCalls": 100,
+        "inFrameGlyphs": 219800,
+        "inFrameVerts": 760400,
+        "workInFrame": true,
+        "valid": true
+      }
+    },
+    "tmp": {
+      "creation": {
+        "totalMs": 6094.14844,
+        "frameTimes": [
+          665.0313,
+          594.2702,
+          605.9831,
+          587.9343,
+          600.3394,
+          619.2918,
+          614.6528,
+          597.7108,
+          614.2461,
+          594.6886
+        ],
+        "median": 605.9831,
+        "min": 587.9343,
+        "max": 665.0313,
+        "totalAlloc": 579086672,
+        "managedAlloc": 0,
+        "gc": [
+          30,
+          30,
+          30
+        ]
+      },
+      "destruction": {
+        "totalMs": 296.1939,
+        "frameTimes": [
+          29.2587,
+          30.1797,
+          29.183,
+          29.3228,
+          29.0042,
+          29.771,
+          29.4367,
+          30.0214,
+          30.1372,
+          29.8792
+        ],
+        "median": 29.771,
+        "min": 29.0042,
+        "max": 30.1797,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 4655.02441,
+        "frameTimes": [
+          443.4963,
+          415.8674,
+          363.4436,
+          443.9477,
+          420.0382,
+          466.363,
+          417.4844,
+          604.4007,
+          596.365,
+          483.6182
+        ],
+        "median": 443.9477,
+        "min": 363.4436,
+        "max": 604.4007,
+        "totalAlloc": 14838361,
+        "managedAlloc": 0,
+        "gc": [
+          3,
+          3,
+          3
+        ],
+        "inFrameWork": {
+          "genMeshCalls": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "glyphs": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "verts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "applyMesh": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "willRenderPasses": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "componentsSeen": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 5192.499,
+        "frameTimes": [
+          565.6004,
+          504.6646,
+          519.4322,
+          508.6671,
+          509.2866,
+          519.3698,
+          520.2938,
+          513.5379,
+          512.627,
+          519.0194
+        ],
+        "median": 519.0194,
+        "min": 504.6646,
+        "max": 565.6004,
+        "totalAlloc": 784,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 11406.918,
+        "frameTimes": [
+          537.3446,
+          618.684,
+          797.9841,
+          930.3013,
+          1107.51917,
+          1280.41235,
+          1423.8772,
+          1575.045,
+          1597.27637,
+          1538.47485
+        ],
+        "median": 1280.41235,
+        "min": 537.3446,
+        "max": 1597.27637,
+        "totalAlloc": 817,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 4821.227,
+        "frameTimes": [
+          482.9141,
+          485.6442,
+          479.8105,
+          483.1255,
+          478.1012,
+          478.9521,
+          481.0471,
+          486.5779,
+          484.6803,
+          480.3739
+        ],
+        "median": 482.9141,
+        "min": 478.1012,
+        "max": 486.5779,
+        "totalAlloc": 848,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 10548.08,
+        "frameTimes": [
+          482.8968,
+          578.5349,
+          747.1003,
+          873.2866,
+          1022.11761,
+          1198.401,
+          1315.14624,
+          1453.21069,
+          1468.74768,
+          1408.638
+        ],
+        "median": 1198.401,
+        "min": 482.8968,
+        "max": 1468.74768,
+        "totalAlloc": 680,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 5306.69141,
+        "frameTimes": [
+          534.3625,
+          512.2114,
+          537.2993,
+          536.5348,
+          534.0191,
+          530.3048,
+          529.7092,
+          535.6273,
+          528.3717,
+          528.2514
+        ],
+        "median": 534.0191,
+        "min": 512.2114,
+        "max": 537.2993,
+        "totalAlloc": 1120,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "validity": {
+        "measured": true,
+        "objectCount": 100,
+        "charsPerObject": 2405,
+        "expectedChars": 240500,
+        "observedChars": 238500,
+        "observedVerts": 791600,
+        "inFrameGenMeshCalls": null,
+        "inFrameGlyphs": null,
+        "inFrameVerts": null,
+        "workInFrame": false,
+        "valid": true
+      }
+    },
+    "unitextSingleThreaded_unique": {
+      "creation": {
+        "totalMs": 3210.601,
+        "frameTimes": [
+          320.6439,
+          327.7047,
+          335.7675,
+          320.755,
+          317.7515,
+          318.0154,
+          317.7192,
+          318.0531,
+          316.8996,
+          317.2913
+        ],
+        "median": 318.0531,
+        "min": 316.8996,
+        "max": 335.7675,
+        "totalAlloc": 447801278,
+        "managedAlloc": 0,
+        "gc": [
+          1,
+          1,
+          1
+        ]
+      },
+      "destruction": {
+        "totalMs": 334.672577,
+        "frameTimes": [
+          33.4774,
+          32.9938,
+          32.6964,
+          33.3354,
+          32.3419,
+          33.4571,
+          33.1612,
+          34.9028,
+          34.882,
+          33.4246
+        ],
+        "median": 33.4246,
+        "min": 32.3419,
+        "max": 34.9028,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 2926.47852,
+        "frameTimes": [
+          295.9658,
+          289.7969,
+          291.8553,
+          296.1958,
+          288.8056,
+          292.1525,
+          294.0898,
+          290.2178,
+          292.6472,
+          294.7519
+        ],
+        "median": 292.6472,
+        "min": 288.8056,
+        "max": 296.1958,
+        "totalAlloc": 128,
+        "managedAlloc": 0,
+        "gc": [
+          1,
+          1,
+          1
+        ],
+        "inFrameWork": {
+          "genMeshCalls": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "glyphs": [
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284
+          ],
+          "verts": [
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336
+          ],
+          "applyMesh": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "willRenderPasses": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "componentsSeen": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ]
+        }
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 895.264954,
+        "frameTimes": [
+          96.6052,
+          87.8805,
+          87.7877,
+          88.1532,
+          88.2172,
+          89.021,
+          89.9465,
+          90.1538,
+          89.6583,
+          87.8415
+        ],
+        "median": 89.021,
+        "min": 87.7877,
+        "max": 96.6052,
+        "totalAlloc": 7465,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 1463.85938,
+        "frameTimes": [
+          117.6343,
+          97.3416,
+          156.7098,
+          153.4955,
+          151.2975,
+          152.2985,
+          157.7321,
+          159.5928,
+          162.802,
+          154.9553
+        ],
+        "median": 154.9553,
+        "min": 97.3416,
+        "max": 162.802,
+        "totalAlloc": 7536,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 907.5678,
+        "frameTimes": [
+          89.0596,
+          90.8333,
+          92.9897,
+          88.302,
+          91.2837,
+          91.4215,
+          93.7167,
+          90.3475,
+          90.1923,
+          89.4215
+        ],
+        "median": 90.8333,
+        "min": 88.302,
+        "max": 93.7167,
+        "totalAlloc": 7353,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 1064.2052,
+        "frameTimes": [
+          103.6008,
+          108.3294,
+          103.6701,
+          106.6682,
+          107.0155,
+          107.9827,
+          106.3037,
+          106.3089,
+          106.8807,
+          107.4452
+        ],
+        "median": 106.8807,
+        "min": 103.6008,
+        "max": 108.3294,
+        "totalAlloc": 7512,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 1219.063,
+        "frameTimes": [
+          122.9245,
+          101.9192,
+          127.1202,
+          122.5432,
+          123.1158,
+          125.1557,
+          124.9913,
+          122.7936,
+          124.5464,
+          123.9531
+        ],
+        "median": 123.9531,
+        "min": 101.9192,
+        "max": 127.1202,
+        "totalAlloc": 5233,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "validity": {
+        "measured": true,
+        "objectCount": 100,
+        "charsPerObject": 2405,
+        "expectedChars": 240500,
+        "observedChars": 240500,
+        "observedVerts": 842400,
+        "inFrameGenMeshCalls": 100,
+        "inFrameGlyphs": 244284,
+        "inFrameVerts": 844336,
+        "workInFrame": true,
+        "valid": true
+      }
+    },
+    "unitextParallel_unique": {
+      "creation": {
+        "totalMs": 1778.33081,
+        "frameTimes": [
+          171.5326,
+          175.2164,
+          173.676,
+          175.3608,
+          180.6308,
+          189.424,
+          176.7231,
+          182.5891,
+          172.3348,
+          180.8432
+        ],
+        "median": 176.7231,
+        "min": 171.5326,
+        "max": 189.424,
+        "totalAlloc": 447800084,
+        "managedAlloc": 0,
+        "gc": [
+          1,
+          1,
+          1
+        ]
+      },
+      "destruction": {
+        "totalMs": 325.1197,
+        "frameTimes": [
+          32.0292,
+          32.338,
+          32.9729,
+          32.4204,
+          32.227,
+          32.9246,
+          32.6233,
+          31.9821,
+          32.271,
+          33.3312
+        ],
+        "median": 32.4204,
+        "min": 31.9821,
+        "max": 33.3312,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 1673.97485,
+        "frameTimes": [
+          154.5199,
+          167.4314,
+          160.3214,
+          162.1849,
+          166.4903,
+          174.5171,
+          190.2544,
+          153.8613,
+          161.9472,
+          182.4468
+        ],
+        "median": 166.4903,
+        "min": 153.8613,
+        "max": 190.2544,
+        "totalAlloc": 153,
+        "managedAlloc": 0,
+        "gc": [
+          1,
+          1,
+          1
+        ],
+        "inFrameWork": {
+          "genMeshCalls": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "glyphs": [
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284,
+            244284
+          ],
+          "verts": [
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336,
+            844336
+          ],
+          "applyMesh": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "willRenderPasses": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "componentsSeen": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100
+          ]
+        }
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 823.808,
+        "frameTimes": [
+          87.5504,
+          80.467,
+          83.8012,
+          81.9313,
+          81.2512,
+          82.8933,
+          81.3358,
+          80.2339,
+          81.9776,
+          82.3663
+        ],
+        "median": 81.9776,
+        "min": 80.2339,
+        "max": 87.5504,
+        "totalAlloc": 8057,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 1390.5238,
+        "frameTimes": [
+          108.7775,
+          88.1578,
+          149.8229,
+          142.2046,
+          142.2555,
+          147.0459,
+          152.9983,
+          156.8439,
+          154.5933,
+          147.8241
+        ],
+        "median": 147.8241,
+        "min": 88.1578,
+        "max": 156.8439,
+        "totalAlloc": 8152,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 824.954956,
+        "frameTimes": [
+          82.0123,
+          86.7583,
+          81.0397,
+          82.2678,
+          83.4401,
+          80.727,
+          83.8405,
+          80.7209,
+          82.2192,
+          81.9292
+        ],
+        "median": 82.2192,
+        "min": 80.7209,
+        "max": 86.7583,
+        "totalAlloc": 8569,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 974.7777,
+        "frameTimes": [
+          94.8002,
+          97.6729,
+          96.6674,
+          96.3995,
+          97.5753,
+          98.9024,
+          97.0265,
+          97.104,
+          99.6958,
+          98.9337
+        ],
+        "median": 97.5753,
+        "min": 94.8002,
+        "max": 99.6958,
+        "totalAlloc": 8600,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 1169.39148,
+        "frameTimes": [
+          117.9464,
+          98.4766,
+          122.0705,
+          119.3379,
+          121.5608,
+          117.5751,
+          118.9865,
+          116.2973,
+          118.2079,
+          118.9325
+        ],
+        "median": 118.9325,
+        "min": 98.4766,
+        "max": 122.0705,
+        "totalAlloc": 5865,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "validity": {
+        "measured": true,
+        "objectCount": 100,
+        "charsPerObject": 2405,
+        "expectedChars": 240500,
+        "observedChars": 240500,
+        "observedVerts": 842400,
+        "inFrameGenMeshCalls": 100,
+        "inFrameGlyphs": 244284,
+        "inFrameVerts": 844336,
+        "workInFrame": true,
+        "valid": true
+      }
+    },
+    "tmp_unique": {
+      "creation": {
+        "totalMs": 6557.792,
+        "frameTimes": [
+          721.9492,
+          668.067,
+          634.9902,
+          652.9365,
+          626.5145,
+          636.7154,
+          659.8127,
+          668.2308,
+          655.469,
+          633.1063
+        ],
+        "median": 655.469,
+        "min": 626.5145,
+        "max": 721.9492,
+        "totalAlloc": 579085806,
+        "managedAlloc": 0,
+        "gc": [
+          30,
+          30,
+          30
+        ]
+      },
+      "destruction": {
+        "totalMs": 311.1173,
+        "frameTimes": [
+          30.9915,
+          30.8879,
+          31.316,
+          30.3237,
+          31.0889,
+          30.8252,
+          31.651,
+          31.1461,
+          30.9622,
+          31.9248
+        ],
+        "median": 31.0889,
+        "min": 30.3237,
+        "max": 31.9248,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 5172.56641,
+        "frameTimes": [
+          516.1608,
+          520.5285,
+          516.643,
+          518.4804,
+          519.2298,
+          513.3112,
+          518.6624,
+          514.5231,
+          516.6191,
+          518.4082
+        ],
+        "median": 518.4082,
+        "min": 513.3112,
+        "max": 520.5285,
+        "totalAlloc": 2625,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ],
+        "inFrameWork": {
+          "genMeshCalls": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "glyphs": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "verts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "applyMesh": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "willRenderPasses": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "componentsSeen": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 5183.36963,
+        "frameTimes": [
+          567.1511,
+          505.3863,
+          510.5948,
+          510.4155,
+          512.8646,
+          520.0637,
+          517.4849,
+          520.944,
+          508.4868,
+          509.9781
+        ],
+        "median": 512.8646,
+        "min": 505.3863,
+        "max": 567.1511,
+        "totalAlloc": 400,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 11365.75,
+        "frameTimes": [
+          534.3766,
+          613.72,
+          805.0527,
+          921.3411,
+          1090.7251,
+          1277.25464,
+          1435.73328,
+          1567.35083,
+          1589.11914,
+          1531.07727
+        ],
+        "median": 1277.25464,
+        "min": 534.3766,
+        "max": 1589.11914,
+        "totalAlloc": 472,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 4803.52734,
+        "frameTimes": [
+          477.8952,
+          476.1915,
+          475.3323,
+          481.1298,
+          484.5721,
+          482.9688,
+          490.2655,
+          478.7631,
+          480.3764,
+          476.0329
+        ],
+        "median": 480.3764,
+        "min": 475.3323,
+        "max": 490.2655,
+        "totalAlloc": 1072,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 10509.2119,
+        "frameTimes": [
+          482.8174,
+          578.2332,
+          744.4371,
+          864.2421,
+          1017.55933,
+          1178.12537,
+          1317.044,
+          1445.87256,
+          1469.31213,
+          1411.568
+        ],
+        "median": 1178.12537,
+        "min": 482.8174,
+        "max": 1469.31213,
+        "totalAlloc": 1737,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 5260.97949,
+        "frameTimes": [
+          527.6007,
+          505.2495,
+          525.5975,
+          528.612,
+          525.326,
+          528.79,
+          528.942,
+          533.4604,
+          527.2088,
+          530.1926
+        ],
+        "median": 528.612,
+        "min": 505.2495,
+        "max": 533.4604,
+        "totalAlloc": 1912,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "validity": {
+        "measured": true,
+        "objectCount": 100,
+        "charsPerObject": 2405,
+        "expectedChars": 240500,
+        "observedChars": 238500,
+        "observedVerts": 791600,
+        "inFrameGenMeshCalls": null,
+        "inFrameGlyphs": null,
+        "inFrameVerts": null,
+        "workInFrame": false,
+        "valid": true
+      }
+    },
+    "uiToolkit": {
+      "creation": {
+        "totalMs": 9546.694,
+        "frameTimes": [
+          953.0845,
+          957.2845,
+          974.924,
+          954.6123,
+          941.7776,
+          949.8938,
+          964.2145,
+          948.7858,
+          955.0335,
+          947.0854
+        ],
+        "median": 954.6123,
+        "min": 941.7776,
+        "max": 974.924,
+        "totalAlloc": 70545464,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "destruction": {
+        "totalMs": 20.662899,
+        "frameTimes": [
+          1.956,
+          1.9178,
+          2.1113,
+          1.9764,
+          2.0172,
+          2.1185,
+          2.2553,
+          1.8997,
+          2.269,
+          2.1417
+        ],
+        "median": 2.1113,
+        "min": 1.8997,
+        "max": 2.269,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fullRebuild": {
+        "totalMs": 8808.313,
+        "frameTimes": [
+          903.5787,
+          820.3935,
+          683.0223,
+          894.0556,
+          765.6725,
+          866.3011,
+          756.4292,
+          1029.06458,
+          1177.49084,
+          912.3055
+        ],
+        "median": 894.0556,
+        "min": 683.0223,
+        "max": 1177.49084,
+        "totalAlloc": 489279545,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapNoAuto": {
+        "totalMs": 1652.38354,
+        "frameTimes": [
+          186.9751,
+          163.2327,
+          163.4525,
+          161.4132,
+          162.6575,
+          161.948,
+          164.176,
+          159.0996,
+          162.9837,
+          166.4453
+        ],
+        "median": 163.2327,
+        "min": 159.0996,
+        "max": 186.9751,
+        "totalAlloc": 25,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutWrapAuto": {
+        "totalMs": 2756.201,
+        "frameTimes": [
+          285.4928,
+          271.4312,
+          270.8811,
+          271.6662,
+          287.008,
+          276.3654,
+          274.429,
+          277.4548,
+          271.6287,
+          269.844
+        ],
+        "median": 274.429,
+        "min": 269.844,
+        "max": 287.008,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapNoAuto": {
+        "totalMs": 1632.02332,
+        "frameTimes": [
+          160.9451,
+          161.2364,
+          166.4655,
+          162.6434,
+          163.3498,
+          166.1266,
+          162.9172,
+          160.3455,
+          166.8063,
+          161.1876
+        ],
+        "median": 162.9172,
+        "min": 160.3455,
+        "max": 166.8063,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "layoutNoWrapAuto": {
+        "totalMs": 2719.21631,
+        "frameTimes": [
+          271.0293,
+          270.8824,
+          268.9899,
+          270.7726,
+          275.7714,
+          272.1606,
+          271.87,
+          277.6175,
+          267.6527,
+          272.4698
+        ],
+        "median": 271.87,
+        "min": 267.6527,
+        "max": 277.6175,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "meshRebuild": {
+        "totalMs": 1649.13428,
+        "frameTimes": [
+          166.1693,
+          169.0779,
+          166.9815,
+          162.9354,
+          166.8902,
+          159.6282,
+          168.1589,
+          161.2223,
+          161.7959,
+          166.2746
+        ],
+        "median": 166.2746,
+        "min": 159.6282,
+        "max": 169.0779,
+        "totalAlloc": 0,
+        "managedAlloc": 0,
+        "gc": [
+          0,
+          0,
+          0
+        ]
+      },
+      "validity": {
+        "measured": true,
+        "objectCount": 100,
+        "charsPerObject": 2405,
+        "expectedChars": 240500,
+        "observedChars": 240500,
+        "observedVerts": null,
+        "inFrameGenMeshCalls": null,
+        "inFrameGlyphs": null,
+        "inFrameVerts": null,
+        "workInFrame": false,
+        "valid": false
+      }
+    }
+  },
+  "glyphRasterization": {
+    "tmp": {
+      "frameTimes": [
+        3292.602,
+        3274.06958,
+        3312.14551,
+        3308.896,
+        3319.52783
+      ],
+      "median": 3308.896,
+      "min": 3274.06958,
+      "max": 3319.52783,
+      "average": 3301.44849,
+      "uniqueGlyphs": 3091,
+      "perGlyphMedianUs": 1070.4936900982691,
+      "managedAlloc": 0
+    }
+  },
+  "errors": [
+    "UniText glyph-rasterization phase DISABLED (OpenGlyph lacks UniText 2.0 SDF GlyphAtlas/PrimaryFont API)"
+  ]
+}

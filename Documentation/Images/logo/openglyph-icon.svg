@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="512" height="512" role="img" aria-label="OpenGlyph">
+  <defs>
+    <linearGradient id="og" x1="16" y1="16" x2="112" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0A84FF"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+  <!-- small-size variant: solid glyph, no construction -->
+  <g fill="none" stroke="url(#og)" stroke-width="16" stroke-linecap="round">
+    <circle cx="56" cy="52" r="22"/>
+    <path d="M 84 30 V 84 C 84 104 70 112 54 112 C 44 112 36 109 31 103"/>
+  </g>
+</svg>

@@ -1,0 +1,4 @@
+font,ttfBytes,storedBefore,storedAfterCompressStoredFontData,isCompressed,ratio,saved%,roundTripExact,decompressMs,brotliAvailable,brotliBytes
+NotoSans-Regular,629024,629024,296411,True,0.4712,52.9,True,3.76,True,229001
+NotoSansArabic-Regular,194176,194176,88621,True,0.4564,54.4,True,0.65,True,73733
+NotoSansHebrew-Regular,48036,48036,27650,True,0.5756,42.4,True,0.24,True,24319
