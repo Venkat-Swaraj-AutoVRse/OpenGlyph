@@ -1417,7 +1417,7 @@ namespace LightSide
                         : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont));
                 // The collector was reset at OnBeforeMesh with the base style and populated per glyph
                 // (local ids in UV1.w). The builder maps each glyph's local id -> a shared StyleTable row.
-                unifiedBuilder.Build(renderData, style, spanStyleCollector, unifiedRenderData);
+                unifiedBuilder.Build(renderData, meshGenerator, style, spanStyleCollector, unifiedRenderData);
                 UpdateSubMeshes(unifiedRenderData);
                 UniTextDebug.EndSample();
                 return;

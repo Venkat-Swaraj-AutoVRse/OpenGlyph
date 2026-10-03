@@ -1124,7 +1124,16 @@ namespace LightSide
         /// so the same mesh instances can be reused across all components.
         /// </para>
         /// </remarks>
-        public List<UniTextRenderData> ApplyMeshesToUnity()
+        public List<UniTextRenderData> ApplyMeshesToUnity() => ApplyMeshesToUnity(true);
+
+        /// <summary>
+        /// <see cref="ApplyMeshesToUnity()"/> with control over the per-segment upload. With
+        /// <paramref name="uploadGeometry"/> false the segment list (materials, texture, font id) is
+        /// returned but the shared segment meshes are NOT written, so their contents are stale: only
+        /// for a caller that consumes the geometry straight from this generator's buffers before
+        /// <see cref="ReturnInstanceBuffers"/> (the unified renderer merge).
+        /// </summary>
+        internal List<UniTextRenderData> ApplyMeshesToUnity(bool uploadGeometry)
         {
             var resultBuffer = SharedPipelineComponents.MeshResultBuffer;
             resultBuffer.Clear();
@@ -1137,6 +1146,12 @@ namespace LightSide
                 ref var segment = ref generatedSegments.buffer[i];
 
                 var mesh = SharedMeshes.Get(i);
+                if (!uploadGeometry)
+                {
+                    resultBuffer.Add(new UniTextRenderData(mesh, segment.materials, segment.texture, segment.fontId));
+                    continue;
+                }
+
                 mesh.Clear();
 
                 if (segment.vertexCount > 0)
