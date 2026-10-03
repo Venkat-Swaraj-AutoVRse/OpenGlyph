@@ -43,7 +43,8 @@ namespace LightSide
         private const int CjkWarnKey = -1;
 
         private static readonly object gate = new();
-        private static Slot[] slots;
+        private static readonly Dictionary<int, Slot> slots = new();
+        private static readonly HashSet<int> fallbackFontIds = new();
         private static readonly Dictionary<int, ScriptEntry> scriptEntries = new();
         private static readonly Dictionary<string, UniTextFont> fontsByFile = new(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<UniTextFont, string> pathByFont = new();
@@ -110,9 +111,22 @@ namespace LightSide
         /// <paramref name="allowLoad"/> is true AND the caller is on the main thread. Null when the
         /// fallback is disabled, no system font exists, or none covers it.
         /// </summary>
-        public static UniTextFont Resolve(uint cp, bool allowLoad = true) => Resolve(cp, allowLoad, null);
+        public static UniTextFont Resolve(uint cp, bool allowLoad = true) => Resolve(cp, allowLoad, null, CjkLanguage.Default);
 
-        internal static UniTextFont Resolve(uint cp, bool allowLoad, UnityEngine.Object context)
+        /// <summary>
+        /// Language-aware <see cref="Resolve(uint, bool)"/>: for a CJK code point, picks the system face
+        /// for <paramref name="language"/> (e.g. Yu Gothic for Japanese, Microsoft JhengHei for
+        /// Traditional Chinese on Windows; the matching face of a Noto Sans CJK collection elsewhere),
+        /// falling back to the other CJK faces when it lacks the glyph. Non-CJK code points ignore the
+        /// language. <see cref="CjkLanguage.Default"/> is the language-less behaviour.
+        /// </summary>
+        public static UniTextFont Resolve(uint cp, CjkLanguage language, bool allowLoad = true) =>
+            Resolve(cp, allowLoad, null, language);
+
+        internal static UniTextFont Resolve(uint cp, bool allowLoad, UnityEngine.Object context) =>
+            Resolve(cp, allowLoad, context, CjkLanguage.Default);
+
+        internal static UniTextFont Resolve(uint cp, bool allowLoad, UnityEngine.Object context, CjkLanguage language)
         {
             if (!UniTextSettings.UseSystemFontFallback) return null;
             if (allowLoad && !UniTextThreadGuard.IsMainThread) allowLoad = false;
@@ -130,12 +144,27 @@ namespace LightSide
             UniTextFont result;
             lock (gate)
             {
-                result = cjk ? ResolveCjkLocked(cp, allowLoad) : ResolveScriptLocked(script, cp, allowLoad);
+                result = cjk ? ResolveCjkLocked(cp, allowLoad, language) : ResolveScriptLocked(script, cp, allowLoad);
                 if (result == null && loadedCount > 0) result = FromLoadedLocked(cp);
                 if (allowLoad) ReportLocked(WarnKey(cp, script, cjk), script, cjk, cp, result, context);
             }
             FlushWarnings();
             return result;
+        }
+
+        /// <summary>True when <paramref name="fontId"/> (a <see cref="UniTextFontProvider.GetFontId"/> value)
+        /// is a font this fallback loaded from the operating system.</summary>
+        public static bool IsFallbackFontId(int fontId)
+        {
+            if (loadedCount == 0) return false;
+            lock (gate) return fallbackFontIds.Contains(fontId);
+        }
+
+        /// <summary>File path of a font loaded by this fallback, or null (diagnostics / tests).</summary>
+        public static string PathOf(UniTextFont font)
+        {
+            if (font == null) return null;
+            lock (gate) return pathByFont.TryGetValue(font, out var p) ? p : null;
         }
 
         private static UniTextFont FromLoadedLocked(uint cp)
@@ -145,19 +174,16 @@ namespace LightSide
             return null;
         }
 
-        private static UniTextFont ResolveCjkLocked(uint cp, bool allowLoad)
+        private static UniTextFont ResolveCjkLocked(uint cp, bool allowLoad, CjkLanguage language)
         {
-            slots ??= BuildSlots();
-            var hangul = IsHangul(cp);
-            for (var pass = 0; pass < slots.Length; pass++)
+            var order = SlotOrder(language, IsHangul(cp));
+            for (var pass = 0; pass < order.Length; pass++)
             {
-                // General first; Hangul puts Korean first.
-                var idx = hangul ? (pass == 0 ? 2 : pass == 1 ? 0 : 1) : pass;
-                var slot = slots[idx];
+                var slot = GetSlotLocked(order[pass], language);
                 if (slot.font == null)
                 {
                     if (slot.attempted || !allowLoad) continue;
-                    TryLoad(slot);
+                    TryLoad(slot, language);
                     if (slot.font == null) continue;
                 }
                 if (Shaper.GetGlyphIndex(slot.font, cp) != 0) return slot.font;
@@ -187,7 +213,8 @@ namespace LightSide
         /// the system font for its script and logs the once-per-script warning. Once a script has been
         /// resolved (positively or negatively) its code points are skipped without any stack lookup.
         /// </summary>
-        internal static void PrepareForText(ReadOnlySpan<char> text, UniTextFontStack stack, UnityEngine.Object context = null)
+        internal static void PrepareForText(ReadOnlySpan<char> text, UniTextFontStack stack, UnityEngine.Object context = null,
+            IReadOnlyList<CjkLanguage> languages = null)
         {
             if (!UniTextSettings.UseSystemFontFallback || text.IsEmpty) return;
             for (var i = 0; i < text.Length; i++)
@@ -206,7 +233,7 @@ namespace LightSide
                 lock (gate)
                 {
                     // Already resolved for the session: workers read the cached result.
-                    if (warnedScripts.Contains(WarnKey(cp, script, cjk)) && (!cjk || AllAttemptedLocked())) continue;
+                    if (warnedScripts.Contains(WarnKey(cp, script, cjk)) && (!cjk || AllAttemptedLocked(languages))) continue;
                 }
 
                 if (stack != null)
@@ -223,14 +250,29 @@ namespace LightSide
                         continue;
                     }
                 }
-                Resolve(cp, true, context);
+                if (cjk && languages != null && languages.Count > 0)
+                {
+                    // Load the face of every language the text uses (component language + <lang> spans),
+                    // so a worker thread finds them loaded.
+                    for (var l = 0; l < languages.Count; l++) Resolve(cp, true, context, languages[l]);
+                }
+                else Resolve(cp, true, context);
             }
         }
 
-        private static bool AllAttemptedLocked()
+        private static bool AllAttemptedLocked(IReadOnlyList<CjkLanguage> languages)
         {
-            if (slots == null) return false;
-            foreach (var s in slots) if (!s.attempted) return false;
+            if (languages == null || languages.Count == 0) return AllAttemptedLocked(CjkLanguage.Default);
+            for (var i = 0; i < languages.Count; i++)
+                if (!AllAttemptedLocked(languages[i])) return false;
+            return true;
+        }
+
+        private static bool AllAttemptedLocked(CjkLanguage language)
+        {
+            var order = SlotOrder(language, false);
+            for (var i = 0; i < order.Length; i++)
+                if (!slots.TryGetValue(SlotKey(order[i], language), out var s) || !s.attempted) return false;
             return true;
         }
 
@@ -287,6 +329,7 @@ namespace LightSide
             fontsByFile[key] = font;
             pathByFont[font] = path;
             loadedFonts.Add(font);
+            fallbackFontIds.Add(UniTextFontProvider.GetFontId(font));
             loadedCount = loadedFonts.Count;
             return font;
         }
@@ -313,7 +356,7 @@ namespace LightSide
             }
         }
 
-        private static void TryLoad(Slot slot)
+        private static void TryLoad(Slot slot, CjkLanguage language)
         {
             slot.attempted = true;
             foreach (var path in slot.paths)
@@ -321,7 +364,7 @@ namespace LightSide
                 try
                 {
                     if (!File.Exists(path)) continue;
-                    var font = LoadFile(path, PickFace(path), "SystemCJK:");
+                    var font = LoadFile(path, PickFace(path, language), "SystemCJK:");
                     if (font == null) continue;
                     slot.font = font;
                     slot.loadedPath = path;
@@ -339,12 +382,20 @@ namespace LightSide
         #region CJK paths
 
         // Noto Sans CJK collections order faces JP, KR, SC, TC, HK. Other collections: face 0.
-        private static int PickFace(string path)
+        private static int PickFace(string path, CjkLanguage language)
         {
             var name = Path.GetFileName(path);
             if (name == null || !name.StartsWith("NotoSansCJK", StringComparison.OrdinalIgnoreCase) ||
                 !name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase))
                 return 0;
+            switch (language)
+            {
+                case CjkLanguage.Japanese: return 0;
+                case CjkLanguage.Korean: return 1;
+                case CjkLanguage.SimplifiedChinese: return 2;
+                case CjkLanguage.TraditionalChinese: return 3;
+                case CjkLanguage.HongKongChinese: return 4;
+            }
             var lang = (PreferredLanguage ?? CultureInfo.CurrentUICulture.Name).ToLowerInvariant();
             if (lang.StartsWith("ja")) return 0;
             if (lang.StartsWith("ko")) return 1;
@@ -353,15 +404,57 @@ namespace LightSide
             return 2; // Simplified Chinese
         }
 
-        private static Slot[] BuildSlots()
+        // Slot kinds: the general (Simplified Chinese / pan-CJK) face, then per-language faces.
+        private const int SlotGeneral = 0, SlotJapanese = 1, SlotKorean = 2, SlotTraditional = 3, SlotHongKong = 4;
+
+        private static readonly int[] OrderDefault = { SlotGeneral, SlotJapanese, SlotKorean };
+        private static readonly int[] OrderDefaultHangul = { SlotKorean, SlotGeneral, SlotJapanese };
+        private static readonly int[] OrderJapanese = { SlotJapanese, SlotGeneral, SlotKorean };
+        private static readonly int[] OrderKorean = { SlotKorean, SlotGeneral, SlotJapanese };
+        private static readonly int[] OrderTraditional = { SlotTraditional, SlotGeneral, SlotJapanese, SlotKorean };
+        private static readonly int[] OrderHongKong = { SlotHongKong, SlotTraditional, SlotGeneral, SlotJapanese, SlotKorean };
+        private static readonly int[] OrderHangulFirst = { SlotKorean, SlotGeneral, SlotJapanese, SlotTraditional };
+
+        /// <summary>
+        /// Face search order for a language. The language-less order (general first, Korean first for
+        /// Hangul) is unchanged from before per-language picking existed. Hangul always tries Korean first.
+        /// </summary>
+        private static int[] SlotOrder(CjkLanguage language, bool hangul)
         {
-            return new[]
+            switch (language)
             {
-                new Slot { paths = GeneralPaths() },
-                new Slot { paths = JapanesePaths() },
-                new Slot { paths = KoreanPaths() },
-            };
+                case CjkLanguage.Japanese: return hangul ? OrderHangulFirst : OrderJapanese;
+                case CjkLanguage.Korean: return OrderKorean;
+                case CjkLanguage.SimplifiedChinese: return hangul ? OrderDefaultHangul : OrderDefault;
+                case CjkLanguage.TraditionalChinese: return hangul ? OrderHangulFirst : OrderTraditional;
+                case CjkLanguage.HongKongChinese: return hangul ? OrderHangulFirst : OrderHongKong;
+                default: return hangul ? OrderDefaultHangul : OrderDefault;
+            }
         }
+
+        private static int SlotKey(int kind, CjkLanguage language) => ((int)language << 4) | kind;
+
+        // One slot per (kind, language): the same file may load a different face per language (Noto Sans
+        // CJK collections). Fonts are shared by (path, face) in LoadFile, so Windows files load once.
+        private static Slot GetSlotLocked(int kind, CjkLanguage language)
+        {
+            var key = SlotKey(kind, language);
+            if (!slots.TryGetValue(key, out var slot))
+            {
+                slot = new Slot { paths = PathsFor(kind) };
+                slots[key] = slot;
+            }
+            return slot;
+        }
+
+        private static string[] PathsFor(int kind) => kind switch
+        {
+            SlotJapanese => JapanesePaths(),
+            SlotKorean => KoreanPaths(),
+            SlotTraditional => TraditionalPaths(),
+            SlotHongKong => HongKongPaths(),
+            _ => GeneralPaths(),
+        };
 
         private static string FontsDir()
         {
@@ -408,6 +501,20 @@ namespace LightSide
 #endif
         }
 
+        // Traditional Chinese (Taiwan) faces. Elsewhere the general Noto Sans CJK collection is loaded at
+        // its Traditional face by PickFace, so no extra path is needed.
+        private static string[] TraditionalPaths()
+        {
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            return new[] { Path.Combine(FontsDir(), "msjh.ttc"), @"C:\Windows\Fonts\msjh.ttc", @"C:\Windows\Fonts\mingliu.ttc" };
+#else
+            return Array.Empty<string>();
+#endif
+        }
+
+        // Hong Kong: Windows ships no Hong Kong-specific sans face, so the Traditional faces are used.
+        private static string[] HongKongPaths() => TraditionalPaths();
+
         #endregion
 
         #region Test hooks
@@ -427,7 +534,8 @@ namespace LightSide
                 warnedScripts.Clear();
                 pendingWarnings.Clear();
                 stackCovered.Clear();
-                slots = null;
+                slots.Clear();
+                fallbackFontIds.Clear();
                 SystemFontFinder.Reset();
             }
         }

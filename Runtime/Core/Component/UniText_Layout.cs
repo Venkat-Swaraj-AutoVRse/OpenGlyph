@@ -88,7 +88,7 @@ namespace LightSide
         public float maxWidth => float.PositiveInfinity;
         public float maxHeight => float.PositiveInfinity;
 
-        public float minWidth => 0;
+        public float minWidth => contentMinWidth ? GetMinContentWidth() : 0;
         public float preferredWidth => cachedPreferredWidth;
         public float flexibleWidth => -1;
 
@@ -131,7 +131,7 @@ namespace LightSide
                 };
 
                 cachedEffectiveFontSize = textProcessor.FindOptimalFontSize(
-                    minFontSize, maxFontSize, rect.width, rect.height, settings);
+                    minFontSize, maxFontSize, rect.width, rect.height, settings, autoSizeStep);
                 textProcessor.EnsureLines(rect.width, cachedEffectiveFontSize, wordWrap, horizontalAlignment, UseTmpJustification);
             }
         }
@@ -158,12 +158,12 @@ namespace LightSide
             };
 
             return textProcessor.FindOptimalFontSize(
-                minFontSize, maxFontSize, width, height, settings);
+                minFontSize, maxFontSize, width, height, settings, autoSizeStep);
         }
 
-        // TMP adds only POSITIVE margins to the preferred (rendered) size.
-        private float PositiveMarginsX { get { var m = LayoutMargins; return Mathf.Max(0f, m.x) + Mathf.Max(0f, m.z); } }
-        private float PositiveMarginsY { get { var m = LayoutMargins; return Mathf.Max(0f, m.y) + Mathf.Max(0f, m.w); } }
+        // TMP adds only POSITIVE margins to the preferred (rendered) size. Padding is never negative.
+        private float PositiveMarginsX { get { var m = TextAreaInsets; return Mathf.Max(0f, m.x) + Mathf.Max(0f, m.z); } }
+        private float PositiveMarginsY { get { var m = TextAreaInsets; return Mathf.Max(0f, m.y) + Mathf.Max(0f, m.w); } }
 
         private void InvalidateLayoutCache()
         {

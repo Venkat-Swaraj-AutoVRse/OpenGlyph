@@ -39,6 +39,10 @@ and rendered as SDF/MSDF through Unity's Canvas — including in VR.
 | 👾 | **Pixel fonts** | Pixel-grid detection and pixel-perfect rendering at integer scales. |
 | ⚡ | **Parallel processing** | Shaping and layout run across worker threads, byte-identical to the serial path. |
 | 🗜️ | **Font compression** | Font bytes stored compressed (Deflate by default) and decompressed transparently; byte-exact round trip. |
+| 🔣 | **OpenType features** | Any feature the font has (`tnum`, `onum`, `smcp`, `ss01`, `cv01`, `liga=0`, …) for the whole text (`FontFeatures`) or a span (`<feature=…>`) ([below](#opentype-features)). |
+| 🗣️ | **Language-aware shaping** | BCP 47 `Language` and `<lang=…>`: language-specific glyph forms (`locl`) and the right CJK system face for ja / ko / zh-Hans / zh-Hant / zh-HK ([below](#language-aware-shaping)). |
+| 📐 | **Content measurement, padding, fit steps** | `GetMinContentWidth()`, `GetMaxContentWidth()`, `GetHeightForWidth(w)`; box-model `Padding`; Auto Size `AutoSizeStep` for discrete sizes ([below](#layout-padding-measurement-and-auto-size-steps)). |
+| 🌍 | **Unity Localization** | Optional `LocalizeUniText` sets the text and its language on locale change; compiles only when `com.unity.localization` is installed ([below](#unity-localization)). |
 
 ## Drop-in TextMesh Pro API — GlyphMeshProUGUI
 
@@ -86,6 +90,59 @@ TMP font assets are not used — fonts are `UniTextFont` assets. Full mapping:
 ![Typewriter animation: maxVisibleCharacters grows by one character per frame in TextMesh Pro (left) and GlyphMeshProUGUI (right)](.github/assets/features/gmp-typewriter.gif)
 
 The typewriter only rebuilds the mesh: changing `maxVisibleCharacters` never reshapes or re-lays out the text.
+
+## Typography and layout
+
+### OpenType features
+
+```csharp
+price.FontFeatures = new[] { "tnum" };   // tabular figures for the whole text
+label.RegisterModifier(new ModRegister { Rule = new FeatureParseRule(), Modifier = new FeatureModifier() });
+label.Text = "Total <feature=tnum>1,234.50</feature>, <feature=smcp>small caps</feature>, <feature=liga=0>fish</feature>";
+```
+
+Settings are HarfBuzz-style (`tnum`, `-kern`, `liga=0`, `aalt=2`); a span applies to exactly its
+characters and overrides the component list. [OpenTypeFeatures.md](Documentation/OpenTypeFeatures.md)
+
+![OpenType features on Noto Sans: a price column with proportional vs tabular figures, the fi and ff ligatures on and off, a small-caps span and a tabular-figures span](.github/assets/features/opentype-features.png)
+
+### Language-aware shaping
+
+```csharp
+title.Language = "sr";        // Serbian б; "ro" gives ș for ş; "ja", "zh-Hant" pick the CJK forms and face
+label.RegisterModifier(new ModRegister { Rule = new LanguageParseRule(), Modifier = new LanguageModifier() });
+label.Text = "直 <lang=ja>直</lang> <lang=zh-Hant>直</lang>";
+```
+
+The language goes to HarfBuzz (`hb_buffer_set_language`) and picks the CJK system font face per
+component and per span when the font stack does not cover a character. Unset keeps the previous
+behaviour. [LanguageShaping.md](Documentation/LanguageShaping.md)
+
+![Language-aware shaping: Cyrillic б unset vs Serbian, ş unset vs Romanian, a lang span, and Han characters from the Japanese and Traditional Chinese system faces](.github/assets/features/language-shaping.png)
+
+### Layout: padding, measurement and Auto Size steps
+
+```csharp
+card.Padding = new Vector4(24, 12, 24, 12);  // left, top, right, bottom: layout, preferred size, Clip, hit tests
+float narrowest = card.GetMinContentWidth(); // widest unbreakable word
+float widest    = card.GetMaxContentWidth(); // widest hard line
+float height    = card.GetHeightForWidth(320f);
+label.AutoSize = true;
+label.AutoSizeStep = 1f;                     // 26 pt instead of 26.8125 pt
+```
+
+The measurements never change the component's rect or layout. [Padding.md](Documentation/Padding.md) ·
+[ContentMeasurement.md](Documentation/ContentMeasurement.md) · [AutoSizeSteps.md](Documentation/AutoSizeSteps.md)
+
+![Padding: the same paragraph in two equal boxes, without and with padding; the inner box shows the content area](.github/assets/features/padding.png)
+
+![Auto Size fit steps: three button labels auto-sized continuously (50.82, 48.099, 48.189 pt) and with a 4 pt step (48 pt each)](.github/assets/features/autosize-steps.png)
+
+### Unity Localization
+
+With `com.unity.localization` installed, add **OpenGlyph > Localize UniText** next to a UniText: the
+`LocalizedString` drives `Text`, and the selected locale's code drives `Language`. Without the package
+the `OpenGlyph.Localization` assembly is skipped. [Localization.md](Documentation/Localization.md)
 
 ## Showcase
 
@@ -251,6 +308,7 @@ binaries but were not tested on device for this release.
 - [GlyphMeshPro ↔ TextMesh Pro parity](Documentation/GlyphMeshPro-Parity.md)
 - [Unified vs legacy render path](Documentation/RenderPathComparison.md)
 - [System font fallback (any script)](Documentation/SystemFontFallback.md)
+- [OpenType features](Documentation/OpenTypeFeatures.md) · [Language-aware shaping](Documentation/LanguageShaping.md) · [Content measurement](Documentation/ContentMeasurement.md) · [Padding](Documentation/Padding.md) · [Auto Size fit steps](Documentation/AutoSizeSteps.md) · [Unity Localization](Documentation/Localization.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
 - [Changelog](CHANGELOG.md)
 

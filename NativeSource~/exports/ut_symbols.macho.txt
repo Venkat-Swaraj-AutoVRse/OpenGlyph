@@ -102,6 +102,7 @@ _ut_hb_buffer_get_length
 _ut_hb_buffer_set_content_type
 _ut_hb_buffer_set_direction
 _ut_hb_buffer_set_flags
+_ut_hb_buffer_set_language
 _ut_hb_buffer_set_script
 _ut_hb_face_create
 _ut_hb_face_destroy

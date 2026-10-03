@@ -11,7 +11,7 @@ name: native
 # links Blend2D via -DOPENGLYPH_ENABLE_BLEND2D=ON). Output names match Plugins/<platform>/ exactly.
 #
 # Symbol-count contract (verified in CI, fail otherwise):
-#   runtime libraries (unitext_native): 117 exported/defined ut_* symbols
+#   runtime libraries (unitext_native): 118 exported/defined ut_* symbols
 #   editor  libraries (unitext_native_editor): 8 exported/defined symbols
 
 on:
@@ -23,7 +23,7 @@ on:
 
 env:
   CMAKE_VERSION: "3.31.6"
-  UT_RUNTIME_SYMS: "117"
+  UT_RUNTIME_SYMS: "118"
   UT_EDITOR_SYMS: "8"
 
 jobs:

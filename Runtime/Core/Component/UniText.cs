@@ -147,6 +147,34 @@ namespace LightSide
         private float maxFontSize = 72f;
 
         [SerializeField]
+        [Tooltip("Auto Size fit step in points. 0 = continuous (any size between Min and Max). " +
+                 "With a step (e.g. 1 or 0.5) the fitted size is rounded down to a multiple of it, so labels " +
+                 "that fit at similar sizes share the same size.")]
+        private float autoSizeStep;
+
+        [SerializeField]
+        [Tooltip("Inner padding (x = left, y = top, z = right, w = bottom) between the RectTransform edge and " +
+                 "the text. Insets layout, wrapping, the overflow clip and link hit testing; added to the " +
+                 "preferred size.")]
+        private Vector4 padding;
+
+        [SerializeField]
+        [Tooltip("BCP 47 language of the text (e.g. ja, ko, zh-Hans, zh-Hant, zh-HK, sr, tr). Empty = unset. " +
+                 "Selects language-specific glyph forms (OpenType locl) and the CJK system font face. " +
+                 "<lang=…> spans override it.")]
+        private string language = "";
+
+        [SerializeField]
+        [Tooltip("OpenType features for the whole text, e.g. tnum, onum, smcp, ss01, cv01, liga=0, -kern. " +
+                 "<feature=…> spans override them on their range.")]
+        private List<string> fontFeatures = new();
+
+        [SerializeField]
+        [Tooltip("Report the minimum content width (the widest unbreakable word, at Min Size when auto-sizing) " +
+                 "as ILayoutElement.minWidth, so layout groups never squeeze the text below it. Off = 0.")]
+        private bool contentMinWidth;
+
+        [SerializeField]
         [Tooltip("Modifier/rule pairs that define how markup is parsed and applied (e.g., color, bold, links).")]
         private StyledList<ModRegister> modRegisters = new();
 
@@ -1059,7 +1087,7 @@ namespace LightSide
             // Undo, prefab revert and the Inspector write the serialized overflow field directly,
             // bypassing the setter: re-lay out and re-apply the clip.
             if (!isActiveAndEnabled) return;
-            SetDirty(DirtyFlags.Layout);
+            SetDirty(OnValidateTypography() ? DirtyFlags.Text : DirtyFlags.Layout);
             RefreshOverflowClip();
         }
 #endif
@@ -1321,6 +1349,7 @@ namespace LightSide
                 Cat.Meow("[UniText] FontProvider created", this);
             }
 
+            ConfigureTypography(textProcessor);
             ConfigureTextProcessor(textProcessor);
 
             UniTextDebug.EndSample();
@@ -1381,10 +1410,16 @@ namespace LightSide
         /// </summary>
         protected virtual Vector4 LayoutMargins => Vector4.zero;
 
-        /// <summary>The rect text is laid out in: the RectTransform rect inset by <see cref="LayoutMargins"/>.</summary>
+        /// <summary>
+        /// Total inset of the text area from the RectTransform rect: <see cref="LayoutMargins"/> plus
+        /// <see cref="Padding"/> (x = left, y = top, z = right, w = bottom).
+        /// </summary>
+        protected Vector4 TextAreaInsets => LayoutMargins + padding;
+
+        /// <summary>The rect text is laid out in: the RectTransform rect inset by <see cref="TextAreaInsets"/>.</summary>
         protected Rect GetLayoutRect(Rect rect)
         {
-            var m = LayoutMargins;
+            var m = TextAreaInsets;
             if (m == Vector4.zero) return rect;
             return new Rect(rect.xMin + m.x, rect.yMin + m.w,
                 Mathf.Max(0f, rect.width - m.x - m.z), Mathf.Max(0f, rect.height - m.y - m.w));
@@ -1637,7 +1672,18 @@ namespace LightSide
             if (c == null) return false;
             var root = c.rootCanvas != null ? c.rootCanvas.transform : c.transform;
 
-            rectTransform.GetWorldCorners(overflowCorners);
+            // The clip is the padded content box: text never draws into the padding.
+            var local = rectTransform.rect;
+            var pad = padding;
+            if (pad != Vector4.zero)
+                local = Rect.MinMaxRect(local.xMin + pad.x, local.yMin + pad.w,
+                    Mathf.Max(local.xMin + pad.x, local.xMax - pad.z), Mathf.Max(local.yMin + pad.w, local.yMax - pad.y));
+            overflowCorners[0] = new Vector3(local.xMin, local.yMin);
+            overflowCorners[1] = new Vector3(local.xMin, local.yMax);
+            overflowCorners[2] = new Vector3(local.xMax, local.yMax);
+            overflowCorners[3] = new Vector3(local.xMax, local.yMin);
+            var tr = rectTransform;
+            for (var i = 0; i < 4; i++) overflowCorners[i] = tr.TransformPoint(overflowCorners[i]);
             var min = (Vector2)root.InverseTransformPoint(overflowCorners[0]);
             var max = min;
             for (var i = 1; i < 4; i++)

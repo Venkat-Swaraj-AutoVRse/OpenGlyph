@@ -112,7 +112,7 @@ parity · **stub** = present with TMP signature, TODO body (documented) ·
 | `float wordSpacing` | **wired (R3)** | em/100 after each whitespace (and U+200B). Test `WordSpacing_AddsEmHundredthsAfterWhitespace_LikeTmp`. |
 | `float lineSpacing` | **wired (R3)** | em/100 added to every line advance; negative values overlap lines (no clamp), as TMP. Test `LineSpacing_AddsEmHundredthsBetweenLines_IncludingNegative_LikeTmp`. |
 | `float paragraphSpacing` | **wired (R3)** | em/100 added after a line ending in U+000A/U+2029 only (not after soft wraps). Test `ParagraphSpacing_AddsOnlyAfterParagraphBreaks_LikeTmp`. |
-| `Vector4 margin` | **wired (R3)** | Insets the layout and mesh rect (L,T,R,B; negative grows it); positive margins are added to the preferred size, as TMP. The Masking clip still uses the full rect. Test `Margin_InsetsTextArea_AndAddsToPreferredSize_LikeTmp`. |
+| `Vector4 margin` | **wired (R3)** | Insets the layout and mesh rect (L,T,R,B; negative grows it); positive margins are added to the preferred size, as TMP. The Masking clip still uses the full rect. UniText `Padding` (wave 1) adds to it. Test `Margin_InsetsTextArea_AndAddsToPreferredSize_LikeTmp`. |
 | `bool richText` | **wired (R3)** | false: the run is wrapped in a literal span (`NoParseParseRule`), so tags show verbatim; `fontStyle` still applies. Test `RichTextOff_ShowsTagsLiterally`. |
 | `int maxVisibleCharacters` | **wired (R3)** | Hidden characters emit no geometry; a change only regenerates the mesh (no reshape, no relayout — checked by counters), so typewriter animation is cheap. `textInfo.characterInfo[i].isVisible` follows. Test `MaxVisibleCharacters_HidesGlyphs_TypewriterDoesNotReshapeOrRelayout`. |
 | `int maxVisibleWords` | **wired (R3)** | TMP word rules (letters/digits/hyphens; counted after the visibility test). Test `MaxVisibleWords_And_MaxVisibleLines_HideLikeTmp`. |
@@ -398,6 +398,13 @@ the same text/size/rect is measured in TMP and compared; the measured numbers ar
   to each line advance after the minimum-advance clamp, so negative values overlap lines as in TMP.
 - **margin** comes from `UniText.LayoutMargins` (virtual, zero for `UniText`): the layout rect and
   the mesh origin are inset; positive margins are added to the preferred size (TMP's rendered size).
+  Since wave 1 the inherited UniText `Padding` adds to it (`TextAreaInsets = margin + Padding`), and
+  `GetPreferredValues` includes both.
+- **Inherited from UniText (wave 1), not TMP API:** `FontFeatures` (OpenType features; note that
+  `liga=1` there re-enables the Latin ligatures GlyphMeshPro turns off for TMP parity), `Language`
+  (BCP 47 shaping + CJK face), `AutoSizeStep`, `Padding`, and `GetMinContentWidth` /
+  `GetMaxContentWidth` / `GetHeightForWidth`. The `<feature>` / `<lang>` tags are not registered on
+  GlyphMeshProUGUI (TMP has no such tags).
 - **richText = false** wraps the raw run in `<og-raw>…</og-raw>`, matched by a `NoParseParseRule`
   that closes at the LAST closing tag, so no other rule sees the text. `<noparse>` (TMP) is
   registered too.

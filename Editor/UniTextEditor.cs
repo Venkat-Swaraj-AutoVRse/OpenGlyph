@@ -30,6 +30,11 @@ namespace LightSide
         private SerializedProperty autoSizeProp;
         private SerializedProperty minFontSizeProp;
         private SerializedProperty maxFontSizeProp;
+        private SerializedProperty autoSizeStepProp;
+        private SerializedProperty paddingProp;
+        private SerializedProperty languageProp;
+        private SerializedProperty fontFeaturesProp;
+        private SerializedProperty contentMinWidthProp;
         private SerializedProperty colorProp;
         private SerializedProperty modRegistersProp;
         private SerializedProperty modRegisterConfigsProp;
@@ -71,6 +76,11 @@ namespace LightSide
             autoSizeProp = serializedObject.FindProperty("autoSize");
             minFontSizeProp = serializedObject.FindProperty("minFontSize");
             maxFontSizeProp = serializedObject.FindProperty("maxFontSize");
+            autoSizeStepProp = serializedObject.FindProperty("autoSizeStep");
+            paddingProp = serializedObject.FindProperty("padding");
+            languageProp = serializedObject.FindProperty("language");
+            fontFeaturesProp = serializedObject.FindProperty("fontFeatures");
+            contentMinWidthProp = serializedObject.FindProperty("contentMinWidth");
             colorProp = serializedObject.FindProperty("m_Color");
             modRegistersProp = serializedObject.FindProperty("modRegisters");
             modRegisterConfigsProp = serializedObject.FindProperty("modRegisterConfigs");
@@ -109,6 +119,7 @@ namespace LightSide
             {
                 DrawField(minFontSizeProp, "Min Size", ut => ut.MinFontSize, (ut, v) => ut.MinFontSize = v);
                 DrawField(maxFontSizeProp, "Max Size", ut => ut.MaxFontSize, (ut, v) => ut.MaxFontSize = v);
+                DrawField(autoSizeStepProp, "Fit Step", ut => ut.AutoSizeStep, (ut, v) => ut.AutoSizeStep = v);
                 GUI.enabled = false;
                 EditorGUILayout.FloatField("Current Size", uniText.CurrentFontSize);
                 GUI.enabled = true;
@@ -126,6 +137,14 @@ namespace LightSide
             DrawField(overEdgeProp, "Over Edge", ut => ut.OverEdge, (ut, v) => ut.OverEdge = v);
             DrawField(underEdgeProp, "Under Edge", ut => ut.UnderEdge, (ut, v) => ut.UnderEdge = v);
             DrawField(leadingDistributionProp, "Leading Distribution", ut => ut.LeadingDistribution, (ut, v) => ut.LeadingDistribution = v);
+            DrawField(paddingProp, "Padding (L, T, R, B)", ut => ut.Padding, (ut, v) => ut.Padding = v);
+            DrawField(contentMinWidthProp, "Content Min Width", ut => ut.ContentMinWidth, (ut, v) => ut.ContentMinWidth = v);
+            EndSection();
+
+            BeginSection("Typography");
+            DrawField(languageProp, "Language (BCP 47)", ut => ut.Language, (ut, v) => ut.Language = v);
+            if (fontFeaturesProp != null)
+                EditorGUILayout.PropertyField(fontFeaturesProp, new GUIContent("Font Features", "OpenType features, e.g. tnum, onum, smcp, ss01, liga=0, -kern"), true);
             EndSection();
 
             BeginSection("Modifiers");
@@ -389,6 +408,7 @@ namespace LightSide
                 bool b => (T)(object)EditorGUI.Toggle(rect, label, b),
                 Enum e => (T)(object)EditorGUI.EnumPopup(rect, label, e),
                 Color c => (T)(object)EditorGUI.ColorField(rect, label, c),
+                Vector4 v4 => (T)(object)EditorGUI.Vector4Field(rect, label, v4),
                 _ => default,
             };
         }

@@ -709,6 +709,7 @@ namespace LightSide
             buf.shapingFontSize = settings.fontSize;
             indentSpans.Clear();
             spanFonts.Clear();
+            ClearTypographySpans();
 
             UniTextDebug.BeginSample("TextProcessor.Parse");
             Parse(text);
@@ -903,11 +904,13 @@ namespace LightSide
             float maxSize,
             float targetWidth,
             float targetHeight,
-            TextProcessSettings baseSettings)
+            TextProcessSettings baseSettings,
+            float step = 0f)
         {
             if (!hasValidFirstPassData) return minSize;
             if (targetWidth <= 0 || targetHeight <= 0) return minSize;
             if (buf.shapingFontSize <= 0) return minSize;
+            if (!(step > 0f) || float.IsInfinity(step)) step = 0f;
 
             var unwrappedWidth = GetUnwrappedWidth();
             var maxGlyphScale = maxSize / buf.shapingFontSize;
@@ -987,10 +990,14 @@ namespace LightSide
                 var heightLimitedSize = targetHeight / (rawHeightRatio - trimRatio);
 
                 var optimalSize = Math.Clamp(Math.Min(widthLimitedSize, heightLimitedSize), minSize, maxSize);
+                if (step > 0f) optimalSize = SnapFontSizeDown(optimalSize, minSize, maxSize, step);
                 hasValidLinesData = false;
                 hasValidPositionedGlyphs = false;
                 return optimalSize;
             }
+
+            if (step > 0f)
+                return FindOptimalSteppedFontSize(minSize, maxSize, targetWidth, targetHeight, baseSettings, step);
 
             const float tolerance = 0.5f;
             var lo = minSize;
@@ -1019,6 +1026,54 @@ namespace LightSide
                 GetHeightForFontSize(lo, targetWidth, baseSettings);
 
             return lo;
+        }
+
+        /// <summary>
+        /// Rounds a fitted size down to a multiple of <paramref name="step"/> (Auto Size fit steps). The
+        /// maximum is kept as is (it fits); a result below the minimum, or no multiple in range, gives the minimum.
+        /// </summary>
+        public static float SnapFontSizeDown(float size, float minSize, float maxSize, float step)
+        {
+            if (!(step > 0f)) return size;
+            if (size >= maxSize) return maxSize;
+            var snapped = (float)(Math.Floor(size / step + 1e-4) * step);
+            if (snapped > size) snapped = size;
+            return snapped < minSize - 1e-4f ? minSize : Math.Min(snapped, maxSize);
+        }
+
+        /// <summary>
+        /// Auto Size with fit steps: the largest multiple of <paramref name="step"/> in [min, max] whose
+        /// layout fits <paramref name="targetHeight"/> (binary search over the multiples). The maximum
+        /// is used when it fits; the minimum when no multiple fits. Leaves the lines broken at the result.
+        /// </summary>
+        private float FindOptimalSteppedFontSize(float minSize, float maxSize, float targetWidth,
+            float targetHeight, TextProcessSettings baseSettings, float step)
+        {
+            if (GetHeightForFontSize(maxSize, targetWidth, baseSettings) <= targetHeight)
+                return maxSize;
+
+            var nLo = (long)Math.Ceiling(minSize / step - 1e-4);
+            var nHi = (long)Math.Floor(maxSize / step + 1e-4);
+            if (nHi * step >= maxSize - 1e-4f) nHi--; // the maximum itself does not fit
+
+            float result = minSize;
+            if (nLo <= nHi && GetHeightForFontSize((float)(nLo * step), targetWidth, baseSettings) <= targetHeight)
+            {
+                // Invariant: nLo fits, nHi + 1 does not.
+                var lo = nLo;
+                var hi = nHi;
+                while (lo < hi)
+                {
+                    var mid = lo + (hi - lo + 1) / 2;
+                    if (GetHeightForFontSize((float)(mid * step), targetWidth, baseSettings) <= targetHeight) lo = mid;
+                    else hi = mid - 1;
+                }
+                result = (float)(lo * step);
+            }
+
+            if (Math.Abs(lastLinesFontSize - result) > 0.001f)
+                GetHeightForFontSize(result, targetWidth, baseSettings);
+            return result;
         }
 
 
@@ -1174,6 +1229,8 @@ namespace LightSide
             var scrSpan = buf.scripts.data.AsSpan(0, cpCount);
             var fp = fontProvider;
 
+            PrepareLanguages(cpCount);
+
             if (fp == null)
             {
                 ItemizeWithoutFontLookup(cpCount, lvlSpan, scrSpan, 0);
@@ -1238,7 +1295,8 @@ namespace LightSide
                 var scriptIsReal = IsRealScript(script);
                 var scriptChanged = currentIsReal && scriptIsReal && currentScript != script;
 
-                if (level != currentLevel || scriptChanged || fontId != currentFontId)
+                if (level != currentLevel || scriptChanged || fontId != currentFontId ||
+                    (cpLanguage != null && cpLanguage[i] != cpLanguage[runStart]))
                 {
                     if (i > runStart)
                         AddRun(runStart, i - runStart, currentLevel, currentScript, currentFontId);
@@ -1322,19 +1380,19 @@ namespace LightSide
                 var cp = cpSpan[start];
 
                 if ((uint)cp < UnicodeData.EmojiRangeThreshold)
-                    return fp.FindFontForCodepoint(cp);
+                    return fp.FindFontForCodepoint(cp, CjkLanguageAt(start));
 
                 if (EmojiFont.IsAvailable && IsSingleCodepointEmoji(cp))
                     return EmojiFont.FontId;
 
-                return fp.FindFontForCodepoint(cp);
+                return fp.FindFontForCodepoint(cp, CjkLanguageAt(start));
             }
 
             var cluster = cpSpan.Slice(start, clusterLength);
             if (EmojiFont.IsAvailable && EmojiSequenceClassifier.IsEmojiCluster(cluster))
                 return EmojiFont.FontId;
 
-            return fp.FindFontForCodepoint(cpSpan[start]);
+            return fp.FindFontForCodepoint(cpSpan[start], CjkLanguageAt(start));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1390,7 +1448,8 @@ namespace LightSide
                 var scriptIsReal = IsRealScript(script);
                 var scriptChanged = currentIsReal && scriptIsReal && currentScript != script;
 
-                if (level != currentLevel || scriptChanged)
+                if (level != currentLevel || scriptChanged ||
+                    (cpLanguage != null && cpLanguage[i] != cpLanguage[runStart]))
                 {
                     if (i > runStart)
                         AddRun(runStart, i - runStart, currentLevel, currentScript, fontId);
@@ -1427,7 +1486,8 @@ namespace LightSide
                 styleSpec = styleActive ? SpecAt(start) : FontStyleSpec.Normal,
                 variationKey = VariationKey.None,
                 realBold = false,
-                realItalic = false
+                realItalic = false,
+                languageIndex = LanguageIndexAt(start)
             };
 
             if (styleActive && fontProvider != null)
@@ -1457,6 +1517,7 @@ namespace LightSide
             var cp = buf.codepoints.Span;
             var runs = buf.runs;
             var smcpFlags = buf.GetAttributeData<PooledArrayAttribute<byte>>(AttributeKeys.SmallCapsFeature)?.buffer.data;
+            SortFeatureSpans();
 
             for (var i = 0; i < runCnt; i++)
             {
@@ -1470,6 +1531,8 @@ namespace LightSide
                 var featureCount = smcpFlags != null ? BuildSmallCapsFeatures(smcpFlags, run.range) : 0;
                 if (DisableLatinLigatures && IsLigatureFreeScript(run.script))
                     featureCount = AppendNoLigatureFeatures(featureCount, run.range);
+                // User features last, so <feature>/FontFeatures override the TMP-parity defaults above.
+                featureCount = AppendUserFeatures(featureCount, run.range);
 
                 var result = Shaper.Shape(
                     cp,
@@ -1483,7 +1546,8 @@ namespace LightSide
                     vtags,
                     vcoords,
                     featureCount > 0 ? featureScratch : null,
-                    featureCount);
+                    featureCount,
+                    LanguageAsciiOf(run.languageIndex));
 
                 var glyphStart = buf.shapedGlyphs.count;
                 AddShapedGlyphs(result.Glyphs);
@@ -1652,7 +1716,24 @@ namespace LightSide
                 return;
             }
 
-            float mainAscender, mainDescender, mainLineHeight;
+            buf.perLineAdvances.EnsureCapacity(lineCount);
+            cachedRawHeight = ComputeLineAdvances(buf.lines.data, lineCount, buf.orderedRuns.data, fontSize,
+                lineSpacing, distribution, buf.perLineAdvances.data,
+                out cachedEffectiveFirstLineHeight, out cachedEffectiveLastLineHeight,
+                out cachedMainAscender, out cachedMainDescender, out cachedMainLineHeight);
+            buf.perLineAdvances.count = lineCount;
+            cachedHeightFontSize = fontSize;
+        }
+
+        /// <summary>
+        /// Per-line advances into <paramref name="advances"/> (last entry 0) for the given lines, and the
+        /// raw (untrimmed) text height. Pure: reads the lines/runs passed in, writes only the outputs.
+        /// </summary>
+        private float ComputeLineAdvances(TextLine[] lines, int lineCount, ShapedRun[] orderedRuns,
+            float fontSize, float lineSpacing, LeadingDistribution distribution, float[] advances,
+            out float firstLineHeight, out float lastLineHeight,
+            out float mainAscender, out float mainDescender, out float mainLineHeight)
+        {
             if (fontProvider != null)
                 fontProvider.GetLineMetrics(fontSize, out mainAscender, out mainDescender, out mainLineHeight);
             else
@@ -1662,11 +1743,6 @@ namespace LightSide
                 mainDescender = -mainLineHeight * 0.2f;
             }
 
-            buf.perLineAdvances.EnsureCapacity(lineCount);
-
-            var lines = buf.lines.data;
-            var orderedRuns = buf.orderedRuns.data;
-            var advances = buf.perLineAdvances.data;
             var totalLineAdvances = 0f;
 
             // Phase 1: Compute per-line effective heights (CSS line box model)
@@ -1681,8 +1757,8 @@ namespace LightSide
                 advances[i] = h;
             }
 
-            cachedEffectiveFirstLineHeight = advances[0];
-            cachedEffectiveLastLineHeight = advances[lineCount - 1];
+            firstLineHeight = advances[0];
+            lastLineHeight = advances[lineCount - 1];
 
             // Phase 2: Compute inter-line advances based on leading distribution model
             var prevH = advances[0];
@@ -1729,12 +1805,7 @@ namespace LightSide
             if (lineCount > 0)
                 advances[lineCount - 1] = 0f;
 
-            buf.perLineAdvances.count = lineCount;
-            cachedRawHeight = mainAscender - mainDescender + totalLineAdvances;
-            cachedMainAscender = mainAscender;
-            cachedMainDescender = mainDescender;
-            cachedMainLineHeight = mainLineHeight;
-            cachedHeightFontSize = fontSize;
+            return mainAscender - mainDescender + totalLineAdvances;
         }
 
         private void ComputeMaxLineMetrics(in TextLine line, ShapedRun[] orderedRuns, float fontSize,

@@ -39,6 +39,14 @@ UT_API void ut_hb_buffer_set_direction(hb_buffer_t* b, int d) {
 UT_API void ut_hb_buffer_set_script(hb_buffer_t* b, unsigned script) {
     hb_buffer_set_script(b, (hb_script_t)script);
 }
+/* BCP 47 language tag (ASCII, len bytes; len < 0 = NUL-terminated). NULL/empty clears it
+ * (HB_LANGUAGE_INVALID), which is what a fresh/cleared buffer has. Drives OpenType language-system
+ * selection (locl and other language-specific lookups). */
+UT_API void ut_hb_buffer_set_language(hb_buffer_t* b, const char* tag, int len) {
+    if (!b) return;
+    if (!tag || len == 0 || !tag[0]) { hb_buffer_set_language(b, HB_LANGUAGE_INVALID); return; }
+    hb_buffer_set_language(b, hb_language_from_string(tag, len));
+}
 UT_API void ut_hb_buffer_set_content_type(hb_buffer_t* b, int ct) {
     hb_buffer_set_content_type(b, (hb_buffer_content_type_t)ct);
 }

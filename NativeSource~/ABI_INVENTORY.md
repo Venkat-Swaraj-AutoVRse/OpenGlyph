@@ -131,6 +131,7 @@ Non-zero return == success/"has value". Fixed-point outputs are 16.16 (`int`) un
 | `ut_hb_buffer_set_script` | `void(hb_buffer_t*, hb_script_t)` |
 | `ut_hb_buffer_set_content_type` | `void(hb_buffer_t*, hb_buffer_content_type_t)` |
 | `ut_hb_buffer_set_flags` | `void(hb_buffer_t*, hb_buffer_flags_t)` |
+| `ut_hb_buffer_set_language` | `void(hb_buffer_t*, const char* bcp47, int len)` — added in wave 1 (language-aware shaping); NULL/empty clears |
 | `ut_hb_buffer_add_codepoints` | `void(hb_buffer_t*, const uint32_t* text, int textLen, unsigned itemOffset, int itemLen)` |
 | `ut_hb_buffer_get_length` | `unsigned(hb_buffer_t*)` |
 | `ut_hb_buffer_get_glyph_infos` | `hb_glyph_info_t*(hb_buffer_t*, unsigned* len)` (20-byte struct: codepoint,mask,cluster,var1,var2) |
