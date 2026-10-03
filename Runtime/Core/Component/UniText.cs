@@ -597,8 +597,15 @@ namespace LightSide
             set
             {
                 if (horizontalAlignment == value) return;
+                // Justified/Flush use a wider line-break tolerance (TMP parity), so a change that
+                // crosses the justify/non-justify boundary must RE-BREAK lines, not just reposition
+                // glyphs. Other alignment changes only move glyphs on already-broken lines.
+                bool wasJustify = horizontalAlignment == HorizontalAlignment.Justified
+                                  || horizontalAlignment == HorizontalAlignment.Flush;
+                bool isJustify = value == HorizontalAlignment.Justified
+                                 || value == HorizontalAlignment.Flush;
                 horizontalAlignment = value;
-                SetDirty(DirtyFlags.Alignment);
+                SetDirty(wasJustify || isJustify ? DirtyFlags.Layout : DirtyFlags.Alignment);
             }
         }
 

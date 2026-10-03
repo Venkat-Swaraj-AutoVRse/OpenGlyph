@@ -283,6 +283,7 @@ namespace LightSide
         private float lastLinesWidth = -1;
         private float lastLinesFontSize = -1;
         private bool lastLinesWordWrap;
+        private HorizontalAlignment lastLinesHAlign = HorizontalAlignment.Left;
         private bool hasValidLinesData;
 
         private float lastLayoutMaxHeight = -1;
@@ -489,8 +490,15 @@ namespace LightSide
             return hasValidLinesData &&
                    Math.Abs(lastLinesWidth - width) < 0.001f &&
                    Math.Abs(lastLinesFontSize - fontSize) < 0.001f &&
-                   lastLinesWordWrap == wordWrap;
+                   lastLinesWordWrap == wordWrap &&
+                   // Justified/flush break at a wider tolerance, so a change into or out of that class
+                   // must re-break even when width/size/wrap are unchanged (TMP parity).
+                   IsJustifyClass(lastLinesHAlign) == IsJustifyClass(firstPassHAlign);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsJustifyClass(HorizontalAlignment a)
+            => a == HorizontalAlignment.Justified || a == HorizontalAlignment.Flush;
 
         /// <summary>
         /// Determines whether cached glyph positions can be reused for the specified parameters.
@@ -525,9 +533,15 @@ namespace LightSide
         /// If parameters match cached values, returns immediately.
         /// </para>
         /// </remarks>
-        public void EnsureLines(float width, float fontSize, bool wordWrap)
+        public void EnsureLines(float width, float fontSize, bool wordWrap, HorizontalAlignment? hAlign = null)
         {
             if (!hasValidFirstPassData) return;
+            // The alignment that drives the justified/flush wrap tolerance. When the caller knows it
+            // (the live component passes its current alignment), it overrides the value captured at the
+            // first pass — the component can change alignment without re-running the first pass, so the
+            // first-pass capture alone would be stale. The test/direct path omits it and uses the
+            // first-pass capture.
+            if (hAlign.HasValue) firstPassHAlign = hAlign.Value;
             if (CanReuseLines(width, fontSize, wordWrap)) return;
 
             UniTextDebug.BeginSample("TextProcessor.EnsureLines");
@@ -1468,6 +1482,7 @@ namespace LightSide
             lastLinesWidth = width;
             lastLinesFontSize = fontSize;
             lastLinesWordWrap = wordWrap;
+            lastLinesHAlign = firstPassHAlign;
             hasValidLinesData = true;
 
             ComputeLineHeights(fontSize, 0f);
