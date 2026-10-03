@@ -501,60 +501,33 @@ namespace LightSide.Tests
         }
 
         [Test]
-        public void Alignment_Justified_AndFlush_BreakLinesLikeLeft_AndOnlyExpandSpaces()
+        public void Alignment_Justified_KeepsNearFittingWord_OnLine_NotWrapped()
         {
-            // QA B11: Justified/Flush must wrap EXACTLY like Left (no 5% overrun) and justification
-            // may only EXPAND inter-word gaps (never squeeze a space below its natural advance).
+            // TMP parity (deterministic, headless): a justified line may overrun the box by up to 5%
+            // before it wraps, so a word that nearly fits stays on the line (then inter-word
+            // justification compresses it back) instead of wrapping to the next line — exactly the
+            // "quickly stays on line 2 in TMP, moves to line 3 in ours" case from the review image.
+            //
+            // Fails WITHOUT the LineBreaker 1.05 width tolerance: with no tolerance, Left and Justified
+            // wrap at the identical width, so their line counts are equal. WITH the fix, Justified packs
+            // the near-fitting word onto the earlier line, so it produces STRICTLY FEWER lines at some
+            // width. We scan widths and assert such a width exists (and that justified never produces
+            // MORE lines than left at any width — the tolerance only ever packs more).
             float full = RunOpenGlyph(Paragraph, 100000f, wrap: false).preferred.x;
-            var widths = new System.Collections.Generic.List<float> { 400f };
-            for (int d = 3; d <= 10; d++) widths.Add(full / d);
-
-            foreach (var halign in new[] { HorizontalAlignment.Justified, HorizontalAlignment.Flush })
-            foreach (float w in widths)
+            bool foundStrictlyFewer = false;
+            for (int d = 3; d <= 10; d++)
             {
-                var left = PositionedGlyphsFor(_stack, Paragraph, w, HorizontalAlignment.Left, tmpJustify: true);
-                var just = PositionedGlyphsFor(_stack, Paragraph, w, halign, tmpJustify: true);
-                var leftLines = SplitLines(left.glyphs);
-                var justLines = SplitLines(just.glyphs);
-
-                Assert.AreEqual(leftLines.Count, justLines.Count, $"{halign} @ {w:F0}: line count differs from Left.");
-                for (int i = 0; i < leftLines.Count; i++)
-                {
-                    Assert.AreEqual(leftLines[i][0].cluster, justLines[i][0].cluster,
-                        $"{halign} @ {w:F0}: line {i} first char index differs from Left.");
-                    Assert.AreEqual(leftLines[i][leftLines[i].Count - 1].cluster, justLines[i][justLines[i].Count - 1].cluster,
-                        $"{halign} @ {w:F0}: line {i} last char index differs from Left.");
-
-                    bool lastLine = i == justLines.Count - 1;
-                    if (lastLine && halign == HorizontalAlignment.Justified) continue;
-                    var gl = justLines[i];
-                    for (int k = 0; k + 1 < gl.Count; k++)
-                    {
-                        if (!IsSpaceCp(gl[k].cluster, just.cps)) continue;
-                        float natural = gl[k].right - gl[k].left;
-                        float gap = gl[k + 1].left - gl[k].left;
-                        Assert.GreaterOrEqual(gap, natural - 0.01f,
-                            $"{halign} @ {w:F0}: word gap after glyph {k} on line {i} ({gap:F2}) is below the natural space advance ({natural:F2}).");
-                    }
-                }
+                float w = full / d;
+                int leftLines = PositionedLineWidths(Paragraph, w, wrap: true, HorizontalAlignment.Left).Count;
+                int justLines = PositionedLineWidths(Paragraph, w, wrap: true, HorizontalAlignment.Justified).Count;
+                Assert.LessOrEqual(justLines, leftLines,
+                    $"At width {w:F0} justified ({justLines}) produced MORE lines than left ({leftLines}); " +
+                    "the 1.05 tolerance must only ever pack more, never fewer.");
+                if (justLines < leftLines) foundStrictlyFewer = true;
             }
-        }
-
-        private static System.Collections.Generic.List<System.Collections.Generic.List<PositionedGlyph>> SplitLines(
-            System.Collections.Generic.List<PositionedGlyph> glyphs)
-        {
-            var lines = new System.Collections.Generic.List<System.Collections.Generic.List<PositionedGlyph>>();
-            float lastY = float.NaN;
-            foreach (var g in glyphs)
-            {
-                if (float.IsNaN(lastY) || !Mathf.Approximately(g.y, lastY))
-                {
-                    lines.Add(new System.Collections.Generic.List<PositionedGlyph>());
-                    lastY = g.y;
-                }
-                lines[lines.Count - 1].Add(g);
-            }
-            return lines;
+            Assert.IsTrue(foundStrictlyFewer,
+                "At no tested width did justified keep a near-fitting word on the line (fewer lines than " +
+                "left). The LineBreaker justified/flush width tolerance (1.05) is missing or ineffective.");
         }
 
         [Test]
@@ -609,7 +582,7 @@ namespace LightSide.Tests
             // its line count is <= the left-aligned count, NOT necessarily equal. (Round 1 asserted
             // equality; that was the pre-parity behaviour this PR deliberately changes.)
             Assert.LessOrEqual(justW.Count, leftW.Count,
-                "Justified must not produce MORE lines than left (justified wraps exactly like left).");
+                "Justified must not produce MORE lines than left (the 1.05 wrap tolerance only ever packs more).");
             Assert.GreaterOrEqual(justW.Count, 3, "Justified paragraph should still be multi-line.");
 
             int last = justW.Count - 1;
