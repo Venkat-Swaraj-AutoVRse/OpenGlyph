@@ -147,6 +147,18 @@ namespace LightSide
                 EditorGUILayout.PropertyField(fontFeaturesProp, new GUIContent("Font Features", "OpenType features, e.g. tnum, onum, smcp, ss01, liga=0, -kern"), true);
             EndSection();
 
+            BeginSection("Effects");
+            var gradientFillProp = serializedObject.FindProperty("gradientFill");
+            if (gradientFillProp != null)
+                EditorGUILayout.PropertyField(gradientFillProp, new GUIContent("Gradient Fill", "Whole-text Linear / Radial / Angular gradient; span <gradient>/<color> override it."), true);
+            var animScaleProp = serializedObject.FindProperty("animationTimeScale");
+            var animUnscaledProp = serializedObject.FindProperty("animationUnscaledTime");
+            var animPhaseProp = serializedObject.FindProperty("animationPhase");
+            if (animScaleProp != null) EditorGUILayout.PropertyField(animScaleProp, new GUIContent("Animation Time Scale"));
+            if (animUnscaledProp != null) EditorGUILayout.PropertyField(animUnscaledProp, new GUIContent("Animation Unscaled Time"));
+            if (animPhaseProp != null) EditorGUILayout.PropertyField(animPhaseProp, new GUIContent("Animation Phase (s)"));
+            EndSection();
+
             BeginSection("Modifiers");
             StyledListUtility.DrawStyledListLayout(modRegistersProp, new GUIContent("Mod Registers"));
             StyledListUtility.DrawStyledListLayout(modRegisterConfigsProp, new GUIContent("Mod Register Configs"));
