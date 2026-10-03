@@ -405,6 +405,12 @@ the same text/size/rect is measured in TMP and compared; the measured numbers ar
   (BCP 47 shaping + CJK face), `AutoSizeStep`, `Padding`, and `GetMinContentWidth` /
   `GetMaxContentWidth` / `GetHeightForWidth`. The `<feature>` / `<lang>` tags are not registered on
   GlyphMeshProUGUI (TMP has no such tags).
+- **Inherited from UniText (wave 2), not TMP API:** `UniTextReveal` works on a GlyphMeshProUGUI and
+  composes with `maxVisibleCharacters` / `Words` / `Lines` (those remove glyphs from the mesh; the reveal
+  fades what is left; test `Wave2RevealTests::GlyphMeshPro_MaxVisibleCharacters_Composes`). Also
+  `GradientFill`, `AnimationTimeScale` / `AnimationUnscaledTime` / `AnimationPhase` and
+  `AddVertexEffect`. The animation (`<wave>` …), `<pause>`, `<glow>`, `<innershadow>` and `<outline2>` tags
+  are not registered by default (TMP has none); register them like on a UniText.
 - **richText = false** wraps the raw run in `<og-raw>…</og-raw>`, matched by a `NoParseParseRule`
   that closes at the LAST closing tag, so no other rule sees the text. `<noparse>` (TMP) is
   registered too.
