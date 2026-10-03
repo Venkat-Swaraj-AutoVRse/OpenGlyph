@@ -86,7 +86,7 @@ namespace LightSide
 
             if (param[param.Length - 1] == '%')
             {
-                if (float.TryParse(param.Slice(0, param.Length - 1), out var percent))
+                if (ModifierNumberParse.TryParseFloat(param.Slice(0, param.Length - 1), out var percent))
                 {
                     value = percent / 100f;
                     isAbsolute = false;
@@ -97,7 +97,7 @@ namespace LightSide
 
             if (param.Length > 2 && param.EndsWith("em".AsSpan(), StringComparison.OrdinalIgnoreCase))
             {
-                if (float.TryParse(param.Slice(0, param.Length - 2), out var emValue))
+                if (ModifierNumberParse.TryParseFloat(param.Slice(0, param.Length - 2), out var emValue))
                 {
                     value = emValue;
                     isAbsolute = false;
@@ -106,7 +106,7 @@ namespace LightSide
                 return false;
             }
 
-            if (float.TryParse(param, out var numValue))
+            if (ModifierNumberParse.TryParseFloat(param, out var numValue))
             {
                 value = numValue;
                 isAbsolute = true;

@@ -44,6 +44,12 @@ namespace LightSide
         private const byte CodecDeflate = 0;
         private const byte CodecBrotli = 1;
 
+        // Upper bound on a container's declared raw length. A real font is a few MB (the largest CJK
+        // faces are ~12-20 MB); 256 MB is far above any legitimate face yet small enough that a
+        // corrupt/garbage header cannot trigger a multi-GB allocation (or an OverflowException) before
+        // the stream is even read. A container claiming more than this is treated as corrupt.
+        private const int MaxRawLength = 256 * 1024 * 1024;
+
         private static int _brotliAvailable = -1; // -1 unknown, 0 no, 1 yes (cached probe result)
 
         /// <summary>
@@ -175,6 +181,10 @@ namespace LightSide
 
             int rawLen = RawLength(data);
             if (rawLen < 0) throw new InvalidDataException("UTFZ: negative raw length.");
+            if (rawLen > MaxRawLength)
+                throw new InvalidDataException(
+                    $"UTFZ: declared raw length {rawLen} exceeds the {MaxRawLength}-byte sanity bound; " +
+                    "treating the container as corrupt rather than allocating it.");
             byte codec = data[6];
 
             if (codec == CodecBrotli && !BrotliAvailable)
