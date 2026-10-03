@@ -184,6 +184,25 @@ half4 BlendOver(half4 dst, half4 src)
     return dst;
 }
 
+// Soft outer glow (GLOW_ON), same model as the unified UniText/Uber shader: full strength at the face
+// edge (shifted out by _GlowOffset), falling to 0 over _GlowOuter (fraction of the atlas spread) with
+// exponent _GlowPower. Vertex part: half4(edge, 1/range, falloff, opacity) in raw-distance units.
+half4 UniTextGlowParam(float baseWeight, float normFactor, float opacity)
+{
+    float edge = 0.5 - (baseWeight + _FaceDilate * _ScaleRatioA * 0.5) * normFactor - _GlowOffset * _ScaleRatioB * 0.5 * normFactor;
+    float range = max(_GlowOuter * _ScaleRatioB * 0.5 * normFactor, 1e-4);
+    return half4(edge, 1.0 / range, max(_GlowPower, 0.01), opacity);
+}
+
+// Fragment part: premultiplied glow colour for raw distance sample rawD.
+half4 UniTextGlowLayer(half rawD, half4 glowParam)
+{
+    half tg = saturate((glowParam.x - rawD) * glowParam.y);
+    half g = pow(1 - tg, glowParam.z) * saturate(rawD * 16.0); // fade at the clamped field floor
+    half ga = saturate(_GlowColor.a * g) * glowParam.w;
+    return half4(_GlowColor.rgb * ga, ga);
+}
+
 // Compute underlay UV offset factor (independent of Padding, proportional to PointSize)
 // gradientScale ≈ PointSize * Padding / 72
 // spreadRatio = Padding / PointSize

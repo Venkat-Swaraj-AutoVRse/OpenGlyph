@@ -52,4 +52,34 @@ namespace LightSide
         protected override string TagName => "style";
         protected override bool HasParameter => true;
     }
+
+    /// <summary>Parses <![CDATA[<glow=#RRGGBBAA,size,softness,intensity>text</glow>]]> per-span soft outer glow.</summary>
+    /// <seealso cref="SpanStyleModifier"/>
+    [Serializable]
+    [TypeGroup("Tags", 1)]
+    public sealed class GlowParseRule : TagParseRule
+    {
+        protected override string TagName => "glow";
+        protected override bool HasParameter => true;
+    }
+
+    /// <summary>Parses <![CDATA[<innershadow=#RRGGBBAA,x,y,dilate,softness>text</innershadow>]]> per-span inner shadow.</summary>
+    /// <seealso cref="SpanStyleModifier"/>
+    [Serializable]
+    [TypeGroup("Tags", 1)]
+    public sealed class InnerShadowParseRule : TagParseRule
+    {
+        protected override string TagName => "innershadow";
+        protected override bool HasParameter => true;
+    }
+
+    /// <summary>Parses <![CDATA[<outline2=#RRGGBBAA,width,softness>text</outline2>]]>: a second stroke band outside the outline.</summary>
+    /// <seealso cref="SpanStyleModifier"/>
+    [Serializable]
+    [TypeGroup("Tags", 1)]
+    public sealed class Outline2ParseRule : TagParseRule
+    {
+        protected override string TagName => "outline2";
+        protected override bool HasParameter => true;
+    }
 }

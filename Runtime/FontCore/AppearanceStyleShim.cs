@@ -95,7 +95,8 @@ namespace LightSide
             float oColA = GetColor(outline, OutlineColor, new Color(0,0,0,0)).a;
             float oW = GetFloat(outline, OutlineWidth, 0f);
             bool outlineOn = twoPass || (oColA > 0f && oW > 0f);
-            bool underlayOn = HasKeyword(face, "UNDERLAY_ON") || HasKeyword(face, "UNDERLAY_INNER");
+            bool underlayOn = HasKeyword(face, "UNDERLAY_ON");
+            bool innerOn = HasKeyword(face, "UNDERLAY_INNER");
             bool glowOn = HasKeyword(face, "GLOW_ON");
 
             if (outlineOn)
@@ -112,6 +113,17 @@ namespace LightSide
                 s.underlayOffsetY = GetFloat(face, UnderlayOffsetY, s.underlayOffsetY) * UnderlayOffsetScaleForTests;
                 s.underlayDilate = GetFloat(face, UnderlayDilate, s.underlayDilate) + UnderlayDilateBiasForTests;
                 s.underlaySoftness = GetFloat(face, UnderlaySoftness, s.underlaySoftness);
+            }
+
+            // Wave 2: the legacy "inner underlay" keyword is an inner shadow; the unified path has a
+            // dedicated layer for it (before, it was drawn as an outer drop shadow there).
+            if (innerOn)
+            {
+                s.innerShadowColor = GetColor(face, UnderlayColor, s.innerShadowColor);
+                s.innerShadowOffsetX = GetFloat(face, UnderlayOffsetX, 0f) * UnderlayOffsetScaleForTests;
+                s.innerShadowOffsetY = GetFloat(face, UnderlayOffsetY, 0f) * UnderlayOffsetScaleForTests;
+                s.innerShadowDilate = GetFloat(face, UnderlayDilate, 0f);
+                s.innerShadowSoftness = GetFloat(face, UnderlaySoftness, 0f);
             }
 
             if (glowOn)

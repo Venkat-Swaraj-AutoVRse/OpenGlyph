@@ -33,6 +33,17 @@ namespace LightSide
         public float glowInner;
         public float glowPower;
 
+        // Wave 2: a second stroke band outside the outline, and an inner shadow inside the face.
+        public Color outline2Color;
+        public float outline2Width;    // v[0,1], added outside outlineWidth
+        public float outline2Softness; // v[0,1]
+
+        public Color innerShadowColor;
+        public float innerShadowOffsetX;
+        public float innerShadowOffsetY;
+        public float innerShadowDilate;
+        public float innerShadowSoftness;
+
         /// <summary>A plain opaque-white face with no outline/underlay/glow — the "default appearance".</summary>
         public static GlyphStyle Default => new()
         {
@@ -46,6 +57,9 @@ namespace LightSide
             underlayOffsetX = 0f, underlayOffsetY = 0f, underlayDilate = 0f, underlaySoftness = 0f,
             glowColor = new Color(0, 0, 0, 0),
             glowOffset = 0f, glowOuter = 0f, glowInner = 0f, glowPower = 1f,
+            outline2Color = new Color(0, 0, 0, 0), outline2Width = 0f, outline2Softness = 0f,
+            innerShadowColor = new Color(0, 0, 0, 0),
+            innerShadowOffsetX = 0f, innerShadowOffsetY = 0f, innerShadowDilate = 0f, innerShadowSoftness = 0f,
         };
 
         public bool Equals(GlyphStyle o) =>
@@ -54,7 +68,11 @@ namespace LightSide
             underlayColor == o.underlayColor && underlayOffsetX == o.underlayOffsetX && underlayOffsetY == o.underlayOffsetY &&
             underlayDilate == o.underlayDilate && underlaySoftness == o.underlaySoftness &&
             glowColor == o.glowColor && glowOffset == o.glowOffset && glowOuter == o.glowOuter &&
-            glowInner == o.glowInner && glowPower == o.glowPower;
+            glowInner == o.glowInner && glowPower == o.glowPower &&
+            outline2Color == o.outline2Color && outline2Width == o.outline2Width && outline2Softness == o.outline2Softness &&
+            innerShadowColor == o.innerShadowColor && innerShadowOffsetX == o.innerShadowOffsetX &&
+            innerShadowOffsetY == o.innerShadowOffsetY && innerShadowDilate == o.innerShadowDilate &&
+            innerShadowSoftness == o.innerShadowSoftness;
 
         public override bool Equals(object obj) => obj is GlyphStyle g && Equals(g);
         public override int GetHashCode()
@@ -65,6 +83,9 @@ namespace LightSide
             h.Add(underlayColor); h.Add(underlayOffsetX); h.Add(underlayOffsetY);
             h.Add(underlayDilate); h.Add(underlaySoftness);
             h.Add(glowColor); h.Add(glowOffset); h.Add(glowOuter); h.Add(glowInner); h.Add(glowPower);
+            h.Add(outline2Color); h.Add(outline2Width); h.Add(outline2Softness);
+            h.Add(innerShadowColor); h.Add(innerShadowOffsetX); h.Add(innerShadowOffsetY);
+            h.Add(innerShadowDilate); h.Add(innerShadowSoftness);
             return h.ToHashCode();
         }
     }
@@ -86,7 +107,11 @@ namespace LightSide
     ///   col 4: (faceDilate, softness, outlineWidth, outlineDilate)
     ///   col 5: (underlayOffsetX, underlayOffsetY, underlayDilate, underlaySoftness)
     ///   col 6: (glowOffset, glowOuter, glowInner, glowPower)
-    ///   col 7: reserved (0,0,0,0)
+    ///   col 7: outline2Color.rgba
+    ///   col 8: innerShadowColor.rgba
+    ///   col 9: (outline2Width, outline2Softness, 0, 0)
+    ///   col 10: (innerShadowOffsetX, innerShadowOffsetY, innerShadowDilate, innerShadowSoftness)
+    ///   col 11: reserved (0,0,0,0)
     /// </code>
     /// The shader reads a texel with <c>(col + 0.5)/width, (styleIdx + 0.5)/height</c> point-sampled.</para>
     /// <para><b>Dedup.</b> Identical styles collapse to one row via <see cref="GetOrAdd"/>, so the row
@@ -94,7 +119,7 @@ namespace LightSide
     /// </remarks>
     public sealed class StyleTable : IDisposable
     {
-        public const int ColumnsPerStyle = 8;
+        public const int ColumnsPerStyle = 12;
 
         private readonly List<GlyphStyle> _styles = new();
         private readonly Dictionary<GlyphStyle, int> _index = new();
@@ -173,7 +198,11 @@ namespace LightSide
             px[b + 4] = new Color(s.faceDilate, s.softness, s.outlineWidth, s.outlineDilate);
             px[b + 5] = new Color(s.underlayOffsetX, s.underlayOffsetY, s.underlayDilate, s.underlaySoftness);
             px[b + 6] = new Color(s.glowOffset, s.glowOuter, s.glowInner, s.glowPower);
-            px[b + 7] = new Color(0, 0, 0, 0);
+            px[b + 7] = s.outline2Color;
+            px[b + 8] = s.innerShadowColor;
+            px[b + 9] = new Color(s.outline2Width, s.outline2Softness, 0, 0);
+            px[b + 10] = new Color(s.innerShadowOffsetX, s.innerShadowOffsetY, s.innerShadowDilate, s.innerShadowSoftness);
+            px[b + 11] = new Color(0, 0, 0, 0);
         }
 
         /// <summary>
