@@ -316,9 +316,27 @@ Guarded by `Alignment_Justified_KeepsNearFittingWord_OnLine_NotWrapped` (determi
 and `Compare_Justified_LineCount_MatchesTMP` (vs real TMP: 5 = 5 lines at the review
 width). Plain UniText layout is unchanged — the tolerance only engages for Justified/Flush.
 
-**Known follow-up (not a regression):** on a line kept via the 5 % tolerance, OpenGlyph
-compresses only the inter-word gaps (clamped so they never collapse below 35 % of a
-space), whereas TMP also shrinks glyph widths (`charWidthAdjDelta`). So a
-tolerance-packed justified line is slightly tighter in OpenGlyph than in TMP. The line
-BREAKS match; full spacing parity needs a character-width-scaling pass, tracked as a
-Round-3 item.
+### Justified spacing split (word + character), Flush letter-spread
+Justification distributes the line's slack exactly as TMP's `wordWrappingRatios`
+(default 0.4): **word spacing absorbs 60 %** (spread across the whitespace gaps) and
+**character spacing absorbs 40 %** (spread across every visible glyph). This applies to
+both spread (positive slack) and compress (negative slack, from a 5 %-tolerance
+overrun line), so a packed line compresses word AND letter spacing together instead of
+collapsing the word gaps to zero. A hard floor additionally caps space compression at
+30 % (a space keeps >= 70 % of its natural width); any remainder is left as residual
+overflow within the 5 % tolerance. Because the character-spacing share applies to every
+justified/flush line, **Flush now spreads the last line's letters** ("t o  v e x  t h e
+ g y m n a s t.") matching TMP. Measured on the review paragraph's justified line 2, the
+narrowest word gap is GMP 4 px vs TMP 5 px (80 %). Full `charWidthAdjDelta` glyph-width
+scaling (TMP shrinks glyph bodies as a last resort) is still not implemented, so an
+extreme overrun could leave a hair of residual overflow rather than squeezing glyphs —
+not observed in the review cases.
+
+### Shader-change scope (grey fix)
+The grey fix changed `UniText/Uber`'s SDF `scale`, which is the shared unified render
+path for ALL text, not only GlyphMeshPro. It replaces a fragment `ddx/ddy` approximation
+with the legacy `UniText/SDF-Face` **vertex** formula **verbatim**, so unified now matches
+the legacy production AA by construction. `UnifiedRendererPixelEquivalenceTests`
+(sdf / msdf / colored-span) report `maxDelta=0`, `0.000 %` pixels differing — unified
+geometry/UVs still byte-match legacy. Brightness is near-white at both small (30 pt) and
+large (120 pt) sizes; outline / underlay / MSDF / SDF tests all pass.
