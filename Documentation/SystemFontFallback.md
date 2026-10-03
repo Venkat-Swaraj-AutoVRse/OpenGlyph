@@ -75,6 +75,16 @@ current UI culture, and **Simplified Chinese (face 2)** otherwise. Other collect
 characters are shared between languages, so only the glyph shape variant differs. CJK text logs the
 same once-per-script warning (Han, Hiragana, Katakana, Hangul, ...).
 
+### Per component and per span: `Language` / `<lang>`
+
+When a component has a `Language` (or the text is inside a `<lang=…>` span), that language picks the CJK
+face instead of the project-wide default above: `ja` → the Japanese group first, `ko` → Korean,
+`zh-Hans` → general, `zh-Hant`/`zh-TW` → Traditional Chinese (`msjh.ttc`, `mingliu.ttc` on Windows),
+`zh-HK` → Hong Kong (on Windows the Traditional faces), and for `NotoSansCJK*.ttc` the matching face.
+The other groups are still tried when the first one lacks a character. Each component keeps its own
+result, so a Japanese label and a Chinese label get different faces in the same scene. Unset (or a
+non-CJK language) keeps the behaviour above. See [LanguageShaping.md](LanguageShaping.md).
+
 ## Disable
 
 Untick **Use System Font Fallback** on the `UniTextSettings` asset, or in code:
