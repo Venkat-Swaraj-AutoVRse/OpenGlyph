@@ -59,7 +59,7 @@ namespace LightSide
             new(113, 255, 87, 255),
         };
 
-        private void OnEnable()
+        protected virtual void OnEnable()
         {
             textProp = serializedObject.FindProperty("text");
             fontStackProp = serializedObject.FindProperty("fontStack");

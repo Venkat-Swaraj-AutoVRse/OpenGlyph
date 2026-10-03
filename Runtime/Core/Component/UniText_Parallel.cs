@@ -175,7 +175,8 @@ namespace LightSide
                 rectTransform = rectTransform,
                 rect = GetLayoutRect(rectTransform.rect),
                 lossyScale = scale,
-                hasWorldCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay,
+                // World text (MeshRenderer) is camera-rendered like a World Space canvas: same SDF scale.
+                hasWorldCamera = RendersToMeshRenderer || (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay),
                 pixelSnapDeviceScale = ComputePixelSnapDeviceScale(),
             };
             var snapPhase = ComputePixelSnapPhase();
@@ -773,6 +774,9 @@ namespace LightSide
             SyncVertexEffectHook();
             SyncGradientFillHook();
 
+            // World text has no Canvas: run the layout callbacks the canvas layout pass would have run.
+            if (RendersToMeshRenderer) EnsureWorldLayout();
+
             // Pre-synthesise the base style for the unified renderer (reads Material properties → main
             // thread only). overrideStyle uses the component-authored style, which needs no Unity reads.
             if (UseUnifiedRenderer)
@@ -840,7 +844,7 @@ namespace LightSide
             // is behaviour-preserving: identical geometry draws identically. This zeroes the cost of a
             // text change that does not change rendered output (trailing-whitespace edits, reassigning
             // equivalent text, score/timer updates landing on the same string). Opt-out via settings.
-            if (UniTextSettings.SkipUnchangedGeometryUpload && hasAppliedGeometry && subMeshRenderers.Count > 0
+            if (UniTextSettings.SkipUnchangedGeometryUpload && hasAppliedGeometry && HasRendererGeometry
                 && vertexEffects.Count == 0 && !isAnimatedRegistered)
             {
                 ulong fp = meshGenerator.GeometryFingerprint();

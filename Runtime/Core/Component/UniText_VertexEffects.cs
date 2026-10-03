@@ -355,6 +355,13 @@ namespace LightSide
             ctx.ResetWork();
             for (var i = 0; i < vertexEffects.Count; i++) vertexEffects[i].Apply(ctx);
 
+            if (RendersToMeshRenderer)
+            {
+                UploadWorldVertexEffects(ctx);
+                System.Threading.Interlocked.Increment(ref VertexEffectUploads);
+                return;
+            }
+
             for (var i = 0; i < ctx.entryCount && i < subMeshRenderers.Count; i++)
             {
                 var e = ctx.entries[i];

@@ -1056,6 +1056,8 @@ namespace LightSide
             DeInit();
             UnhookSpanStyle();
             unifiedBuilder = null;
+            DestroyWorldMesh();
+            DestroyWorldCollider();
 #if UNITY_EDITOR
             DestroyUnifiedTestSnapshots();
 #endif
@@ -1492,7 +1494,8 @@ namespace LightSide
                 // The collector was reset at OnBeforeMesh with the base style and populated per glyph
                 // (local ids in UV1.w). The builder maps each glyph's local id -> a shared StyleTable row.
                 unifiedBuilder.Build(renderData, meshGenerator, style, spanStyleCollector, unifiedRenderData);
-                UpdateSubMeshes(unifiedRenderData);
+                if (RendersToMeshRenderer) ApplyWorldMeshes(unifiedRenderData, true);
+                else UpdateSubMeshes(unifiedRenderData);
 #if UNITY_EDITOR
                 if (UnifiedRenderBuilder.SnapshotMeshesForTests) SnapshotUnifiedMeshesForTests();
 #endif
@@ -1501,7 +1504,8 @@ namespace LightSide
             }
 
             WarnIfLegacyDropsSpanStyles();
-            UpdateSubMeshes();
+            if (RendersToMeshRenderer) ApplyWorldMeshes(renderData, false);
+            else UpdateSubMeshes();
 
             UniTextDebug.EndSample();
         }
@@ -1723,6 +1727,7 @@ namespace LightSide
         /// </summary>
         private void RefreshOverflowClip()
         {
+            if (RendersToMeshRenderer) { ApplyWorldClip(); return; }
             if (subMeshRenderers.Count == 0) return;
             var valid = TryGetEffectiveClip(out var clip);
             if (valid == hasAppliedClip && (!valid || ClipApproximatelyEqual(clip, lastAppliedClip))) return;
@@ -2090,6 +2095,7 @@ namespace LightSide
 
         private void ClearAllRenderers()
         {
+            if (RendersToMeshRenderer) ClearWorldMesh();
             for (var i = 0; i < subMeshRenderers.Count; i++) subMeshRenderers[i].renderer?.Clear();
             // Renderers no longer hold the fingerprinted geometry — force the next build to re-upload.
             hasAppliedGeometry = false;
