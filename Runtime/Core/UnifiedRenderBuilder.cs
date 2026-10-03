@@ -113,17 +113,53 @@ namespace LightSide
             dst.SetFloat(AtlasSize, src.GetFloat(AtlasSize));
         }
 
+        // Per-format merged geometry, kept in plain arrays that are reused across Builds (grown, never
+        // shrunk). Bulk channels are block-copied and the mesh is set from array ranges. The earlier
+        // List<T>-per-vertex Add loop cost ~0.35 ms per 7.6k-vertex component on Windows, the largest
+        // part of a unified rebuild.
         private sealed class Group
         {
-            public readonly List<Vector3> verts = new();
-            public readonly List<Vector3> normals = new();
-            public readonly List<Color32> colors = new();
-            public readonly List<Vector4> uv0 = new();
-            public readonly List<Vector4> uv1 = new();
-            public readonly List<int> tris = new();
+            public Vector3[] verts = Array.Empty<Vector3>();
+            public Vector3[] normals = Array.Empty<Vector3>();
+            public Color32[] colors = Array.Empty<Color32>();
+            public Vector4[] uv0 = Array.Empty<Vector4>();
+            public Vector4[] uv1 = Array.Empty<Vector4>();
+            public int[] tris = Array.Empty<int>();
+            public int vertCount;
+            public int triCount;
+            // normals[0..constNormals) are known to hold the UGUI forward normal (0,0,-1).
+            public int constNormals;
             public Mesh mesh;
             public int pageSize;
-            public void ClearBuffers() { verts.Clear(); normals.Clear(); colors.Clear(); uv0.Clear(); uv1.Clear(); tris.Clear(); pageSize = 0; }
+
+            public void ClearBuffers() { vertCount = 0; triCount = 0; pageSize = 0; }
+
+            public void EnsureVerts(int required)
+            {
+                if (verts.Length >= required) return;
+                var cap = Math.Max(required, Math.Max(256, verts.Length * 2));
+                Array.Resize(ref verts, cap);
+                Array.Resize(ref normals, cap);
+                Array.Resize(ref colors, cap);
+                Array.Resize(ref uv0, cap);
+                Array.Resize(ref uv1, cap);
+            }
+
+            public void EnsureTris(int required)
+            {
+                if (tris.Length >= required) return;
+                Array.Resize(ref tris, Math.Max(required, Math.Max(384, tris.Length * 2)));
+            }
+
+            /// <summary>Writes the forward normal into [start, end) unless it is already there.</summary>
+            public void FillConstNormals(int start, int end)
+            {
+                if (end <= constNormals) return;
+                var from = Math.Max(start, constNormals);
+                var n = new Vector3(0, 0, -1);
+                for (var i = from; i < end; i++) normals[i] = n;
+                if (start <= constNormals) constNormals = end;
+            }
         }
 
         private readonly Dictionary<TextureFormat, Group> _groups = new();
@@ -151,8 +187,15 @@ namespace LightSide
         /// <summary>Diagnostics: when true, logs each segment's page format -> glyphMode -> dst array.</summary>
         public static bool DiagLog = false;
 
+        /// <summary>
+        /// TEST INSTRUMENTATION: number of segments the last builds merged by reading the Unity mesh
+        /// back (<c>Mesh.GetVertices</c> etc.) instead of from the generator's own buffers. The
+        /// component rebuild path must never read back; tests reset this and assert it stays 0.
+        /// </summary>
+        internal static long MeshReadbackSegments;
+
         public void Build(List<UniTextRenderData> segments, in GlyphStyle style, List<UniTextRenderData> output)
-            => Build(segments, style, null, output);
+            => Build(segments, null, style, null, output);
 
         /// <summary>
         /// R2 sub-task 2 overload: when a per-component <paramref name="spanStyles"/> collector is
@@ -162,24 +205,40 @@ namespace LightSide
         /// row chosen per vertex, still one renderer. Local id 0 (no span) uses the base <paramref name="style"/>.
         /// </summary>
         public void Build(List<UniTextRenderData> segments, in GlyphStyle style, SpanStyleCollector spanStyles, List<UniTextRenderData> output)
+            => Build(segments, null, style, spanStyles, output);
+
+        /// <summary>
+        /// Same as the public overloads, but when <paramref name="source"/> is the generator that just
+        /// produced <paramref name="segments"/> (its buffers not yet returned, one generated segment per
+        /// entry), the geometry is read straight from the generator's managed buffers instead of being
+        /// read back out of the Unity meshes. Falls back to the mesh readback otherwise.
+        /// </summary>
+        internal void Build(List<UniTextRenderData> segments, UniTextMeshGenerator source, in GlyphStyle style,
+            SpanStyleCollector spanStyles, List<UniTextRenderData> output)
         {
             using var _ = s_BuildMarker.Auto();
             output.Clear();
             if (segments == null || segments.Count == 0) return;
+
+            var genSegs = source != null && source.HasGeneratedData ? source.GeneratedSegments : null;
+            if (genSegs != null && genSegs.Count != segments.Count) genSegs = null;
 
             // Shared style table (dedups identical styles across all components) -> stable styleIdx.
             int baseStyleIdx = SharedStyles.GetOrAdd(style);
 
             foreach (var kv in _groups) kv.Value.ClearBuffers();
 
-            foreach (var seg in segments)
+            for (var si = 0; si < segments.Count; si++)
             {
-                if (seg.mesh == null || seg.mesh.vertexCount == 0 || seg.texture is not Texture2D page) continue;
+                var seg = segments[si];
+                if (seg.mesh == null || seg.texture is not Texture2D page) continue;
+                var vertexCount = genSegs != null ? genSegs.buffer[si].vertexCount : seg.mesh.vertexCount;
+                if (vertexCount == 0) continue;
 
                 var mode = ModeFromFormat(page.format);
                 var dstFormat = UberDrawGroup.FormatFor(mode);
                 if (DiagLog)
-                    Debug.Log($"[UnifiedRenderBuilder DIAG] seg fontId={seg.fontId} pageFormat={page.format} -> glyphMode={mode} dstArray={dstFormat} verts={seg.mesh.vertexCount}");
+                    Debug.Log($"[UnifiedRenderBuilder DIAG] seg fontId={seg.fontId} pageFormat={page.format} -> glyphMode={mode} dstArray={dstFormat} verts={vertexCount}");
                 var arr = SharedGlyphAtlas.Get(dstFormat, page.width);
                 // Pass the page's current revision so a page mutated IN PLACE after its first copy
                 // (glyphs added later) is re-copied into its existing slice rather than drawing the
@@ -190,7 +249,10 @@ namespace LightSide
 
                 if (!_groups.TryGetValue(dstFormat, out var g)) { g = new Group(); _groups[dstFormat] = g; }
                 g.pageSize = page.width;
-                AppendSegment(g, seg.mesh, slice, (int)mode, baseStyleIdx, spanStyles);
+                if (genSegs != null)
+                    AppendFromGenerator(g, source, in genSegs.buffer[si], slice, (int)mode, baseStyleIdx, spanStyles);
+                else
+                    AppendSegment(g, seg.mesh, slice, (int)mode, baseStyleIdx, spanStyles);
             }
 
             // Build/refresh the shared style texture AFTER span rows have been added above.
@@ -199,19 +261,19 @@ namespace LightSide
             foreach (var kv in _groups)
             {
                 var g = kv.Value;
-                if (g.verts.Count == 0) continue;
+                if (g.vertCount == 0) continue;
                 var arr = SharedGlyphAtlas.Get(kv.Key, g.pageSize > 0 ? g.pageSize : 1024);
                 arr.Apply(false);
 
                 if (g.mesh == null) g.mesh = NewMesh();
                 var m = g.mesh;
                 m.Clear();
-                m.SetVertices(g.verts);
-                m.SetNormals(g.normals);
-                m.SetColors(g.colors);
-                m.SetUVs(0, g.uv0);
-                m.SetUVs(1, g.uv1);
-                m.SetTriangles(g.tris, 0);
+                m.SetVertices(g.verts, 0, g.vertCount);
+                m.SetNormals(g.normals, 0, g.vertCount);
+                m.SetColors(g.colors, 0, g.vertCount);
+                m.SetUVs(0, g.uv0, 0, g.vertCount);
+                m.SetUVs(1, g.uv1, 0, g.vertCount);
+                m.SetTriangles(g.tris, 0, g.triCount, 0);
 
                 // SHARED material (batches across components) carrying the shared array + style texture.
                 var mat = MaterialFor(kv.Key);
@@ -228,9 +290,65 @@ namespace LightSide
             }
         }
 
+        /// <summary>
+        /// Appends one generated segment from the generator's buffers: positions, colours and UV0 are
+        /// block-copied; only UV1 (slice / glyph mode / shared style row) and the rebased indices are
+        /// written per element. The generator emits no normals, so the UGUI forward normal is used —
+        /// the same value the readback path substitutes for a mesh without normals.
+        /// </summary>
+        private void AppendFromGenerator(Group g, UniTextMeshGenerator src, in GeneratedMeshSegment seg,
+            int slice, int glyphMode, int baseStyleIdx, SpanStyleCollector spanStyles)
+        {
+            var count = seg.vertexCount;
+            var start = seg.vertexStart;
+            var baseIndex = g.vertCount;
+            g.EnsureVerts(baseIndex + count);
+
+            Array.Copy(src.Vertices, start, g.verts, baseIndex, count);
+            Array.Copy(src.Colors, start, g.colors, baseIndex, count);
+            Array.Copy(src.Uvs0, start, g.uv0, baseIndex, count);
+            g.FillConstNormals(baseIndex, baseIndex + count);
+
+            var srcUv1 = src.Uvs1;
+            var dstUv1 = g.uv1;
+            int lastLocal = -1, lastShared = baseStyleIdx;
+            for (int i = 0; i < count; i++)
+            {
+                var u = srcUv1[start + i];
+                // UV1.x is the real spreadRatio (Padding/PointSize), UV1.w the per-glyph LOCAL
+                // span-style id (0 = base); see AppendSegment.
+                int styleIdx = baseStyleIdx;
+                if (spanStyles != null)
+                {
+                    int local = (int)(u.w + 0.5f);
+                    if (local == lastLocal) styleIdx = lastShared;
+                    else if (local <= 0) { lastLocal = local; lastShared = baseStyleIdx; }
+                    else
+                    {
+                        styleIdx = SharedStyles.GetOrAdd(spanStyles.StyleAt(local));
+                        lastLocal = local; lastShared = styleIdx;
+                    }
+                }
+                dstUv1[baseIndex + i] = new Vector4(u.x, slice, glyphMode, styleIdx);
+            }
+
+            var triCount = seg.triangleCount;
+            var triBase = g.triCount;
+            g.EnsureTris(triBase + triCount);
+            var srcTris = src.Triangles;
+            var dstTris = g.tris;
+            var triStart = seg.triangleStart;
+            for (int i = 0; i < triCount; i++)
+                dstTris[triBase + i] = baseIndex + srcTris[triStart + i];
+
+            g.vertCount = baseIndex + count;
+            g.triCount = triBase + triCount;
+        }
+
         private void AppendSegment(Group g, Mesh src, int slice, int glyphMode, int baseStyleIdx, SpanStyleCollector spanStyles)
         {
-            int baseIndex = g.verts.Count;
+            System.Threading.Interlocked.Increment(ref MeshReadbackSegments);
+            int baseIndex = g.vertCount;
             // Non-allocating reads into reusable scratch lists (the .vertices/.colors32/.triangles
             // PROPERTIES allocate a fresh array every call — the per-frame GC the benchmark flagged).
             _tmpV.Clear(); src.GetVertices(_tmpV);
@@ -240,18 +358,25 @@ namespace LightSide
             _tmpUv1.Clear(); src.GetUVs(1, _tmpUv1);
             _tmpTri.Clear(); src.GetTriangles(_tmpTri, 0);
 
-            bool haveColors = _tmpC.Count == _tmpV.Count;
-            bool haveNormals = _tmpN.Count == _tmpV.Count;
-            bool haveUv1 = _tmpUv1.Count == _tmpV.Count;
+            var count = _tmpV.Count;
+            bool haveColors = _tmpC.Count == count;
+            bool haveNormals = _tmpN.Count == count;
+            bool haveUv1 = _tmpUv1.Count == count;
+            g.EnsureVerts(baseIndex + count);
+            if (haveNormals)
+            {
+                for (int i = 0; i < count; i++) g.normals[baseIndex + i] = _tmpN[i];
+                if (g.constNormals > baseIndex) g.constNormals = baseIndex;
+            }
+            else g.FillConstNormals(baseIndex, baseIndex + count);
+
             // Small cache so repeated local ids within a segment don't re-walk the shared table.
             int lastLocal = -1, lastShared = baseStyleIdx;
-            for (int i = 0; i < _tmpV.Count; i++)
+            for (int i = 0; i < count; i++)
             {
-                g.verts.Add(_tmpV[i]);
-                g.normals.Add(haveNormals ? _tmpN[i] : new Vector3(0, 0, -1)); // UGUI forward normal
-                g.colors.Add(haveColors ? _tmpC[i] : (Color32)Color.white);
-                var uv0 = i < _tmpUv.Count ? _tmpUv[i] : Vector4.zero;
-                g.uv0.Add(uv0);
+                g.verts[baseIndex + i] = _tmpV[i];
+                g.colors[baseIndex + i] = haveColors ? _tmpC[i] : (Color32)Color.white;
+                g.uv0[baseIndex + i] = i < _tmpUv.Count ? _tmpUv[i] : Vector4.zero;
                 // UV1.x MUST be the real spreadRatio (Padding/PointSize) from the source mesh's
                 // TEXCOORD1.x — NOT uv0.z (gradientScale). normFactor = 0.1/spreadRatio, and getting
                 // this wrong (≈0.01 instead of ≈1) makes the outline/underlay offset ~100x too small.
@@ -270,10 +395,16 @@ namespace LightSide
                         lastLocal = local; lastShared = styleIdx;
                     }
                 }
-                g.uv1.Add(new Vector4(spreadRatio, slice, glyphMode, styleIdx));
+                g.uv1[baseIndex + i] = new Vector4(spreadRatio, slice, glyphMode, styleIdx);
             }
+
+            var triBase = g.triCount;
+            g.EnsureTris(triBase + _tmpTri.Count);
             for (int i = 0; i < _tmpTri.Count; i++)
-                g.tris.Add(baseIndex + _tmpTri[i]);
+                g.tris[triBase + i] = baseIndex + _tmpTri[i];
+
+            g.vertCount = baseIndex + count;
+            g.triCount = triBase + _tmpTri.Count;
         }
 
         private static Mesh NewMesh()

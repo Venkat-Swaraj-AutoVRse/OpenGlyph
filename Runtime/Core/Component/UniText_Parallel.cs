@@ -791,7 +791,9 @@ namespace LightSide
                 }
             }
 
-            renderData = meshGenerator.ApplyMeshesToUnity();
+            // Unified: the merge reads the generator buffers directly, so the per-segment shared
+            // meshes are not written (that upload was pure overhead, then read straight back).
+            renderData = meshGenerator.ApplyMeshesToUnity(uploadGeometry: !UseUnifiedRenderer);
             System.Threading.Interlocked.Increment(ref MeshUploadCount);
     #if UNITEXT_TESTS
             CopyMeshesForTests();
@@ -810,7 +812,6 @@ namespace LightSide
                 lastAppliedGeometryFingerprint = 0;
                 hasAppliedGeometry = false;
             }
-            meshGenerator.ReturnInstanceBuffers();
 
             if (textProcessor != null)
             {
@@ -818,7 +819,17 @@ namespace LightSide
                 resultHeight = textProcessor.ResultHeight;
             }
 
-            UpdateRendering();
+            // The generator buffers stay rented through UpdateRendering so the unified builder can
+            // merge straight from them instead of reading the just-uploaded meshes back.
+            var generator = meshGenerator;
+            try
+            {
+                UpdateRendering();
+            }
+            finally
+            {
+                generator.ReturnInstanceBuffers();
+            }
 
             dirtyFlags = DirtyFlags.None;
         }
@@ -851,12 +862,19 @@ namespace LightSide
         internal System.Collections.Generic.List<Vector3> GetGeneratedVerticesForEditorTests()
         {
             var result = new System.Collections.Generic.List<Vector3>();
-            if (renderData == null) return result;
-            foreach (var rd in renderData)
+            // Unified: the per-segment shared meshes are not written (the merge reads the generator
+            // buffers directly), so read this component's merged meshes. Same positions, grouped
+            // per draw-group format.
+            var src = UseUnifiedRenderer ? unifiedRenderData : renderData;
+            if (src == null) return result;
+            foreach (var rd in src)
                 if (rd.mesh != null)
                     result.AddRange(rd.mesh.vertices);
             return result;
         }
+
+        /// <summary>EDITOR-ONLY: this component's merged unified-renderer meshes from the last rebuild.</summary>
+        internal IReadOnlyList<UniTextRenderData> UnifiedRenderDataForEditorTests => unifiedRenderData;
     #endif
 
     #if UNITEXT_TESTS
@@ -882,17 +900,30 @@ namespace LightSide
             testMeshSnapshots.Clear();
             testSegmentFontInfo.Clear();
 
-            foreach (var rd in renderData)
+            // Snapshot from the generator buffers (still rented here): with the unified renderer the
+            // shared per-segment meshes are not written, and the data is what an upload would hold.
+            var gen = meshGenerator;
+            var genSegs = gen.GeneratedSegments;
+            for (var s = 0; s < renderData.Count; s++)
             {
                 var copy = new Mesh();
-                copy.vertices = rd.mesh.vertices;
-                copy.triangles = rd.mesh.triangles;
-
-                tempUvBuffer.Clear();
-                rd.mesh.GetUVs(0, tempUvBuffer);
-                copy.SetUVs(0, tempUvBuffer);
-
-                copy.colors32 = rd.mesh.colors32;
+                if (genSegs != null && s < genSegs.Count && gen.HasGeneratedData)
+                {
+                    var seg = genSegs[s];
+                    if (seg.vertexCount > 0)
+                    {
+                        copy.SetVertices(gen.Vertices, seg.vertexStart, seg.vertexCount);
+                        copy.SetUVs(0, gen.Uvs0, seg.vertexStart, seg.vertexCount);
+                        copy.SetColors(gen.Colors, seg.vertexStart, seg.vertexCount);
+                        // Mesh.triangles concatenates every submesh; a multi-pass segment repeats its
+                        // indices once per material (see ApplyMeshesToUnity).
+                        var passes = Math.Max(1, seg.materials?.Length ?? 1);
+                        var tris = new int[seg.triangleCount * passes];
+                        for (var p = 0; p < passes; p++)
+                            Array.Copy(gen.Triangles, seg.triangleStart, tris, p * seg.triangleCount, seg.triangleCount);
+                        copy.triangles = tris;
+                    }
+                }
                 testMeshSnapshots.Add(copy);
             }
 
