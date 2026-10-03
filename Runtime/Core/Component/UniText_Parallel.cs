@@ -184,9 +184,10 @@ namespace LightSide
 
             PrepareModifiersForParallel();
 
-            // Main thread: load the system CJK font (file IO + asset creation) before any worker runs.
+            // Main thread: load system fallback fonts for uncovered scripts (file IO + asset creation)
+            // before any worker runs, and log the once-per-script warning naming this component.
             if (UniTextSettings.UseSystemFontFallback)
-                SystemFontFallback.PrepareForText(sourceText.Span, fontProvider?.FontStackAsset);
+                SystemFontFallback.PrepareForText(sourceText.Span, fontProvider?.FontStackAsset, this);
         }
         
 

@@ -17,6 +17,7 @@ through phase 1c.
 
 #### Added
 - **Physical alignment for GlyphMeshPro (B23)**: `GlyphMeshProUGUI` Left/Right now hug the rect's physical left/right edge for RTL paragraphs, like TMP (`LayoutSettings.physicalAlignment` / `TextProcessSettings.PhysicalAlignment`). Plain `UniText` is unchanged: `HorizontalAlignment.Left/Right` are the paragraph's start/end edge (now documented as such).
+- **System font fallback for any script**: code points of any script the font stack does not cover (Tamil, Bengali, Georgian, Ethiopic, Tibetan, ...) now use an installed system font found by script (Android `fonts.xml`, per-platform name hints, `NotoSans<Script>` files, then a bounded cmap scan). It logs one warning per script per session, naming the font used or saying it will render as missing glyphs. See `Documentation/SystemFontFallback.md`.
 - **System CJK font fallback** (`SystemFontFallback`, `UniTextSettings.useSystemFontFallback`, default on): CJK code points not covered by the font stack lazily use the OS CJK font. TTC face index is now honoured by `CreateFontAsset(..., faceIndex)` and shaping. See `Documentation/SystemFontFallback.md`.
 - **Phase 0 — Native MSDF pipeline.** Clean-room native font core
   (`unitext_native`) built from source for all platforms (Windows, macOS, Linux,

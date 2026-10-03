@@ -274,10 +274,10 @@ namespace LightSide
             var unicode = (uint)codepoint;
             var foundFont = fontStackAsset?.FindFontForCodepoint(unicode, searchedFontAssets);
 
-            if (foundFont == null && UniTextSettings.UseSystemFontFallback && SystemFontFallback.IsCjkCodepoint(unicode))
+            if (foundFont == null && unicode >= 0x80 && UniTextSettings.UseSystemFontFallback)
             {
-                // System CJK fallback: loads lazily on the main thread; a worker only sees loaded fonts
-                // (the main-thread prepare step pre-loads for the component text).
+                // System font fallback (any script): loads lazily on the main thread; a worker only sees
+                // loaded fonts / cached results (the main-thread prepare step pre-loads for the component text).
                 foundFont = SystemFontFallback.Resolve(unicode);
             }
 
