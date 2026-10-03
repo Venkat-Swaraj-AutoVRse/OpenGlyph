@@ -82,12 +82,24 @@ namespace LightSide
             RebuildLookup();
         }
 
-    #if UNITY_EDITOR
+        /// <summary>
+        /// Raised when the appearance changes: from the Inspector (editor) or when runtime code calls
+        /// <see cref="NotifyChanged"/>. Subscribed components rebuild. Available in players too.
+        /// </summary>
         public event Action Changed;
-        private void OnValidate()
+
+        /// <summary>Signals that this appearance (or its materials) was modified at runtime, so components using it refresh.</summary>
+        public void NotifyChanged()
         {
             RebuildLookup();
             Changed?.Invoke();
+        }
+
+    #if UNITY_EDITOR
+        // OnValidate does not exist in players; runtime code uses NotifyChanged().
+        private void OnValidate()
+        {
+            NotifyChanged();
         }
     #endif
 

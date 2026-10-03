@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace LightSide.Tests
 {
@@ -138,14 +139,14 @@ namespace LightSide.Tests
 
         // ---- (4) end-to-end: per-glyph styleIdx in ONE renderer -------------------------------
 
-        private UniText MakeText(string text, UniTextFontStack stack)
+        private UniText MakeText(string text, UniTextFontStack stack, UniText.UnifiedRendererMode mode = UniText.UnifiedRendererMode.ForceOn)
         {
             var canvasGo = new GameObject("Canvas", typeof(Canvas)); _junk.Add(canvasGo);
             canvasGo.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
             var go = new GameObject("UniText", typeof(RectTransform)); _junk.Add(go);
             go.transform.SetParent(canvasGo.transform, false);
             var t = go.AddComponent<UniText>();
-            t.SetUnifiedRendererModeForTests(UniText.UnifiedRendererMode.ForceOn);
+            t.SetUnifiedRendererModeForTests(mode);
             // Register the per-span style tags.
             t.RegisterModifier(new ModRegister { Modifier = new SpanStyleModifier(SpanStyleModifier.Kind.Outline), Rule = new OutlineParseRule() });
             t.RegisterModifier(new ModRegister { Modifier = new SpanStyleModifier(SpanStyleModifier.Kind.Underlay), Rule = new UnderlayParseRule() });
@@ -189,6 +190,57 @@ namespace LightSide.Tests
             Assert.Greater(idx.Count, 0);
             Assert.Greater(idx.Distinct().Count(), 1,
                 "the outline span's glyphs carry a different styleIdx than the plain glyphs (per-glyph row in one renderer)");
+        }
+
+        // ---- B8: legacy renderer warns (once) that span styles are not rendered ---------------------
+
+        private UniTextFontStack MakeNotoStack()
+        {
+            if (!FT.IsInitialized) FT.Initialize();
+            if (!FT.IsInitialized) Assert.Ignore("FreeType native unavailable.");
+            SharedGlyphAtlas.Clear();
+            string noto = MsdfTestUtil.FindNotoSansPath();
+            if (noto == null) Assert.Ignore("NotoSans-Regular.ttf not found.");
+            var font = UniTextFont.CreateFontAsset(File.ReadAllBytes(noto), 48);
+            if (font == null) Assert.Ignore("font asset creation failed.");
+            _junk.Add(font);
+            var stack = ScriptableObject.CreateInstance<UniTextFontStack>(); _junk.Add(stack);
+            stack.fonts.Add(font);
+            return stack;
+        }
+
+        [Test]
+        public void LegacyRenderer_SpanStyles_WarnsExactlyOncePerComponent()
+        {
+            var stack = MakeNotoStack();
+            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex(
+                @"\[OpenGlyph\] '.*' uses <outline>/<underlay>/\.\.\. span styles, which only render with the unified renderer"));
+            var t = MakeText("AB<outline=#FF0000,0.2>CD</outline>EF", stack, UniText.UnifiedRendererMode.ForceOff);
+            if (t.GetDrawnVerticesForTests().Count == 0) Assert.Ignore("Pipeline produced no geometry in this environment.");
+            // Re-render several times: must not warn again (LogAssert fails the test on any unexpected/extra warning).
+            t.Text = "AB<outline=#00FF00,0.2>CD</outline>EFG";
+            Canvas.ForceUpdateCanvases();
+            t.Text = "AB<outline=#0000FF,0.2>CD</outline>EFGH";
+            Canvas.ForceUpdateCanvases();
+            LogAssert.NoUnexpectedReceived();
+        }
+
+        [Test]
+        public void LegacyRenderer_NoSpanStyles_NoWarning()
+        {
+            var stack = MakeNotoStack();
+            var t = MakeText("ABCDEF", stack, UniText.UnifiedRendererMode.ForceOff);
+            if (t.GetDrawnVerticesForTests().Count == 0) Assert.Ignore("Pipeline produced no geometry in this environment.");
+            LogAssert.NoUnexpectedReceived();
+        }
+
+        [Test]
+        public void UnifiedRenderer_SpanStyles_NoWarning()
+        {
+            var stack = MakeNotoStack();
+            var t = MakeText("AB<outline=#FF0000,0.2>CD</outline>EF", stack, UniText.UnifiedRendererMode.ForceOn);
+            if (t.GetDrawnVerticesForTests().Count == 0) Assert.Ignore("Pipeline produced no geometry in this environment.");
+            LogAssert.NoUnexpectedReceived();
         }
     }
 }
