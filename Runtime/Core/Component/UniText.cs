@@ -1027,8 +1027,10 @@ namespace LightSide
             highlighter?.Destroy();
             DeInit();
             UnhookSpanStyle();
-            unifiedBuilder?.Dispose();
             unifiedBuilder = null;
+#if UNITY_EDITOR
+            DestroyUnifiedTestSnapshots();
+#endif
             DestroyRuntimeConfigCopies();
         }
 
@@ -1398,10 +1400,11 @@ namespace LightSide
                 // TexCoord1 lets the per-glyph data reach the shader.
                 var cv = canvas;
                 if (cv != null)
-                    cv.additionalShaderChannels |= AdditionalCanvasShaderChannels.TexCoord1
-                                                 | AdditionalCanvasShaderChannels.Normal;
+                    EnsureCanvasShaderChannels(cv);
 
-                unifiedBuilder ??= new UnifiedRenderBuilder();
+                // Stateless, process-wide builder: the merge buffers and merged meshes are shared by
+                // every component (CanvasRenderer.SetMesh copies), exactly like legacy SharedMeshes.
+                unifiedBuilder ??= UnifiedRenderBuilder.Shared;
                 unifiedRenderData ??= new List<UniTextRenderData>(2);
                 spanStyleCollector ??= new SpanStyleCollector();
                 EnsureSpanStyleHooked();
@@ -1419,6 +1422,9 @@ namespace LightSide
                 // (local ids in UV1.w). The builder maps each glyph's local id -> a shared StyleTable row.
                 unifiedBuilder.Build(renderData, meshGenerator, style, spanStyleCollector, unifiedRenderData);
                 UpdateSubMeshes(unifiedRenderData);
+#if UNITY_EDITOR
+                if (UnifiedRenderBuilder.SnapshotMeshesForTests) SnapshotUnifiedMeshesForTests();
+#endif
                 UniTextDebug.EndSample();
                 return;
             }
@@ -1481,7 +1487,12 @@ namespace LightSide
 
         private void OnSpanStyleBeforeMesh()
         {
+            spanStyleAttr = null;
             if (!UseUnifiedRenderer) return;
+            // Resolve the span-style buffer once per generation, not once per glyph (a dictionary
+            // lookup by string key per glyph). Null = the text has no span styles: every glyph keeps
+            // the generator's UV1.w = 0 (base style), so the per-glyph hook has nothing to do.
+            spanStyleAttr = Buffers?.GetAttributeData<PooledArrayAttribute<SpanStyleOverride>>(AttributeKeys.SpanStyle);
             // Use the base style resolved on the MAIN-THREAD prepare step. Synthesising it from the
             // legacy appearance reads Material properties, which is main-thread only — doing it here
             // would run on a worker in the parallel path. hasPreparedBaseStyle is set by
@@ -1496,17 +1507,19 @@ namespace LightSide
             spanStyleCollector.Reset(spanBaseStyle);
         }
 
+        private PooledArrayAttribute<SpanStyleOverride> spanStyleAttr;
+
         private void OnSpanStyleGlyph()
         {
+            var attr = spanStyleAttr;
+            if (attr == null) return; // no span styles (or legacy path): UV1.w stays 0 = base style
             if (!UseUnifiedRenderer) return;
             var gen = UniTextMeshGenerator.Current;
             if (gen == null) return;
             if (spanStyleCollector == null) { spanStyleCollector = new SpanStyleCollector(); spanStyleCollector.Reset(spanBaseStyle); }
 
             // Read the accumulated per-span override for this glyph's cluster from the shared buffer.
-            var attr = Buffers?.GetAttributeData<PooledArrayAttribute<SpanStyleOverride>>(AttributeKeys.SpanStyle);
             int localId = 0;
-            if (attr != null)
             {
                 var buf = attr.buffer.data;
                 int cluster = gen.currentCluster;
@@ -1792,6 +1805,33 @@ namespace LightSide
                 foreach (var v in uv1) result.Add((int)(v.w + 0.5f));
             }
             return result;
+        }
+
+        // EDITOR/TEST: private copies of the shared merged meshes (see UnifiedRenderBuilder.SnapshotMeshesForTests).
+        private List<Mesh> unifiedTestSnapshots;
+
+        private void SnapshotUnifiedMeshesForTests()
+        {
+            if (unifiedRenderData == null) return;
+            unifiedTestSnapshots ??= new List<Mesh>();
+            for (int i = 0; i < unifiedRenderData.Count; i++)
+            {
+                var rd = unifiedRenderData[i];
+                if (rd.mesh == null) continue;
+                while (unifiedTestSnapshots.Count <= i) unifiedTestSnapshots.Add(null);
+                if (unifiedTestSnapshots[i] != null) DestroyImmediate(unifiedTestSnapshots[i]);
+                var copy = Instantiate(rd.mesh);
+                copy.hideFlags = HideFlags.DontSave;
+                unifiedTestSnapshots[i] = copy;
+                unifiedRenderData[i] = new UniTextRenderData(copy, rd.materials, rd.texture, rd.fontId);
+            }
+        }
+
+        private void DestroyUnifiedTestSnapshots()
+        {
+            if (unifiedTestSnapshots == null) return;
+            foreach (var m in unifiedTestSnapshots) if (m != null) DestroyImmediate(m);
+            unifiedTestSnapshots.Clear();
         }
 
         /// <summary>EDITOR/TEST: the (mesh, material, texture) tuples this component built for the
