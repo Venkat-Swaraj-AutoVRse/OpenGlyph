@@ -21,6 +21,7 @@ namespace LightSide
         private SerializedProperty fontSizeProp;
         private SerializedProperty baseDirectionProp;
         private SerializedProperty wordWrapProp;
+        private SerializedProperty overflowProp;
         private SerializedProperty horizontalAlignmentProp;
         private SerializedProperty verticalAlignmentProp;
         private SerializedProperty overEdgeProp;
@@ -61,6 +62,7 @@ namespace LightSide
             fontSizeProp = serializedObject.FindProperty("fontSize");
             baseDirectionProp = serializedObject.FindProperty("baseDirection");
             wordWrapProp = serializedObject.FindProperty("wordWrap");
+            overflowProp = serializedObject.FindProperty("overflow");
             horizontalAlignmentProp = serializedObject.FindProperty("horizontalAlignment");
             verticalAlignmentProp = serializedObject.FindProperty("verticalAlignment");
             overEdgeProp = serializedObject.FindProperty("overEdge");
@@ -117,6 +119,7 @@ namespace LightSide
             BeginSection("Layout");
             DrawField(baseDirectionProp, "Base Direction", ut => ut.BaseDirection, (ut, v) => ut.BaseDirection = v);
             DrawField(wordWrapProp, "Word Wrap", ut => ut.WordWrap, (ut, v) => ut.WordWrap = v);
+            DrawField(overflowProp, "Overflow", ut => ut.Overflow, (ut, v) => ut.Overflow = v);
             EditorGUILayout.Space(4);
             DrawAlignmentButtons();
             EditorGUILayout.Space(4);

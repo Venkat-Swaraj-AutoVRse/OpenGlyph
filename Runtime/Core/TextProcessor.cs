@@ -50,6 +50,13 @@ namespace LightSide
         public bool enableWordWrap;
 
         /// <summary>
+        /// Vertical overflow handling applied after line breaking (<see cref="TextOverflow.Truncate"/> and
+        /// <see cref="TextOverflow.Ellipsis"/> drop lines whose bottom would exceed <see cref="MaxHeight"/>).
+        /// Default <see cref="TextOverflow.Overflow"/> leaves the layout untouched.
+        /// </summary>
+        public TextOverflow Overflow;
+
+        /// <summary>
         /// Gets or sets the maximum width for text layout.
         /// </summary>
         /// <value>
@@ -194,7 +201,7 @@ namespace LightSide
     /// <seealso href="https://unicode.org/reports/tr9/">UAX #9: Unicode Bidirectional Algorithm</seealso>
     /// <seealso href="https://unicode.org/reports/tr14/">UAX #14: Unicode Line Breaking Algorithm</seealso>
     /// <seealso href="https://unicode.org/reports/tr24/">UAX #24: Unicode Script Property</seealso>
-    public sealed class TextProcessor
+    public sealed partial class TextProcessor
     {
         private static BidiEngine BidiEngine => SharedPipelineComponents.BidiEngine;
         private static ScriptAnalyzer ScriptAnalyzer => SharedPipelineComponents.ScriptAnalyzer;
@@ -301,6 +308,7 @@ namespace LightSide
         private float lastLayoutMaxHeight = -1;
         private HorizontalAlignment lastLayoutHAlign;
         private VerticalAlignment lastLayoutVAlign;
+        private TextOverflow lastLayoutOverflow;
         private bool hasValidPositionedGlyphs;
 
         private TextProcessSettings lastSettings;
@@ -416,6 +424,7 @@ namespace LightSide
         {
             hasValidFirstPassData = false;
             hasValidGlyphsInAtlas = false;
+            ellipsisResolved = false;
             InvalidateLayoutData();
         }
 
@@ -468,7 +477,8 @@ namespace LightSide
             UniTextDebug.Increment(ref UniTextDebug.TextProcessor_EnsureShapingCount);
 
             if (hasValidFirstPassData) return;
-            
+            ellipsisResolved = false;
+
             UniTextDebug.BeginSample("TextProcessor.EnsureShaping");
 
             buf.Reset();
@@ -530,14 +540,16 @@ namespace LightSide
         /// otherwise, <see langword="false"/>.
         /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool CanReusePositions(float maxHeight, HorizontalAlignment hAlign, VerticalAlignment vAlign)
+        public bool CanReusePositions(float maxHeight, HorizontalAlignment hAlign, VerticalAlignment vAlign,
+            TextOverflow overflow = TextOverflow.Overflow)
         {
             if (!hasValidPositionedGlyphs) return false;
 
             var heightMatches = (float.IsInfinity(lastLayoutMaxHeight) && float.IsInfinity(maxHeight)) ||
                                 Math.Abs(lastLayoutMaxHeight - maxHeight) < 0.001f;
 
-            return heightMatches && lastLayoutHAlign == hAlign && lastLayoutVAlign == vAlign;
+            return heightMatches && lastLayoutHAlign == hAlign && lastLayoutVAlign == vAlign &&
+                   lastLayoutOverflow == overflow;
         }
 
         /// <summary>
@@ -587,7 +599,8 @@ namespace LightSide
         public void EnsurePositions(TextProcessSettings settings)
         {
             if (!hasValidLinesData) return;
-            if (CanReusePositions(settings.MaxHeight, settings.HorizontalAlignment, settings.VerticalAlignment)) return;
+            if (CanReusePositions(settings.MaxHeight, settings.HorizontalAlignment, settings.VerticalAlignment,
+                    settings.Overflow)) return;
 
             UniTextDebug.BeginSample("TextProcessor.EnsurePositions");
 
@@ -598,6 +611,7 @@ namespace LightSide
             lastLayoutMaxHeight = settings.MaxHeight;
             lastLayoutHAlign = settings.HorizontalAlignment;
             lastLayoutVAlign = settings.VerticalAlignment;
+            lastLayoutOverflow = settings.Overflow;
             hasValidPositionedGlyphs = true;
 
             LayoutComplete?.Invoke();
@@ -1672,7 +1686,8 @@ namespace LightSide
         {
             UniTextDebug.BeginSample("TextProcessor.LayoutText");
             buf.positionedGlyphs.count = 0;
-            buf.positionedGlyphs.EnsureCapacity(buf.shapedGlyphs.count);
+            var wantsEllipsis = settings.Overflow == TextOverflow.Ellipsis;
+            buf.positionedGlyphs.EnsureCapacity(buf.shapedGlyphs.count + (wantsEllipsis ? EllipsisSlotCount : 0));
 
             ComputeLineHeights(settings.fontSize, settings.LineSpacing, settings.LeadingDistribution);
 
@@ -1686,17 +1701,43 @@ namespace LightSide
             Layout.SetLayoutSettings(settings.layout);
             Layout.SetEffectiveLineHeights(cachedEffectiveFirstLineHeight, cachedEffectiveLastLineHeight);
 
+            // Vertical overflow (Truncate / Ellipsis): lines past the last one that fits are simply not
+            // handed to the layout. The cached line/run data is never shrunk, so a later relayout with a
+            // different height still sees every line.
+            var lineCount = buf.lines.count;
+            var visibleLines = lineCount;
+            var layoutHeight = cachedRawHeight;
+            if (settings.Overflow is TextOverflow.Truncate or TextOverflow.Ellipsis)
+            {
+                visibleLines = FitVisibleLineCount(settings, out layoutHeight, out var lastLineHeight);
+                if (visibleLines < lineCount)
+                    Layout.SetEffectiveLineHeights(cachedEffectiveFirstLineHeight, lastLineHeight);
+            }
+
+            var runsLength = buf.orderedRuns.count;
+            var glyphsLength = buf.shapedGlyphs.count;
             var glyphCnt = buf.positionedGlyphs.count;
-            Layout.Layout(
-                buf.lines.Span,
-                buf.orderedRuns.Span,
-                buf.shapedGlyphs.Span,
-                buf.perLineAdvances.Span,
-                cachedRawHeight,
-                buf.positionedGlyphs.data, ref glyphCnt,
-                out resultWidth, out resultHeight,
-                buf.codepoints.Span);
-            buf.positionedGlyphs.count = glyphCnt;
+            try
+            {
+                if (wantsEllipsis && visibleLines < lineCount)
+                    BeginEllipsisOnLine(visibleLines - 1, settings, ref runsLength, ref glyphsLength);
+
+                Layout.Layout(
+                    buf.lines.data.AsSpan(0, visibleLines),
+                    buf.orderedRuns.data.AsSpan(0, runsLength),
+                    buf.shapedGlyphs.data.AsSpan(0, glyphsLength),
+                    buf.perLineAdvances.Span,
+                    layoutHeight,
+                    buf.positionedGlyphs.data, ref glyphCnt,
+                    out resultWidth, out resultHeight,
+                    buf.codepoints.Span);
+                buf.positionedGlyphs.count = glyphCnt;
+            }
+            finally
+            {
+                // Always restore the patched line/runs, even if layout throws.
+                EndEllipsisOnLine();
+            }
 
             UniTextDebug.EndSample();
         }
