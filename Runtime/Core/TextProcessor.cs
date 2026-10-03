@@ -709,6 +709,7 @@ namespace LightSide
             buf.shapingFontSize = settings.fontSize;
             indentSpans.Clear();
             spanFonts.Clear();
+            ClearTypographySpans();
 
             UniTextDebug.BeginSample("TextProcessor.Parse");
             Parse(text);
@@ -1457,6 +1458,7 @@ namespace LightSide
             var cp = buf.codepoints.Span;
             var runs = buf.runs;
             var smcpFlags = buf.GetAttributeData<PooledArrayAttribute<byte>>(AttributeKeys.SmallCapsFeature)?.buffer.data;
+            SortFeatureSpans();
 
             for (var i = 0; i < runCnt; i++)
             {
@@ -1470,6 +1472,8 @@ namespace LightSide
                 var featureCount = smcpFlags != null ? BuildSmallCapsFeatures(smcpFlags, run.range) : 0;
                 if (DisableLatinLigatures && IsLigatureFreeScript(run.script))
                     featureCount = AppendNoLigatureFeatures(featureCount, run.range);
+                // User features last, so <feature>/FontFeatures override the TMP-parity defaults above.
+                featureCount = AppendUserFeatures(featureCount, run.range);
 
                 var result = Shaper.Shape(
                     cp,

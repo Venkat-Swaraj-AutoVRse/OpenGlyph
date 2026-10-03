@@ -147,6 +147,34 @@ namespace LightSide
         private float maxFontSize = 72f;
 
         [SerializeField]
+        [Tooltip("Auto Size fit step in points. 0 = continuous (any size between Min and Max). " +
+                 "With a step (e.g. 1 or 0.5) the fitted size is rounded down to a multiple of it, so labels " +
+                 "that fit at similar sizes share the same size.")]
+        private float autoSizeStep;
+
+        [SerializeField]
+        [Tooltip("Inner padding (x = left, y = top, z = right, w = bottom) between the RectTransform edge and " +
+                 "the text. Insets layout, wrapping, the overflow clip and link hit testing; added to the " +
+                 "preferred size.")]
+        private Vector4 padding;
+
+        [SerializeField]
+        [Tooltip("BCP 47 language of the text (e.g. ja, ko, zh-Hans, zh-Hant, zh-HK, sr, tr). Empty = unset. " +
+                 "Selects language-specific glyph forms (OpenType locl) and the CJK system font face. " +
+                 "<lang=…> spans override it.")]
+        private string language = "";
+
+        [SerializeField]
+        [Tooltip("OpenType features for the whole text, e.g. tnum, onum, smcp, ss01, cv01, liga=0, -kern. " +
+                 "<feature=…> spans override them on their range.")]
+        private List<string> fontFeatures = new();
+
+        [SerializeField]
+        [Tooltip("Report the minimum content width (the widest unbreakable word, at Min Size when auto-sizing) " +
+                 "as ILayoutElement.minWidth, so layout groups never squeeze the text below it. Off = 0.")]
+        private bool contentMinWidth;
+
+        [SerializeField]
         [Tooltip("Modifier/rule pairs that define how markup is parsed and applied (e.g., color, bold, links).")]
         private StyledList<ModRegister> modRegisters = new();
 
@@ -1059,7 +1087,7 @@ namespace LightSide
             // Undo, prefab revert and the Inspector write the serialized overflow field directly,
             // bypassing the setter: re-lay out and re-apply the clip.
             if (!isActiveAndEnabled) return;
-            SetDirty(DirtyFlags.Layout);
+            SetDirty(OnValidateTypography() ? DirtyFlags.Text : DirtyFlags.Layout);
             RefreshOverflowClip();
         }
 #endif
@@ -1321,6 +1349,7 @@ namespace LightSide
                 Cat.Meow("[UniText] FontProvider created", this);
             }
 
+            ConfigureTypography(textProcessor);
             ConfigureTextProcessor(textProcessor);
 
             UniTextDebug.EndSample();
