@@ -216,6 +216,25 @@ namespace LightSide.Tests
                     $"GlyphMeshPro white text peaked at {peak:P0} luminance at 30pt — it must reach " +
                     "near-white (>=98%) like TMP. A dim peak at small sizes is the grey-text bug " +
                     "(SDF coverage ramp not saturating at small font sizes).");
+
+                // Also verify a LARGE size still saturates (the shared uber shader scale change must be
+                // correct across the size range, not only at small sizes). Re-use the same component.
+                c.fontSize = 120f; c.text = "Big";
+                c.ForceMeshUpdate(ignoreActiveState: true);
+                Canvas.ForceUpdateCanvases(); cam.Render();
+                RenderTexture.active = rt;
+                var tex2 = new Texture2D(512, 256, TextureFormat.RGBA32, false);
+                tex2.ReadPixels(new Rect(0, 0, 512, 256), 0, 0); tex2.Apply(); RenderTexture.active = prev;
+                float peakBig = 0f; int fgBig = 0;
+                foreach (var p in tex2.GetPixels())
+                {
+                    float lum = 0.299f * p.r + 0.587f * p.g + 0.114f * p.b;
+                    if (p.r + p.g + p.b > 0.6f) { fgBig++; if (lum > peakBig) peakBig = lum; }
+                }
+                Object.DestroyImmediate(tex2);
+                Debug.Log($"[Brightness] GMP large white text peak={peakBig:F3} fg={fgBig}");
+                Assert.GreaterOrEqual(peakBig, 0.98f,
+                    $"GlyphMeshPro white text peaked at {peakBig:P0} at 120pt — large text must also be white.");
             }
             finally
             {

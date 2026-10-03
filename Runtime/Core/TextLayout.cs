@@ -262,16 +262,22 @@ namespace LightSide
                 }
 
                 // ---- Justification (Justified/Flush) --------------------------------------------
-                // Distribute the horizontal slack across inter-word whitespace so the line fills the
-                // available width. Justified skips the LAST line of a paragraph (a line that ends the
-                // text or ends at a hard newline); Flush justifies every line. The slack may be
-                // NEGATIVE: TMP's wrap test keeps a word on a justified line that overruns the box by
-                // up to 5% (see LineBreaker widthTolerance), then justification COMPRESSES the gaps to
-                // pull it back inside the box — which is why "quickly" stays on TMP's line 2 instead of
-                // wrapping. We mirror that: distribute (availableWidth - lineWidth)/gaps whether that is
-                // positive (spread) or negative (compress). Requires finite width, an LTR line, and at
-                // least one whitespace gap.
-                float justifyExtraPerGap = 0f;
+                // Match TMP: the line's horizontal slack is split between inter-word spacing and
+                // character spacing by wordWrappingRatios (TMP default 0.4). Spaces absorb (1-ratio)=60%
+                // of the slack spread across the whitespace gaps; visible glyphs absorb ratio=40% spread
+                // across every visible glyph. Slack may be NEGATIVE (compress) because the LineBreaker
+                // keeps a near-fitting word on a justified line that overruns the box by up to 5% (so
+                // "quickly" stays on line 2 like TMP) — the split then compresses word AND character
+                // spacing together, so spaces never collapse to zero the way a word-gap-only compress
+                // did. A hard FLOOR additionally caps space compression at 30% (a space keeps >=70% of
+                // its natural width); if the split would shrink a space further, the excess is left as
+                // residual overflow (always within the 5% tolerance) rather than collapsing the gap.
+                // Justified skips the paragraph's last line; Flush justifies every line (so Flush also
+                // spreads the last line's characters, matching TMP's "t o  v e x" look).
+                const float WordWrappingRatio = 0.4f;   // TMP m_wordWrappingRatios default
+                const float MinSpaceFraction = 0.70f;   // a space keeps at least 70% of its advance
+                float justifyPerSpace = 0f;   // extra advance added at each whitespace glyph
+                float justifyPerGlyph = 0f;   // extra advance added at each visible (non-space) glyph
                 if ((hAlign == HorizontalAlignment.Justified || hAlign == HorizontalAlignment.Flush)
                     && hasFiniteWidth && !isRtlLine)
                 {
@@ -280,9 +286,28 @@ namespace LightSide
                     bool justifyThisLine = hAlign == HorizontalAlignment.Flush || !isLastLineOfParagraph;
                     if (justifyThisLine)
                     {
-                        int gaps = CountWhitespaceGaps(in line, runs, glyphs, codepoints);
-                        if (gaps > 0)
-                            justifyExtraPerGap = (availableWidth - lineWidth) / gaps;
+                        CountJustifyTargets(in line, runs, glyphs, codepoints, glyphScale,
+                            out int spaces, out int visibleGlyphs, out float minSpaceAdvance);
+                        float gap = availableWidth - lineWidth; // + = spread, - = compress
+                        if (spaces > 0 || visibleGlyphs > 0)
+                        {
+                            float spaceShare = spaces > 0 ? gap * (1f - WordWrappingRatio) : 0f;
+                            float glyphShare = visibleGlyphs > 0 ? gap * WordWrappingRatio : 0f;
+                            // When there are no visible glyphs to carry the char-spacing share (or no
+                            // spaces), route the whole gap to whichever target exists.
+                            if (visibleGlyphs == 0) spaceShare = gap;
+                            if (spaces == 0) glyphShare = gap;
+
+                            justifyPerSpace = spaces > 0 ? spaceShare / spaces : 0f;
+                            justifyPerGlyph = visibleGlyphs > 0 ? glyphShare / visibleGlyphs : 0f;
+
+                            // Floor: never shrink a space below MinSpaceFraction of its natural advance.
+                            if (justifyPerSpace < 0f && spaces > 0)
+                            {
+                                float maxShrink = minSpaceAdvance * (1f - MinSpaceFraction);
+                                if (-justifyPerSpace > maxShrink) justifyPerSpace = -maxShrink;
+                            }
+                        }
                     }
                 }
 
@@ -325,22 +350,17 @@ namespace LightSide
                             bottom = boundsBottom
                         };
                         x += advanceScaled;
-                        // Justification: widen (positive) or compress (negative) whitespace gaps so the
-                        // line fills the box. On compression, clamp so a space never shrinks below a
-                        // readable floor of its own width — TMP compresses mostly via character-width
-                        // scaling, so collapsing word gaps to zero (letters touching) is not parity.
-                        // Any residual stays within the 5% wrap tolerance rather than collapsing a gap.
-                        if (justifyExtraPerGap != 0f && IsWhitespaceCluster(glyph.cluster, codepoints))
+                        // Apply the justification split: whitespace gaps take the word-spacing share,
+                        // every other (visible) glyph takes the character-spacing share. This both
+                        // spreads (positive gap) and compresses (negative gap) word AND letter spacing
+                        // together, exactly like TMP's wordWrappingRatios distribution.
+                        if (IsWhitespaceCluster(glyph.cluster, codepoints))
                         {
-                            var applied = justifyExtraPerGap;
-                            if (applied < 0f)
-                            {
-                                // Keep at least MinSpaceFraction of the space's natural advance.
-                                const float MinSpaceFraction = 0.35f;
-                                var minApplied = -(advanceScaled * (1f - MinSpaceFraction));
-                                if (applied < minApplied) applied = minApplied;
-                            }
-                            x += applied;
+                            x += justifyPerSpace;
+                        }
+                        else if (justifyPerGlyph != 0f)
+                        {
+                            x += justifyPerGlyph;
                         }
                     }
                 }
@@ -438,34 +458,46 @@ namespace LightSide
                 || cp == 0x205F || cp == 0x3000;
         }
 
-        /// <summary>Counts the inter-word whitespace gaps on a line (one per whitespace glyph). This is
-        /// the number of gaps the leftover slack is spread across for justification.</summary>
-        private static int CountWhitespaceGaps(in TextLine line, ReadOnlySpan<ShapedRun> runs,
-            ReadOnlySpan<ShapedGlyph> glyphs, ReadOnlySpan<int> codepoints)
+        /// <summary>Counts the justification targets on a line: inter-word whitespace gaps (one per
+        /// whitespace glyph, excluding a trailing wrap space) and visible (non-whitespace) glyphs, plus
+        /// the smallest whitespace advance (scaled) — used to floor how far a space may compress.</summary>
+        private static void CountJustifyTargets(in TextLine line, ReadOnlySpan<ShapedRun> runs,
+            ReadOnlySpan<ShapedGlyph> glyphs, ReadOnlySpan<int> codepoints, float glyphScale,
+            out int spaces, out int visibleGlyphs, out float minSpaceAdvance)
         {
-            if (codepoints.IsEmpty) return 0;
-            int gaps = 0;
+            spaces = 0; visibleGlyphs = 0; minSpaceAdvance = float.MaxValue;
+            if (codepoints.IsEmpty) { minSpaceAdvance = 0f; return; }
             int runEnd = line.runStart + line.runCount;
             for (int r = line.runStart; r < runEnd; r++)
             {
                 ref readonly var run = ref runs[r];
                 int gEnd = run.glyphStart + run.glyphCount;
                 for (int g = run.glyphStart; g < gEnd; g++)
+                {
                     if (IsWhitespaceCluster(glyphs[g].cluster, codepoints))
-                        gaps++;
+                    {
+                        spaces++;
+                        float adv = glyphs[g].advanceX * glyphScale;
+                        if (adv < minSpaceAdvance) minSpaceAdvance = adv;
+                    }
+                    else visibleGlyphs++;
+                }
             }
             // A trailing space at the line's wrap point should not stretch the visible line end; drop
             // one gap when the line's last glyph is whitespace so the last word still lands at the edge.
-            if (gaps > 0 && runEnd > line.runStart)
+            if (spaces > 0 && runEnd > line.runStart)
             {
                 ref readonly var lastRun = ref runs[runEnd - 1];
                 if (lastRun.glyphCount > 0)
                 {
                     int lastG = lastRun.glyphStart + lastRun.glyphCount - 1;
-                    if (IsWhitespaceCluster(glyphs[lastG].cluster, codepoints)) gaps--;
+                    if (IsWhitespaceCluster(glyphs[lastG].cluster, codepoints)) spaces--;
                 }
             }
-            return gaps;
+            // TMP spreads the character-spacing share across visibleCount-1 glyphs (the last glyph on
+            // the line gets no trailing advance); mirror that so the final glyph lands at the edge.
+            if (visibleGlyphs > 1) visibleGlyphs -= 1;
+            if (minSpaceAdvance == float.MaxValue) minSpaceAdvance = 0f;
         }
 
         /// <summary>True when the line ends at a hard line break (newline) — i.e. it is the last line
