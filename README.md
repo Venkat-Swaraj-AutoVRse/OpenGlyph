@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="Documentation/Images/logo/openglyph-mark.svg" alt="OpenGlyph logo" width="120">
+<img src=".github/assets/logo/openglyph-mark.svg" alt="OpenGlyph logo" width="120">
 
 # OpenGlyph
 
@@ -11,13 +11,13 @@
 [![Unicode 17.0](https://img.shields.io/badge/Unicode-17.0-blue)](Conformance~/README.md)
 [![Conformance](https://img.shields.io/badge/conformance-1%2C042%2C587%20passed-brightgreen)](#unicode-conformance)
 
-<img src="Documentation/Images/intro/openglyph_intro.gif" alt="OpenGlyph intro animation: multilingual text, rich-text styles and layout rendered in Unity" width="960">
+<img src=".github/assets/intro/openglyph_intro.gif" alt="OpenGlyph intro animation: multilingual text, rich-text styles and layout rendered in Unity" width="960">
 
-[▶ Full-quality video (MP4)](Documentation/Images/intro/openglyph_intro.mp4)
+[▶ Full-quality video (MP4)](.github/assets/intro/openglyph_intro.mp4)
 
 </div>
 
-![OpenGlyph rendering English, Vietnamese, Russian, Greek, Arabic, Hebrew, Hindi, Thai, Khmer, Myanmar, mixed bidirectional text and emoji](Documentation/Images/showcase/hero.png)
+![OpenGlyph rendering English, Vietnamese, Russian, Greek, Arabic, Hebrew, Hindi, Thai, Khmer, Myanmar, mixed bidirectional text and emoji](.github/assets/showcase/hero.png)
 
 OpenGlyph is an open-source (MIT) text engine for Unity, forked from UniText 1.0. Text is shaped by
 [HarfBuzz](https://harfbuzz.github.io/), laid out with Unicode-conformant BiDi and line breaking,
@@ -42,7 +42,7 @@ and rendered as SDF/MSDF through Unity's Canvas — including in VR.
 
 ## Drop-in TextMesh Pro API — GlyphMeshProUGUI
 
-![GlyphMeshProUGUI: TextMesh Pro-style C# code and the text it renders](Documentation/Images/showcase/glyphmeshpro.png)
+![GlyphMeshProUGUI: TextMesh Pro-style C# code and the text it renders](.github/assets/showcase/glyphmeshpro.png)
 
 `OpenGlyph.GlyphMeshProUGUI` is a Canvas text component whose members are named after
 TextMesh Pro's, so existing TMP code usually migrates by changing the `using` and the type name:
@@ -86,9 +86,9 @@ TMP font assets are not used — fonts are `UniTextFont` assets. Full mapping:
 
 | Rich text | Layout |
 |---|---|
-| ![Gradients, outline, drop shadow, bold/italic/underline/strike, color, size, superscript, subscript, link and character spacing](Documentation/Images/showcase/styles.png) | ![Justified word wrap, auto-size, Truncate/Ellipsis/Clip overflow and right-aligned Arabic and Hebrew paragraphs](Documentation/Images/showcase/layout.png) |
+| ![Gradients, outline, drop shadow, bold/italic/underline/strike, color, size, superscript, subscript, link and character spacing](.github/assets/showcase/styles.png) | ![Justified word wrap, auto-size, Truncate/Ellipsis/Clip overflow and right-aligned Arabic and Hebrew paragraphs](.github/assets/showcase/layout.png) |
 | **SDF sharpness (OpenGlyph vs TextMesh Pro)** | **On device: Meta Quest 3S, both eyes** |
-| ![The word Crisp at 12 to 200 px in OpenGlyph and TextMesh Pro](Documentation/Images/showcase/sharpness.png) | ![Stereo capture from a Quest 3S showing Latin, Vietnamese, Cyrillic, Greek, Arabic, Hebrew, Devanagari, Thai, CJK, emoji, Khmer and Myanmar rows](Documentation/Images/quest3s_stereo_scripts.png) |
+| ![The word Crisp at 12 to 200 px in OpenGlyph and TextMesh Pro](.github/assets/showcase/sharpness.png) | ![Stereo capture from a Quest 3S showing Latin, Vietnamese, Cyrillic, Greek, Arabic, Hebrew, Devanagari, Thai, CJK, emoji, Khmer and Myanmar rows](.github/assets/quest3s_stereo_scripts.png) |
 
 In the Quest capture the left column is TextMesh Pro with its default font (no fallback assets), so
 non-Latin rows show missing-glyph boxes; the other columns are OpenGlyph (legacy, unified) and
