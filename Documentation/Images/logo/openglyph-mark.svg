@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="512" height="512" role="img" aria-label="OpenGlyph">
+  <defs>
+    <linearGradient id="og" x1="16" y1="16" x2="112" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0A84FF"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <!-- the glyph body as a thick stroke; the outline is that body minus a slightly thinner copy -->
+    <g id="body" fill="none" stroke-linecap="round">
+      <circle cx="56" cy="52" r="22"/>
+      <path d="M 84 30 V 84 C 84 104 70 112 54 112 C 44 112 36 109 31 103"/>
+    </g>
+    <mask id="contour" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+      <use href="#body" stroke="#fff" stroke-width="16"/>
+      <use href="#body" stroke="#000" stroke-width="10"/>
+    </mask>
+  </defs>
+
+  <!-- faint filled body -->
+  <use href="#body" stroke="url(#og)" stroke-width="16" opacity="0.22"/>
+  <!-- crisp contour (3 px on each side of the body) -->
+  <rect width="128" height="128" fill="url(#og)" mask="url(#contour)"/>
+
+  <!-- tangent handles: outer bowl (r=30, kappa*r≈16.6), inner bowl (r=14, ≈7.7) -->
+  <g stroke="#94A3B8" stroke-width="1.25" fill="none" stroke-linecap="round">
+    <line x1="39.4" y1="22" x2="72.6" y2="22"/>
+    <line x1="26" y1="35.4" x2="26" y2="68.6"/>
+    <line x1="39.4" y1="82" x2="72.6" y2="82"/>
+    <line x1="48.3" y1="38" x2="63.7" y2="38"/>
+    <line x1="92" y1="84" x2="92" y2="103"/>
+    <line x1="54" y1="120" x2="73" y2="120"/>
+  </g>
+
+  <!-- off-curve (control) points -->
+  <g fill="#FFFFFF" stroke="#0A84FF" stroke-width="1.5">
+    <circle cx="39.4" cy="22" r="3"/><circle cx="72.6" cy="22" r="3"/>
+    <circle cx="26" cy="35.4" r="3"/><circle cx="26" cy="68.6" r="3"/>
+    <circle cx="39.4" cy="82" r="3"/><circle cx="72.6" cy="82" r="3"/>
+    <circle cx="48.3" cy="38" r="3"/><circle cx="63.7" cy="38" r="3"/>
+    <circle cx="92" cy="103" r="3"/><circle cx="73" cy="120" r="3"/>
+  </g>
+
+  <!-- on-curve points -->
+  <g fill="#FFFFFF" stroke="#0A84FF" stroke-width="1.5">
+    <rect x="52.5" y="18.5" width="7" height="7"/>
+    <rect x="22.5" y="48.5" width="7" height="7"/>
+    <rect x="52.5" y="78.5" width="7" height="7"/>
+    <rect x="52.5" y="34.5" width="7" height="7"/>
+    <rect x="88.5" y="23.5" width="7" height="7"/>
+    <rect x="88.5" y="80.5" width="7" height="7"/>
+    <rect x="50.5" y="116.5" width="7" height="7"/>
+  </g>
+</svg>
