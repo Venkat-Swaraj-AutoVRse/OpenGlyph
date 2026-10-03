@@ -68,6 +68,61 @@ namespace LightSide
         /// <summary>Gets the appearance settings for font materials.</summary>
         public UniTextAppearance Appearance { get; set; }
 
+        // ---- Threading: main-thread material prepare ------------------------------------------------
+        // Resolving materials (UniTextAppearance.GetMaterials) can Shader.Find / new Material and write
+        // a non-thread-safe cache, so it must happen on the main thread. In the parallel pipeline,
+        // PrepareMaterials() is called on the main-thread prepare step and fills preparedMaterials for
+        // every registered font; GetMaterials(fontId) then serves worker-thread mesh generation from
+        // this cache with zero Unity calls. A cache MISS on a worker still falls through to the live
+        // resolver, which trips UniTextThreadGuard — surfacing any font that escaped the prepare.
+        private readonly Dictionary<int, Material[]> preparedMaterials = new();
+        private bool materialsPrepared;
+
+        /// <summary>
+        /// MAIN-THREAD ONLY. Resolves and caches the materials for every currently-registered font
+        /// (main, emoji, and all fallbacks registered during the first pass), so the subsequent
+        /// parallel mesh-generation pass can read them off the main thread. Idempotent per rebuild;
+        /// clears and refills so a font registered since the last prepare is included.
+        /// </summary>
+        internal void PrepareMaterials()
+        {
+            UniTextThreadGuard.AssertMainThread("UniTextFontProvider.PrepareMaterials");
+
+            preparedMaterials.Clear();
+            // Main font.
+            preparedMaterials[mainFontId] = ResolveMaterialsLive(mainFontId);
+            // Every registered fallback / styled face discovered so far (itemization during the first
+            // pass registers each fallback it uses, so by WillRender they are all present here).
+            foreach (var kvp in fontAssets)
+            {
+                if (!preparedMaterials.ContainsKey(kvp.Key))
+                    preparedMaterials[kvp.Key] = ResolveMaterialsLive(kvp.Key);
+            }
+            // Emoji (its own material, resolved through the appearance's EmojiFont branch).
+            if (!preparedMaterials.ContainsKey(EmojiFont.FontId))
+                preparedMaterials[EmojiFont.FontId] = ResolveMaterialsLive(EmojiFont.FontId);
+
+            materialsPrepared = true;
+        }
+
+        /// <summary>Clears the prepared-material cache (serial path, or when the appearance changes).</summary>
+        internal void InvalidatePreparedMaterials()
+        {
+            preparedMaterials.Clear();
+            materialsPrepared = false;
+        }
+
+        // The live resolver — the only place that actually touches the appearance's Unity-API path.
+        private Material[] ResolveMaterialsLive(int fontId)
+        {
+            var appearance = Appearance;
+#if UNITY_EDITOR
+            if (appearance == null) appearance = UniTextSettings.DefaultAppearance;
+#endif
+            if (appearance == null) return null;
+            return appearance.GetMaterials(GetFontAsset(fontId));
+        }
+
 
         /// <summary>
         /// Initializes the font provider with the specified fonts and appearance.
@@ -322,17 +377,21 @@ namespace LightSide
         /// <returns>Materials array. Single for normal, two for 2-pass (outline + face).</returns>
         public Material[] GetMaterials(int fontId)
         {
+            // Parallel path: during mesh generation this runs on a worker thread, so it must NOT touch
+            // Unity. Serve from the main-thread-prepared cache. A hit is lock-free: preparedMaterials is
+            // only mutated on the main-thread prepare step, which completes-happens-before the worker
+            // dispatch (the barrier in UniTextWorkerPool.Execute), so the dictionary is read-only here.
+            if (materialsPrepared && preparedMaterials.TryGetValue(fontId, out var prepped))
+                return prepped;
+
+            // Miss (serial path, or a font that escaped PrepareMaterials): resolve live. On a worker
+            // this trips UniTextThreadGuard via the appearance, which is exactly the intended signal.
             // A component whose legacy appearance was cleared (e.g. by the migration tool's
             // "Clear the legacy appearance reference" option) has Appearance == null. Fall back to
             // the project default appearance; with none, return null, which the mesh generator
             // already treats as "no materials" (the unified path never reads these).
             // UniTextSettings.DefaultAppearance is editor-only, so players get no fallback.
-            var appearance = Appearance;
-#if UNITY_EDITOR
-            if (appearance == null) appearance = UniTextSettings.DefaultAppearance;
-#endif
-            if (appearance == null) return null;
-            return appearance.GetMaterials(GetFontAsset(fontId));
+            return ResolveMaterialsLive(fontId);
         }
 
         /// <summary>
