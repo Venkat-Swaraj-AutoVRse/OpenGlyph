@@ -325,9 +325,23 @@ namespace LightSide
                             bottom = boundsBottom
                         };
                         x += advanceScaled;
-                        // Justification: widen whitespace gaps so the line fills the box.
+                        // Justification: widen (positive) or compress (negative) whitespace gaps so the
+                        // line fills the box. On compression, clamp so a space never shrinks below a
+                        // readable floor of its own width — TMP compresses mostly via character-width
+                        // scaling, so collapsing word gaps to zero (letters touching) is not parity.
+                        // Any residual stays within the 5% wrap tolerance rather than collapsing a gap.
                         if (justifyExtraPerGap != 0f && IsWhitespaceCluster(glyph.cluster, codepoints))
-                            x += justifyExtraPerGap;
+                        {
+                            var applied = justifyExtraPerGap;
+                            if (applied < 0f)
+                            {
+                                // Keep at least MinSpaceFraction of the space's natural advance.
+                                const float MinSpaceFraction = 0.35f;
+                                var minApplied = -(advanceScaled * (1f - MinSpaceFraction));
+                                if (applied < minApplied) applied = minApplied;
+                            }
+                            x += applied;
+                        }
                     }
                 }
 
