@@ -1,6 +1,6 @@
 # GlyphMeshPro vs TextMeshPro Parity
 
-**Status: Round 2 (in progress).** This document maps TextMeshPro's API and rich-text
+**Status: Round 3.** Phase A (stored-only properties now real) and Phase B (small caps, highlight, layout tags, Page/Linked overflow) are wired; see the Round 3 section at the end for semantics and test names. This document maps TextMeshPro's API and rich-text
 tag surface onto OpenGlyph's `GlyphMeshProUGUI` (Canvas) and `GlyphMeshPro` (world-space).
 Every row is kept in sync with ACTUAL behaviour; a non-"applied" status is a real gap.
 
@@ -13,11 +13,11 @@ Every row is kept in sync with ACTUAL behaviour; a non-"applied" status is a rea
 | fontStyle Superscript / Subscript (+ `<sup>`/`<sub>`) | **done** | evidence/markup_sup_sub.png |
 | Justified / Flush alignment | **done** | evidence/alignment_justified_flush.png |
 | Tag `<voffset>` | **done** | evidence/markup_voffset.png |
-| fontStyle Highlight (`<mark>`) | **not started** | needs background-quad modifier behind glyphs |
-| fontStyle SmallCaps | **not started** | needs small-caps transform modifier |
-| Tags `<nobr> <font> <align> <indent> <mark> <sprite>` | **not started** | see tag table |
+| fontStyle Highlight (`<mark>`) | **done (R3)** | `MarkTag_DrawsLineHighBoxBehindRun` (legacy + unified) |
+| fontStyle SmallCaps | **done (R3)** | `SmallCaps_UsesSmcpOrSyntheticCapitalsAtPointEight` |
+| Tags `<nobr> <font> <align> <indent> <line-indent> <mark> <noparse>` | **done (R3)** | see tag table; `<sprite>` out of scope |
 | 3D GlyphMeshPro (world-space MeshRenderer) | **not started** (Round-1 stub) | headless host + mesh emission |
-| Overflow Page / Linked / ScrollRect | **not started** | see overflow table |
+| Overflow Page / Linked / ScrollRect | **done (R3)** | see overflow table |
 
 Each "done" row: deterministic headless test + full suite BOTH modes (renderer-off 256 pass/0 fail; unified-on 272 pass/0 fail; 280 total) + GPU side-by-side PNG verified against real TextMeshPro.
 
@@ -73,12 +73,12 @@ Where TMP exposes a concept the engine lacks (overflow modes, justification,
 | `TextMeshPro`                 | `OpenGlyph.GlyphMeshPro`              | World-space; design + stub (Round 1). |
 | `TMP_FontAsset`               | `LightSide.UniTextFont`               | Font asset. |
 | `TMP_Text`                    | `GlyphMeshProUGUI` base surface       | Abstract base in TMP; folded into the component here. |
-| `FontStyles` (flags)          | `OpenGlyph.FontStyles` (flags)        | Mirror of TMP flag names. R2 applies Bold/Italic/Underline/Strikethrough/Upper/LowerCase/Super/Subscript; SmallCaps/Highlight remain gaps. |
+| `FontStyles` (flags)          | `OpenGlyph.FontStyles` (flags)        | Mirror of TMP flag names. Every flag applies (SmallCaps and Highlight since R3). |
 | `TextAlignmentOptions`        | `OpenGlyph.TextAlignmentOptions`      | Mirror of TMP names; see Alignment section for gaps. |
-| `TextOverflowModes`           | `OpenGlyph.TextOverflowModes`         | Mirror of TMP names; Overflow/Ellipsis/Truncate/Masking live, rest stubbed. |
+| `TextOverflowModes`           | `OpenGlyph.TextOverflowModes`         | Mirror of TMP names; every mode is live (ScrollRect/Page/Linked since R3). |
 | `TextWrappingModes`           | `OpenGlyph.TextWrappingModes`         | Mapped onto engine `WordWrap` bool. |
 | `VertexGradient`              | `OpenGlyph.VertexGradient`            | 4-corner color struct mirroring TMP. |
-| `TMP_TextInfo`                | `OpenGlyph.GlyphTextInfo`             | characterCount/lineCount/characterInfo/lineInfo subset. |
+| `TMP_TextInfo`                | `OpenGlyph.GlyphTextInfo`             | characterCount/lineCount/wordCount/pageCount/characterInfo (incl. isVisible)/lineInfo subset. |
 | `TMP_CharacterInfo`           | `OpenGlyph.GlyphCharacterInfo`        | Subset of fields. |
 | `TMP_LineInfo`                | `OpenGlyph.GlyphLineInfo`             | Subset of fields. |
 
@@ -101,28 +101,28 @@ parity · **stub** = present with TMP signature, TODO body (documented) ·
 | `float fontSize` | direct | → `UniText.FontSize`. |
 | `bool enableAutoSizing` | direct | → `UniText.AutoSize`. |
 | `float fontSizeMin` / `fontSizeMax` | direct | → `UniText.MinFontSize` / `MaxFontSize`. |
-| `FontStyles fontStyle` | adapter | Bold->FontWeight, Italic->StyleAxis. **Round 2 (applied):** Underline, Strikethrough, UpperCase, LowerCase, Superscript, Subscript � composed as engine span tags, auto-registering their backing modifiers. SmallCaps/Highlight stored and round-trip but **not applied** yet (no engine modifier; see font-style section). |
+| `FontStyles fontStyle` | adapter | Bold->FontWeight, Italic->StyleAxis. Underline, Strikethrough, UpperCase, LowerCase, SmallCaps, Superscript, Subscript and Highlight are composed as engine span tags (auto-registered modifiers). SmallCaps and Highlight since R3. |
 | `Color color` | direct | → `UniText.color` (override). |
-| `bool enableVertexGradient` + `VertexGradient colorGradient` | adapter | 4-corner gradient applied as a per-span vertex-color modifier over the engine's gradient system. Feasible; see Gradient section. |
+| `bool enableVertexGradient` + `VertexGradient colorGradient` | **wired (R3)** | Per character quad: BL/TL/TR/BR corner colours multiplied with the vertex colour (after `<color>`), as TMP. Test `VertexGradient_FourCorners_MultipliedWithColor` (legacy + unified). `TMP_ColorGradient` presets are not supported. |
 | `TextAlignmentOptions alignment` | adapter | split into `HorizontalAlignment`+`VerticalAlignment`; Justified/Flush/Geometry/Baseline/Capline/Midline gaps documented below. |
 | `TextWrappingModes textWrappingMode` | adapter | NoWrap→`WordWrap=false`; Normal→`WordWrap=true`; PreserveWhitespace(NoWrap) stubbed to Normal/NoWrap + TODO. |
 | `bool enableWordWrapping` (obsolete) | adapter | legacy bool → `WordWrap`. |
-| `TextOverflowModes overflowMode` | adapter/new | Overflow, Ellipsis, Truncate, Masking implemented; ScrollRect, Page, Linked **stub + TODO**. |
-| `float characterSpacing` | adapter | → engine char-spacing. |
-| `float wordSpacing` | adapter | → engine word-spacing. |
-| `float lineSpacing` | adapter | → engine line-spacing. |
-| `float paragraphSpacing` | adapter | → engine paragraph-spacing. |
-| `Vector4 margin` | adapter | → engine margin (L,T,R,B). |
-| `bool richText` | direct | → engine rich-text toggle. |
-| `int maxVisibleCharacters` | adapter | clamps visible glyph count post-layout. |
-| `int maxVisibleWords` | adapter | clamps to word boundary. |
-| `int maxVisibleLines` | adapter | clamps to line boundary. |
+| `TextOverflowModes overflowMode` | adapter/new | All modes. ScrollRect = Overflow (as TMP, no warning); Page and Linked since R3 (see overflow table). |
+| `float characterSpacing` | **wired (R3)** | em/100 of the font size after every character (after the cluster's last glyph); preferred width counts n-1 spacings like TMP. Test `CharacterSpacing_AddsEmHundredthsAfterEachCharacter_LikeTmp`. |
+| `float wordSpacing` | **wired (R3)** | em/100 after each whitespace (and U+200B). Test `WordSpacing_AddsEmHundredthsAfterWhitespace_LikeTmp`. |
+| `float lineSpacing` | **wired (R3)** | em/100 added to every line advance; negative values overlap lines (no clamp), as TMP. Test `LineSpacing_AddsEmHundredthsBetweenLines_IncludingNegative_LikeTmp`. |
+| `float paragraphSpacing` | **wired (R3)** | em/100 added after a line ending in U+000A/U+2029 only (not after soft wraps). Test `ParagraphSpacing_AddsOnlyAfterParagraphBreaks_LikeTmp`. |
+| `Vector4 margin` | **wired (R3)** | Insets the layout and mesh rect (L,T,R,B; negative grows it); positive margins are added to the preferred size, as TMP. The Masking clip still uses the full rect. Test `Margin_InsetsTextArea_AndAddsToPreferredSize_LikeTmp`. |
+| `bool richText` | **wired (R3)** | false: the run is wrapped in a literal span (`NoParseParseRule`), so tags show verbatim; `fontStyle` still applies. Test `RichTextOff_ShowsTagsLiterally`. |
+| `int maxVisibleCharacters` | **wired (R3)** | Hidden characters emit no geometry; a change only regenerates the mesh (no reshape, no relayout — checked by counters), so typewriter animation is cheap. `textInfo.characterInfo[i].isVisible` follows. Test `MaxVisibleCharacters_HidesGlyphs_TypewriterDoesNotReshapeOrRelayout`. |
+| `int maxVisibleWords` | **wired (R3)** | TMP word rules (letters/digits/hyphens; counted after the visibility test). Test `MaxVisibleWords_And_MaxVisibleLines_HideLikeTmp`. |
+| `int maxVisibleLines` | **wired (R3)** | Line index from the engine's lines. Same test. |
 | `bool isRightToLeftText` | adapter | → `UniText.BaseDirection = RightToLeft`. |
 | `float preferredWidth` / `preferredHeight` | direct | inherited `ILayoutElement`. |
 | `GetPreferredValues()` + 3 overloads | adapter | → `TextProcessor.GetPreferredWidth/Height`. |
 | `GetRenderedValues()` / `(bool)` | adapter | → engine `ResultSize`. |
 | `ForceMeshUpdate(bool,bool)` | adapter | → `UniText.SetDirty(DirtyFlags.Text)` (full rebuild) + synchronous layout flush. |
-| `TMP_TextInfo textInfo` | adapter | `GlyphTextInfo`: characterCount, lineCount, characterInfo[], lineInfo[] from engine `ResultGlyphs`/lines. |
+| `TMP_TextInfo textInfo` | adapter | `GlyphTextInfo`: characterCount, lineCount, wordCount, pageCount, characterInfo[] (isVisible honours maxVisible*), lineInfo[] from engine `ResultGlyphs`/lines. |
 | `bool raycastTarget` | direct | inherited from `Graphic`. |
 | `TMP_TextInfo GetTextInfo(string)` | stub | returns populated `GlyphTextInfo` for the given text; TODO full fidelity. |
 | `uint[] Text` (parsed), `TextRenderFlags`, `TextureMappingOptions`, `MaskingTypes`, `FontWeight` enum, sprite/link DBs | oos | advanced/renderer-internal surface not required by R1 scope. |
@@ -168,9 +168,9 @@ ragged, matching TMP); Flush justifies the last line too. GPU evidence:
 | `Italic` | adapter | engine `FontStyleAxis = Italic` (synthetic oblique fallback). **Wired.** |
 | `Underline` | **applied (R2)** | `fontStyle` composes `<u>…</u>` around the run; the component auto-registers `UnderlineParseRule`+`UnderlineModifier`. Verified by test + GPU evidence PNG (line present, matches TMP). |
 | `Strikethrough` | **applied (R2)** | `fontStyle` composes `<s>…</s>`; auto-registers `StrikethroughParseRule`+`StrikethroughModifier`. Verified by test + GPU evidence PNG. |
-| `UpperCase` | **applied (R2)** | composes `<uppercase>` (alias of engine `upper`) + `UppercaseModifier`. Verified by test + GPU PNG. | `LowerCase` | **applied (R2)** | composes `<lowercase>` + new `LowercaseModifier`. Verified. | `SmallCaps` | **gap (R2)** | no engine small-caps modifier yet; TODO. |
+| `UpperCase` | **applied (R2)** | composes `<uppercase>` (alias of engine `upper`) + `UppercaseModifier`. Verified by test + GPU PNG. | `LowerCase` | **applied (R2)** | composes `<lowercase>` + new `LowercaseModifier`. Verified. | `SmallCaps` | **applied (R3)** | composes `<smallcaps>`: the font's OpenType `smcp` when it has it, else synthetic (lowercase -> capital at 0.8x, TMP). Test `SmallCaps_UsesSmcpOrSyntheticCapitalsAtPointEight`. |
 | `Subscript` / `Superscript` | **applied (R2)** | compose `<sub>`/`<sup>` + new `SuperSubscriptModifier` (0.5 scale on advance + quad, baseline raise/lower). Verified by test + GPU PNG vs TMP. |
-| `Highlight` | **gap (R2)** | no engine highlight rule; the component-level `TextHighlighter` is separate; TODO. |
+| `Highlight` | **applied (R3)** | composes `<mark>` (TMP default #FFFF0040). Test `MarkTag_DrawsLineHighBoxBehindRun`. |
 
 **Current reality (verified by test + GPU evidence):** `fontStyle` applies **Bold, Italic, Underline, Strikethrough, UpperCase, LowerCase, Superscript and Subscript**. U/S compose `<u>`/`<s>`; case composes `<uppercase>`/`<lowercase>` (pre-shape codepoint transform); sup/sub compose `<sup>`/`<sub>` (scale + baseline shift). GPU PNGs: fontstyle_underline_strike.png, fontstyle_upper_lower.png, markup_sup_sub.png (all match TMP). SmallCaps/Highlight still need engine modifiers (tracked below).
 Underline and Strikethrough**. Underline/Strikethrough render by composing the engine's
@@ -189,9 +189,9 @@ has a rule.
 | `Ellipsis` | adapter | truncate at last fitting break and append `…`. |
 | `Truncate` | adapter | hard clip at last fully-fitting glyph, no marker. |
 | `Masking` | adapter | rely on inherited `MaskableGraphic` clip rect (`SetClipRect`). |
-| `ScrollRect` | stub | TODO — needs ScrollRect integration. Falls back to Overflow. |
-| `Page` | stub | TODO — needs page model. Falls back to Overflow. |
-| `Linked` | stub | TODO — needs linked-text chain. Falls back to Overflow. |
+| `ScrollRect` | **wired (R3)** | Overflow, no warning (TMP does the same). Test `OverflowScrollRect_BehavesAsOverflow_WithoutWarning`. |
+| `Page` | **wired (R3)** | Lines are grouped into pages that fit the text area; `pageToDisplay` (1-based, clamped) selects the page, laid out from the top. `textInfo.pageCount`. Test `OverflowPage_ShowsTheRequestedPageOfLines_LikeTmp`. |
+| `Linked` | **wired (R3)** | Keeps the lines that fit (Truncate); `linkedTextComponent` (a GlyphMeshProUGUI) gets the same text with `firstVisibleCharacter` = first overflowing character, and so on down the chain (same frame); no overflow clears the linked text, as TMP. Test `OverflowLinked_SendsOverflowingTextToLinkedComponent_LikeTmp`. |
 
 ## Wrapping parity (`TextWrappingModes`)
 
@@ -231,19 +231,19 @@ as supported.
 | `<style=…>` | direct | engine span-style rule (`style`). |
 | `<uppercase>` | **applied (R2)** | `UppercaseAliasParseRule` (name alias of engine `upper`) + `UppercaseModifier`. |
 | `<lowercase>` | **applied (R2)** | new `LowercaseParseRule` + `LowercaseModifier`. |
-| `<smallcaps>` | **gap (R2)** | no engine rule; TODO. |
-| `<mark=#…>` | **gap (R2)** | no engine highlight rule; TODO (highlighter exists at the component level). |
+| `<smallcaps>` | **applied (R3)** | `SmallCapsParseRule` + `SmallCapsModifier` (smcp or synthetic). |
+| `<mark>` / `<mark=#RRGGBBAA>` | **applied (R3)** | `MarkParseRule` + `MarkModifier`: one solid box per line, run advances wide, font ascender..descender tall, drawn behind the glyphs; alpha = min(tag, component). `padding`/`color=` attributes not parsed. |
 | `<sup>` / `<sub>` | **applied (R2)** | new `SuperscriptParseRule`/`SubscriptParseRule` + `SuperSubscriptModifier`. Verified by GPU PNG vs TMP. |
 | `<voffset=�>` | **applied (R2)** | new `VOffsetParseRule` + `VOffsetModifier` (per-span vertical shift of the glyph quad; em/px/% value). Verified by GPU PNG vs TMP. |
-| `<nobr>` | **gap (R2)** | no engine no-break rule; TODO. |
+| `<nobr>` | **applied (R3)** | `NoBreakParseRule` + `NoBreakModifier` (removes soft break opportunities inside the span). Test `NoBrTag_KeepsSpanOnOneLine`. |
 | `<mspace=…>` | **gap (R2)** | no engine monospace rule; TODO. |
 | `<space=…>` | **gap (R2)** | no engine rule; TODO. |
 | `<width=…>` | **gap (R2)** | no engine rule; TODO. |
-| `<indent=…>` | **gap (R2)** | no engine rule; TODO. |
+| `<indent=N|N%|Nem>` / `<line-indent=…>` | **applied (R3)** | `IndentParseRule`/`LineIndentParseRule` + `IndentModifier`. indent: the pen jumps to the indent where the tag opens and every following line of the span starts there; line-indent: first line of each paragraph in the span. Tests `IndentTag_IndentsWrappedLines_AndJumpsMidLine_LikeTmp`, `LineIndentTag_IndentsFirstLineOfEachParagraph`. |
 | `<margin=…>` | **gap (R2)** | no engine inline-margin rule; component-level `margin` property only. |
-| `<align=…>` | **gap (R2)** | no engine inline-align rule; component-level alignment only (justified/flush also gap). |
+| `<align=left|center|right|justified|flush>` | **applied (R3)** | `AlignParseRule` + `AlignModifier`: per-line override (first codepoint of the line carrying one). Test `AlignTag_SetsPerParagraphAlignment`. |
 | `<alpha=#xx>` | **gap (R2)** | no engine rule; TODO (fold into `color`). |
-| `<font=…>` | **gap (R2)** | no engine inline font-switch rule; component-level `font` only. |
+| `<font="Name">` | **applied (R3)** | `FontParseRule` + `FontModifier`; name lookup in `UniTextFontRegistry` (see Round 3). Characters the font lacks fall back to the stack. Test `FontTag_SwitchesFontForSpan_ResolvedByName`. |
 | `<pos>` / `<rotate>` / `<sprite>` / `<page>` | oos | positional/sprite/page tags — not in R1 scope. |
 
 **OpenGlyph-only tags (no TMP equivalent, present in the engine):** `line-spacing`,
@@ -265,23 +265,17 @@ Target: Quest / world-space text without a Canvas. Design:
   surface, `// TODO R2` bodies) + this design. Full headless engine host and
   mesh emission are Round 2.
 
-## Round 2 gaps (tracked)
+## Open gaps (tracked)
 
-- Inter-word **justification** (Justified/Flush alignment) is **done** (R2). Remaining: inline `<align=justified>` tag.
-- Overflow **ScrollRect / Page / Linked**.
 - Wrapping **PreserveWhitespace / PreserveWhitespaceNoWrap**.
-- `GlyphMeshPro` headless engine host + world-space mesh emission.
-- `<sprite>` / `<pos>` / `<rotate>` / `<page>` tags.
+- `GlyphMeshPro` headless engine host + world-space mesh emission (separate task).
+- `<sprite>` (separate task), `<pos>` / `<rotate>` / `<page>` tags.
 - `GetTextInfo(string)` full fidelity (sprite/link/word info arrays).
-- **`fontStyle` flags not yet wired:** SmallCaps, Highlight (all others now apply). SmallCaps needs a small-caps modifier; Highlight needs a background-quad modifier drawn behind the glyphs.
-  Superscript, Highlight (Bold/Italic/Underline/Strikethrough now apply). Underline/Strikethrough
-  were wired to the existing `<u>`/`<s>` rules in Round 2; the rest need new engine modifiers
-  (a case transform, a baseline-shift+scale, and a background-quad renderer).
-- **Rich-text tags with no engine rule (apply via markup is impossible until added):**
-  `<smallcaps>`, `<mark>`, `<nobr>`,
-  `<mspace>`, `<space>`, `<width>`, `<indent>`, `<margin>` (inline), `<align>` (inline),
-  `<alpha>`, `<font>` (inline). `<uppercase>` is the engine's `upper` (needs a name alias).
-
+- Rich-text tags with no engine rule: `<mspace>`, `<space>`, `<width>`, `<margin>` (inline), `<alpha>`.
+- `<mark>` `padding=` / `color=` attributes; `<font>` `material=` attribute (ignored).
+- `TMP_ColorGradient` presets (`colorGradientPreset`).
+- Mid-line `<line-indent>` (only the line-start case is applied) and an `<indent>` jump followed by
+  a wrap that breaks BEFORE the jump on the same line (rare; the wrap width is then approximate).
 
 ## Round 2.1 — grey-text fix + justification line-break parity (PR #17 review follow-up)
 
@@ -372,3 +366,59 @@ and `Gmp_Justified_Khmer_KeepsEveryMarkOffsetRelativeToItsBase` — every multi-
 cluster's intra-cluster glyph offsets are identical justified vs unjustified. (Devanagari
 is not a bundled fixture; Thai vowel/tone marks and Khmer subscript conjuncts exercise the
 same multi-glyph-cluster property.)
+
+## Round 3 — stored-only properties made real + missing TMP features
+
+All Round 3 tests live in `Tests/Editor/GlyphMeshProParity3Tests.cs`. Where a real
+`TextMeshProUGUI` can be built in the test host (the tests give TMP a runtime settings instance and a
+stand-in shader when the TMP Essential Resources are absent; layout does not depend on the shader),
+the same text/size/rect is measured in TMP and compared; the measured numbers are logged with a
+`[GMP3]` prefix.
+
+### Units and semantics
+- **characterSpacing / wordSpacing / lineSpacing / paragraphSpacing** use TMP units: em/100 of the
+  font size (`fontSize * 0.01 * value`). They are inputs on `TextProcessor`
+  (`CharacterSpacingEm`, `WordSpacingEm`, `LineSpacingEm`, `ParagraphSpacingEm`) that plain
+  `UniText` leaves at 0; `GlyphMeshProUGUI` pushes them in `ConfigureTextProcessor` before every
+  rebuild. Character/word spacing is added after shaping and after the `Shaped` modifiers (so `<size>`
+  does not scale it), once per character after its cluster's last glyph. Line/paragraph spacing is added
+  to each line advance after the minimum-advance clamp, so negative values overlap lines as in TMP.
+- **margin** comes from `UniText.LayoutMargins` (virtual, zero for `UniText`): the layout rect and
+  the mesh origin are inset; positive margins are added to the preferred size (TMP's rendered size).
+- **richText = false** wraps the raw run in `<og-raw>…</og-raw>`, matched by a `NoParseParseRule`
+  that closes at the LAST closing tag, so no other rule sees the text. `<noparse>` (TMP) is
+  registered too.
+- **Vertex gradient**: a per-glyph colour pass subscribed last, so it multiplies the final vertex
+  colour (`<color>` included): BL/TL/TR/BR = corner × colour. Colour (emoji) fonts are skipped.
+- **maxVisibleCharacters / Words / Lines**: TMP's visibility rule (`i < maxChars && words < maxWords
+  && line < maxLines`) is evaluated into a per-codepoint mask handed to the mesh generator
+  (`UniTextMeshGenerator.ClusterHidden`); hidden glyphs emit no quad, and underline/strike/mark skip
+  them. The setters dirty only the mesh (`DirtyFlags.Color`): the test animates every value and
+  asserts `TextProcessor.FirstPassCount` and `LayoutCount` do not move.
+- **SmallCaps**: `Shaper.FontSubstitutesFeature(font, 'smcp')` probes the font once (shapes a
+  lowercase sample with and without the feature). With `smcp`, the span is shaped with a ranged
+  HarfBuzz feature; otherwise lowercase letters become capitals drawn and advanced at 0.8×.
+  Noto Sans has `smcp`, so the bundled fixture exercises the real-feature path.
+- **Highlight / `<mark>`**: solid quads that sample the inside of the underscore glyph (opaque in
+  every SDF/MSDF shader); their triangles are moved to the front of the segment so the box is drawn
+  behind the glyphs, in both the legacy and the unified renderer. (TMP draws its highlight over the
+  text, which is why its default colour is translucent; boxes behind the text were requested here.)
+- **`<font="Name">`** lookup (`UniTextFontRegistry`): 1) fonts registered with
+  `UniTextFontRegistry.Register(name, font)` (or `Register(stack)`, by stack asset name); 2) fonts of the
+  component's font stack, its fallback stacks and family faces, by asset name; 3) the project default
+  font stack. Case-insensitive. `default` or an unknown name leaves the span on the component font.
+  Names are snapshotted on the main thread (worker threads never read `Object.name`); call
+  `UniTextFontRegistry.InvalidateNames()` after renaming fonts at runtime.
+- **Page**: `TextProcessor.PageToDisplay` groups lines greedily into pages that fit the layout height
+  and lays out only the requested page from the top; `PageCount` and `FirstOverflowCodepoint` are
+  reported. Vertical alignment uses the page's height.
+- **Linked**: the source truncates; after its mesh is applied it sets the linked component's text and
+  `firstVisibleCharacter` (= `TextProcessor.FirstOverflowCodepoint`). Lines start at
+  `FirstVisibleCodepoint` in `LineBreaker`. Components dirtied while meshes are being applied are now
+  processed in a follow-up pass of the same frame (bounded to 8 passes), so a chain updates at once.
+
+### Registration
+`GlyphMeshProUGUI` auto-registers every new rule/modifier pair. For plain `UniText` they are ordinary
+`ModRegister` options (`NoParseParseRule`+`EmptyModifier`, `NoBreakParseRule`+`NoBreakModifier`,
+`AlignParseRule`+`AlignModifier`, `IndentParseRule`/`LineIndentParseRule`+`IndentModifier`,
+`FontParseRule`+`FontModifier`, `SmallCapsParseRule`+`SmallCapsModifier`, `MarkParseRule`+`MarkModifier`).
