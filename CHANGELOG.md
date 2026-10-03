@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Open-source (MIT) clean-room fork of UniText 1.0. This preview integrates phase 0
 through phase 1c.
 
+#### Changed
+- **Unified renderer is now the project default** (`UniTextSettings.useUnifiedRenderer = true`, shipped asset and runtime default). Opt out per component with `UnifiedRenderer = ForceOff` or project-wide in settings. Test runs: `UNITEXT_FORCE_UNIFIED=1` / `UNITEXT_FORCE_LEGACY=1` pin each mode.
+
 #### Added
 - **Phase 0 — Native MSDF pipeline.** Clean-room native font core
   (`unitext_native`) built from source for all platforms (Windows, macOS, Linux,

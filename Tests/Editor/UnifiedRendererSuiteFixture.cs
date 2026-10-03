@@ -4,34 +4,51 @@ using UnityEngine;
 namespace LightSide.Tests
 {
     /// <summary>
-    /// Render-Architecture Round 2: an opt-in assembly-wide fixture that forces the project default
-    /// <see cref="UniTextSettings.UseUnifiedRenderer"/> ON for the ENTIRE EditMode suite when the
-    /// environment variable <c>UNITEXT_FORCE_UNIFIED=1</c> is set. With the variable unset (normal
-    /// CI / local runs) it does nothing, so the default suite exercises the legacy path. Running the
-    /// suite with the variable set verifies the unified path against every existing text test at once
-    /// (and surfaces any test that asserts legacy per-segment-renderer structure by design).
+    /// Assembly-wide fixture that pins the project default <see cref="UniTextSettings.UseUnifiedRenderer"/>
+    /// for the ENTIRE EditMode suite so that BOTH renderer paths stay covered as two distinct runs.
+    /// The shipped project default is now ON (unified), so:
+    /// <list type="bullet">
+    /// <item><c>UNITEXT_FORCE_UNIFIED=1</c> pins the default ON (unified run).</item>
+    /// <item><c>UNITEXT_FORCE_LEGACY=1</c> pins the default OFF (legacy run).</item>
+    /// <item>neither set: the shipped project default is used (unified).</item>
+    /// </list>
+    /// If both are set, LEGACY is rejected as ambiguous and UNIFIED wins (a warning is logged).
+    /// Test host scripts: <c>-ForceUnified</c> sets UNITEXT_FORCE_UNIFIED, <c>-ForceLegacy</c> sets UNITEXT_FORCE_LEGACY.
     /// </summary>
     [SetUpFixture]
     public class UnifiedRendererSuiteFixture
     {
         private bool _applied;
+        private bool _previous;
+
+        private static bool IsSet(string name)
+        {
+            var v = System.Environment.GetEnvironmentVariable(name);
+            return v == "1" || string.Equals(v, "true", System.StringComparison.OrdinalIgnoreCase);
+        }
 
         [OneTimeSetUp]
-        public void ForceUnifiedIfRequested()
+        public void PinRendererModeIfRequested()
         {
-            var v = System.Environment.GetEnvironmentVariable("UNITEXT_FORCE_UNIFIED");
-            if (v == "1" || string.Equals(v, "true", System.StringComparison.OrdinalIgnoreCase))
+            bool unified = IsSet("UNITEXT_FORCE_UNIFIED");
+            bool legacy = IsSet("UNITEXT_FORCE_LEGACY");
+            if (unified && legacy)
             {
-                UniTextSettings.SetUseUnifiedRendererForTests(true);
-                _applied = UniTextSettings.UseUnifiedRenderer;
-                Debug.Log($"[UnifiedRendererSuiteFixture] forced UseUnifiedRenderer ON (effective={_applied}).");
+                Debug.LogWarning("[UnifiedRendererSuiteFixture] both UNITEXT_FORCE_UNIFIED and UNITEXT_FORCE_LEGACY set; using UNIFIED.");
+                legacy = false;
             }
+            if (!unified && !legacy) return;
+
+            _previous = UniTextSettings.UseUnifiedRenderer;
+            UniTextSettings.SetUseUnifiedRendererForTests(unified);
+            _applied = true;
+            Debug.Log($"[UnifiedRendererSuiteFixture] pinned UseUnifiedRenderer={UniTextSettings.UseUnifiedRenderer} ({(unified ? "unified" : "legacy")} run).");
         }
 
         [OneTimeTearDown]
         public void Restore()
         {
-            if (_applied) UniTextSettings.SetUseUnifiedRendererForTests(false);
+            if (_applied) UniTextSettings.SetUseUnifiedRendererForTests(_previous);
         }
     }
 }
