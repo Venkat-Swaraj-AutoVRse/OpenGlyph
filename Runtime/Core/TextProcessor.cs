@@ -1468,6 +1468,8 @@ namespace LightSide
                         opszAuto ? buf.shapingFontSize : 0f, out vtags, out vcoords);
 
                 var featureCount = smcpFlags != null ? BuildSmallCapsFeatures(smcpFlags, run.range) : 0;
+                if (DisableLatinLigatures && IsLigatureFreeScript(run.script))
+                    featureCount = AppendNoLigatureFeatures(featureCount, run.range);
 
                 var result = Shaper.Shape(
                     cp,
@@ -1802,7 +1804,8 @@ namespace LightSide
                 margins,
                 widthTolerance,
                 FirstVisibleCodepoint,
-                jumps);
+                jumps,
+                firstPassTmpJustify);
 
             buf.lines.data = linesArr;
             buf.orderedRuns.data = orderedRunsArr;

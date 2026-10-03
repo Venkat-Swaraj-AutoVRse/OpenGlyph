@@ -621,6 +621,7 @@ namespace OpenGlyph
             string src = CleanText ?? string.Empty;
             bool masked = ComputeHiddenMask();
             var mask = m_hiddenMask;
+            int mappedCount = MapGlyphsToCodepoints();
             float lastBaseline = float.NaN;
             int line = -1;
             int lineFirst = 0;
@@ -643,10 +644,16 @@ namespace OpenGlyph
                     info.lineInfo[line].baseline = g.y;
                 }
 
-                bool visible = !masked || (uint)g.cluster >= (uint)mask.Length || mask[g.cluster] == 0;
+                // TMP isVisible: within the maxVisible* limits AND a drawn character (whitespace and
+                // control characters are never visible), per glyph's own codepoint (marks separately).
+                int cpIdx = (uint)i < (uint)mappedCount ? m_glyphCodepoint[i] : g.cluster;
+                var buf = Buffers;
+                int cp = buf != null && (uint)cpIdx < (uint)buf.codepoints.count ? buf.codepoints.data[cpIdx] : 0;
+                bool drawn = !(cp <= 0xFFFF && (char.IsWhiteSpace((char)cp) || char.IsControl((char)cp))) && cp != 0x200B && cp != 0xAD;
+                bool visible = drawn && (!masked || (uint)cpIdx >= (uint)mask.Length || mask[cpIdx] == 0);
                 info.characterInfo[i] = new GlyphCharacterInfo
                 {
-                    character = (g.cluster >= 0 && g.cluster < src.Length) ? src[g.cluster] : '\0',
+                    character = cp > 0 && cp <= 0xFFFF ? (char)cp : (g.cluster >= 0 && g.cluster < src.Length ? src[g.cluster] : '\0'),
                     lineNumber = line,
                     isVisible = visible,
                     origin = g.x,

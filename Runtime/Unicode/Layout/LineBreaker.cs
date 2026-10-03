@@ -36,7 +36,8 @@ namespace LightSide
             ReadOnlySpan<float> startMargins,
             float widthTolerance = 1f,
             int firstCodepoint = 0,
-            ReadOnlySpan<float> indentJumps = default)
+            ReadOnlySpan<float> indentJumps = default,
+            bool hangTrailingSpaces = false)
         {
             tempLines = linesOut;
             tempLineCount = 0;
@@ -51,7 +52,7 @@ namespace LightSide
             }
 
             WrapLines(codepoints, runs, glyphs, cpWidths, breakTypes, maxWidth, startMargins, widthTolerance,
-                firstCodepoint < 0 ? 0 : firstCodepoint, indentJumps);
+                firstCodepoint < 0 ? 0 : firstCodepoint, indentJumps, hangTrailingSpaces);
             ReorderRunsPerLine(paragraphs);
 
             linesOut = tempLines;
@@ -83,7 +84,8 @@ namespace LightSide
             ReadOnlySpan<float> startMargins,
             float widthTolerance = 1f,
             int firstCodepoint = 0,
-            ReadOnlySpan<float> indentJumps = default)
+            ReadOnlySpan<float> indentJumps = default,
+            bool hangTrailingSpaces = false)
         {
             searchStartRunIdx = 0;
             ResetRunClusterOrder(runs.Length);
@@ -129,7 +131,10 @@ namespace LightSide
 
                 var breakType = GetBreakTypeAfter(breakTypes, cpIdx);
 
-                while (lineWidth > effectiveMaxWidth)
+                // TMP parity (opt-in): a breaking space at the end of a line hangs past the edge instead of
+                // forcing the preceding word onto the next line (TMP never wraps on whitespace).
+                var hangs = hangTrailingSpaces && breakType == LineBreakType.Optional && IsHangingSpace(codepoints[cpIdx]);
+                while (lineWidth > effectiveMaxWidth && !hangs)
                     if (lastBreakCp >= 0 && lastBreakCp >= lineStartCp)
                     {
                         CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, lastBreakCp, rawMargin);
@@ -177,6 +182,10 @@ namespace LightSide
             if (lineStartCp < cpCount)
                 CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, cpCount - 1, rawMargin);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsHangingSpace(int cp) =>
+            cp == ' ' || cp == 0x3000 || (cp >= 0x2000 && cp <= 0x2006) || (cp >= 0x2008 && cp <= 0x200A) || cp == 0x205F;
 
         private void CreateLineFromCodepoints(
             ReadOnlySpan<ShapedRun> runs,

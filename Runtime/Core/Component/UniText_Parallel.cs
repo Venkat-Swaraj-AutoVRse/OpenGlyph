@@ -813,6 +813,7 @@ namespace LightSide
             meshGenerator.SetHorizontalAlignment(horizontalAlignment);
 
             meshGenerator.ClusterHidden = null;
+            meshGenerator.GlyphHidden = null;
             OnBeforeGenerateMeshData(meshGenerator);
             meshGenerator.GenerateMeshDataOnly(glyphs);
         }

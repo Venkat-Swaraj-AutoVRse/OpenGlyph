@@ -106,6 +106,9 @@ namespace OpenGlyph
             processor.ParagraphSpacingEm = m_paragraphSpacing;
             processor.FirstVisibleCodepoint = Mathf.Max(0, m_firstVisibleCharacter);
             processor.PageToDisplay = m_overflowMode == TextOverflowModes.Page ? Mathf.Max(1, m_pageToDisplay) : 0;
+            // TMP's default font features are kerning only: no liga/clig, so every Latin character is
+            // its own glyph (and maxVisibleCharacters reveals one character at a time, like TMP).
+            processor.DisableLatinLigatures = true;
         }
 
         /// <summary>Pushes the TMP layout inputs onto the live processor now (the next rebuild re-pushes).</summary>
@@ -116,7 +119,16 @@ namespace OpenGlyph
 
         protected override void OnBeforeGenerateMeshData(UniTextMeshGenerator generator)
         {
-            generator.ClusterHidden = ComputeHiddenMask() ? m_hiddenMask : null;
+            if (ComputeHiddenMask())
+            {
+                generator.ClusterHidden = m_hiddenMask;
+                generator.GlyphHidden = ComputeGlyphHiddenMask() ? m_glyphHiddenMask : null;
+            }
+            else
+            {
+                generator.ClusterHidden = null;
+                generator.GlyphHidden = null;
+            }
 
             // Vertex gradient: (re)subscribe LAST so it runs after <color> and multiplies the final colour.
             m_gradientHandler ??= OnGradientGlyph;
@@ -203,6 +215,64 @@ namespace OpenGlyph
                 }
             }
             for (var i = cpCount; i < mask.Length; i++) mask[i] = 1;
+            return true;
+        }
+
+        private byte[] m_glyphHiddenMask = Array.Empty<byte>();
+        private int[] m_glyphCodepoint = Array.Empty<int>();
+        private int[] m_clusterEnd = Array.Empty<int>();
+
+        /// <summary>
+        /// Maps each positioned glyph to the codepoint (TMP character) it renders and stores it in
+        /// <see cref="m_glyphCodepoint"/>: the k-th glyph of a cluster renders the cluster's k-th codepoint
+        /// (a base and its combining marks are separate TMP characters), clamped to the cluster's last
+        /// codepoint. A glyph standing for several codepoints (ligature) maps to its first. Pure data.
+        /// </summary>
+        private int MapGlyphsToCodepoints()
+        {
+            var buf = Buffers;
+            if (buf == null) return 0;
+            var glyphs = buf.positionedGlyphs.data;
+            var n = buf.positionedGlyphs.count;
+            var cpCount = buf.codepoints.count;
+            if (m_glyphCodepoint.Length < n) m_glyphCodepoint = new int[Mathf.NextPowerOfTwo(Mathf.Max(n, 8))];
+            if (m_clusterEnd.Length < cpCount + 1) m_clusterEnd = new int[Mathf.NextPowerOfTwo(cpCount + 1)];
+
+            // Cluster starts -> the codepoint range each cluster covers.
+            var end = m_clusterEnd;
+            for (var i = 0; i <= cpCount; i++) end[i] = 0;
+            for (var i = 0; i < n; i++) { var cl = glyphs[i].cluster; if ((uint)cl < (uint)cpCount) end[cl] = 1; }
+            var next = cpCount;
+            for (var i = cpCount - 1; i >= 0; i--)
+            {
+                var isStart = end[i] != 0;
+                end[i] = next;
+                if (isStart) next = i;
+            }
+
+            var k = 0;
+            for (var i = 0; i < n; i++)
+            {
+                var cl = glyphs[i].cluster;
+                k = i > 0 && glyphs[i - 1].cluster == cl ? k + 1 : 0;
+                if ((uint)cl >= (uint)cpCount) { m_glyphCodepoint[i] = cl; continue; }
+                m_glyphCodepoint[i] = Mathf.Min(cl + k, end[cl] - 1);
+            }
+            return n;
+        }
+
+        /// <summary>Per-positioned-glyph mask from the per-codepoint mask (see <see cref="MapGlyphsToCodepoints"/>).</summary>
+        private bool ComputeGlyphHiddenMask()
+        {
+            var n = MapGlyphsToCodepoints();
+            if (n == 0) return false;
+            if (m_glyphHiddenMask.Length < n) m_glyphHiddenMask = new byte[Mathf.NextPowerOfTwo(n)];
+            var mask = m_hiddenMask;
+            for (var i = 0; i < n; i++)
+            {
+                var cp = m_glyphCodepoint[i];
+                m_glyphHiddenMask[i] = (uint)cp < (uint)mask.Length ? mask[cp] : (byte)0;
+            }
             return true;
         }
 

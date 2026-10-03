@@ -275,10 +275,10 @@ Target: Quest / world-space text without a Canvas. Design:
 - `<mark>` `padding=` / `color=` attributes; `<font>` `material=` attribute (ignored).
 - `TMP_ColorGradient` presets (`colorGradientPreset`).
 - Wrapping counts a trailing space against the width (TMP does not), so a line can wrap one word earlier than TMP.
-- Wrapping counts a trailing space against the width (TMP does not), so a line can wrap one word
-  earlier than TMP.
-- `maxVisibleCharacters` hides by cluster: a ligature (e.g. `ff`) is shown as soon as its first
-  character is visible; TMP (no ligatures by default) shows one character at a time.
+- A canonically composable base + mark (e.g. `z` + U+0301) is shaped by HarfBuzz as ONE precomposed
+  glyph (`ź`), which TMP draws as two characters; that glyph appears with its first character.
+- With a `maxVisible*` limit, TMP's Middle/Bottom vertical alignment follows the visible lines; GMP
+  aligns the whole laid-out text.
 - Mid-line `<line-indent>` (only the line-start case is applied) and an `<indent>` jump followed by
   a wrap that breaks BEFORE the jump on the same line (rare; the wrap width is then approximate).
 
@@ -379,10 +379,8 @@ same multi-glyph-cluster property.)
 ![maxVisibleCharacters typewriter in TextMesh Pro and GlyphMeshProUGUI, one character per frame at 15 fps](../.github/assets/features/gmp-typewriter.gif)
 
 Rendered offscreen in the Editor with the same Noto Sans font, size (32 pt / 28 pt) and rect for both
-components. Expected differences: GlyphMeshPro draws the highlight behind the text (TMP draws it over);
-HarfBuzz applies the font's `ff` ligature, so at `maxVisibleCharacters = 13` the ligature that starts at
-the 13th character also shows the 14th `f`; and in the typewriter GlyphMeshPro wraps "over" one word
-earlier, because the engine counts the trailing space when wrapping (pre-existing, see the open gaps).
+components. The one intended difference: GlyphMeshPro draws the highlight behind the text (TMP draws it
+over).
 
 All Round 3 tests live in `Tests/Editor/GlyphMeshProParity3Tests.cs`. Where a real
 `TextMeshProUGUI` can be built in the test host (the tests give TMP a runtime settings instance and a
@@ -405,6 +403,17 @@ the same text/size/rect is measured in TMP and compared; the measured numbers ar
   registered too.
 - **Vertex gradient**: a per-glyph colour pass subscribed last, so it multiplies the final vertex
   colour (`<color>` included): BL/TL/TR/BR = corner × colour. Colour (emoji) fonts are skipped.
+- **TMP character counting** (fixed after the first demo render): TMP counts every character in
+  `textInfo.characterInfo` — spaces, newlines and combining marks — and draws each separately because its
+  default font features are kerning only (no `liga`/`clig`). GlyphMeshPro therefore shapes
+  Latin/Greek/Cyrillic/Common runs with `liga`/`clig` off (`TextProcessor.DisableLatinLigatures`; complex
+  scripts and `rlig` untouched), maps every glyph of a cluster to its own codepoint (a base and its marks
+  are revealed one by one), reports whitespace/control characters as `isVisible = false`, and lets a
+  breaking space at a line end hang instead of forcing a wrap (`LineBreaker` `hangTrailingSpaces`), as
+  TMP does. Tests: `MaxVisibleCharacters_CountsSpacesNewlinesAndMarks_LikeTmp`,
+  `MaxVisibleWords_CountsLikeTmp`, `MaxVisibleLines_CountsLikeTmp` (every limit value over spaces,
+  newline, `ffi`/`ff`/`fl` ligature text and combining marks: 0 mismatches vs a real TextMeshProUGUI),
+  `TrailingSpace_DoesNotForceWrap_LikeTmp` (45 widths, same line starts as TMP).
 - **maxVisibleCharacters / Words / Lines**: TMP's visibility rule (`i < maxChars && words < maxWords
   && line < maxLines`) is evaluated into a per-codepoint mask handed to the mesh generator
   (`UniTextMeshGenerator.ClusterHidden`); hidden glyphs emit no quad, and underline/strike/mark skip

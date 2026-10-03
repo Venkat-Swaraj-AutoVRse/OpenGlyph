@@ -440,6 +440,101 @@ namespace LightSide.Tests
                         $"quad {i} vertex {v}: revealed glyph geometry must match an unlimited component");
         }
 
+        // TMP counts every character of textInfo.characterInfo (spaces, newlines, combining marks) in
+        // maxVisibleCharacters, shows each character separately (no ligatures with the default font
+        // features), and reports whitespace as isVisible = false.
+        private static readonly string[] VisibilityTexts =
+        {
+            "Typewriter effect in progress",
+            "ab cd\nef gh",
+            "office affine fluff",
+            "x\u0301y q\u0301w",   // marks with no precomposed form: base and mark are separate TMP characters
+        };
+
+        private static int TmpVisible(TextMeshProUGUI t)
+        {
+            var n = 0;
+            for (var i = 0; i < t.textInfo.characterCount; i++) if (t.textInfo.characterInfo[i].isVisible) n++;
+            return n;
+        }
+
+        private static int GmpTextInfoVisible(GlyphMeshProUGUI g)
+        {
+            var info = g.textInfo; var n = 0;
+            for (var i = 0; i < info.characterCount; i++) if (info.characterInfo[i].isVisible) n++;
+            return n;
+        }
+
+        private void CompareVisibility(string label, Action<TextMeshProUGUI, int> setTmp, Action<GlyphMeshProUGUI, int> setGmp, Func<string, int> maxN)
+        {
+            var mismatches = new List<string>();
+            foreach (var s in VisibilityTexts)
+            {
+                var tmp = MakeTmp(s, 900, 300);
+                if (tmp == null) Assert.Ignore("TMP comparison unavailable in this host.");
+                var gmp = Make(s, 900, 300);
+                for (var n = 0; n <= maxN(s); n++)
+                {
+                    setTmp(tmp, n); tmp.ForceMeshUpdate(true, true);
+                    setGmp(gmp, n); Render();
+                    int tv = TmpVisible(tmp), quads = QuadCount(gmp), iv = GmpTextInfoVisible(gmp);
+                    if (tv != quads || tv != iv)
+                        mismatches.Add($"'{Escape(s)}' {label}={n}: TMP visible={tv} GMP drawn={quads} GMP textInfo visible={iv}");
+                }
+            }
+            Debug.Log($"[GMP3] {label} vs TMP: {mismatches.Count} mismatches" + (mismatches.Count > 0 ? "\n  " + string.Join("\n  ", mismatches) : ""));
+            Assert.IsEmpty(mismatches, $"{label}: GMP must hide/show exactly the characters TMP does");
+        }
+
+        private static string Escape(string s) => s.Replace("\n", "\\n").Replace("\u0301", "\\u0301");
+
+        [Test]
+        public void MaxVisibleCharacters_CountsSpacesNewlinesAndMarks_LikeTmp() =>
+            CompareVisibility("maxVisibleCharacters", (t, n) => t.maxVisibleCharacters = n, (g, n) => g.maxVisibleCharacters = n, s => s.Length + 1);
+
+        [Test]
+        public void MaxVisibleWords_CountsLikeTmp() =>
+            CompareVisibility("maxVisibleWords", (t, n) => t.maxVisibleWords = n, (g, n) => g.maxVisibleWords = n, s => 5);
+
+        [Test]
+        public void MaxVisibleLines_CountsLikeTmp() =>
+            CompareVisibility("maxVisibleLines", (t, n) => t.maxVisibleLines = n, (g, n) => g.maxVisibleLines = n, s => 3);
+
+        [Test]
+        public void TrailingSpace_DoesNotForceWrap_LikeTmp()
+        {
+            const string s = "The quick brown fox jumps over the lazy dog, one character per frame.";
+            var mismatches = new List<string>();
+            int compared = 0, skipped = 0;
+            for (var w = 300f; w <= 700f; w += 9f) // sweep: some widths end a line exactly at a space
+            {
+                var tmp = MakeTmp(s, w, 300);
+                if (tmp == null) Assert.Ignore("TMP comparison unavailable in this host.");
+                // Skip widths within 1.5 px of one of TMP's own break points: there sub-pixel differences
+                // (TMP's global font-feature/settings state left by other tests) flip TMP's result.
+                string TmpStarts(float width)
+                {
+                    var t = MakeTmp(s, width, 300);
+                    var l = new List<int>();
+                    for (var i = 0; i < t.textInfo.lineCount; i++) l.Add(t.textInfo.lineInfo[i].firstCharacterIndex);
+                    return string.Join(",", l);
+                }
+                var here = TmpStarts(w);
+                if (TmpStarts(w - 1.5f) != here || TmpStarts(w + 1.5f) != here) { skipped++; continue; }
+                compared++;
+                var gmp = Make(s, w, 300);
+                var gl = Lines(gmp);
+                var tl = new List<int>();
+                for (var i = 0; i < tmp.textInfo.lineCount; i++) tl.Add(tmp.textInfo.lineInfo[i].firstCharacterIndex);
+                var gs = gl.ConvertAll(l => l.firstCluster);
+                if (string.Join(",", tl) != string.Join(",", gs))
+                    mismatches.Add($"width {w}: TMP line starts {string.Join(",", tl)} GMP {string.Join(",", gs)}");
+            }
+            Debug.Log($"[GMP3] wrap vs TMP: compared={compared} skipped(boundary)={skipped} mismatches={mismatches.Count} " + string.Join(" | ", mismatches));
+            Assert.Greater(compared, 30, "most widths are compared");
+            Assert.IsEmpty(mismatches, "GlyphMeshPro wraps at the same characters as TMP");
+        }
+
         [Test]
         public void MaxVisibleWords_And_MaxVisibleLines_HideLikeTmp()
         {

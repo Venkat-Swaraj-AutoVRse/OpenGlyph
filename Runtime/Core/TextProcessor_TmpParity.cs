@@ -9,6 +9,30 @@ namespace LightSide
     public sealed partial class TextProcessor
     {
         private static readonly uint SmcpTag = HB.Tag('s', 'm', 'c', 'p');
+        private static readonly uint LigaTag = HB.Tag('l', 'i', 'g', 'a');
+        private static readonly uint CligTag = HB.Tag('c', 'l', 'i', 'g');
+
+        /// <summary>
+        /// TMP parity: shape Latin/Greek/Cyrillic/Common runs with the standard and contextual ligatures
+        /// (<c>liga</c>, <c>clig</c>) turned off, as TextMesh Pro does with its default font features
+        /// (kerning only). Required ligatures (<c>rlig</c>) and complex scripts are unaffected. Off for plain
+        /// UniText; a change requires a first-pass rebuild.
+        /// </summary>
+        public bool DisableLatinLigatures;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsLigatureFreeScript(UnicodeScript s) =>
+            s == UnicodeScript.Latin || s == UnicodeScript.Greek || s == UnicodeScript.Cyrillic ||
+            s == UnicodeScript.Common || s == UnicodeScript.Inherited;
+
+        private static int AppendNoLigatureFeatures(int count, TextRange range)
+        {
+            featureScratch ??= new HBFeature[8];
+            if (count + 2 > featureScratch.Length) Array.Resize(ref featureScratch, Math.Max(8, (count + 2) * 2));
+            featureScratch[count++] = new HBFeature { tag = LigaTag, value = 0, start = (uint)range.start, end = (uint)range.End };
+            featureScratch[count++] = new HBFeature { tag = CligTag, value = 0, start = (uint)range.start, end = (uint)range.End };
+            return count;
+        }
 
         [ThreadStatic] private static HBFeature[] featureScratch;
 
