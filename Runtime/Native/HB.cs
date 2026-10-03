@@ -126,7 +126,7 @@ namespace LightSide
 
         #region Unified Font API
 
-        public static IntPtr CreateFont(IntPtr ftFace, IntPtr fontDataPtr, int fontDataLength, out IntPtr blob, out IntPtr hbFace, out int upem)
+        public static IntPtr CreateFont(IntPtr ftFace, IntPtr fontDataPtr, int fontDataLength, out IntPtr blob, out IntPtr hbFace, out int upem, int faceIndex = 0)
         {
             blob = IntPtr.Zero;
             hbFace = IntPtr.Zero;
@@ -139,7 +139,7 @@ namespace LightSide
             if (blob == IntPtr.Zero)
                 return IntPtr.Zero;
 
-            hbFace = ut_hb_face_create(blob, 0);
+            hbFace = ut_hb_face_create(blob, (uint)faceIndex);
             if (hbFace == IntPtr.Zero)
             {
                 ut_hb_blob_destroy(blob);

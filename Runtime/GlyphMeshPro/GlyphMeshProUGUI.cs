@@ -315,6 +315,11 @@ namespace OpenGlyph
         /// <c>false</c>, so this scoping change leaves every existing plain-UniText layout untouched.</summary>
         protected override bool UseTmpJustification => true;
 
+        /// <summary>GlyphMeshPro mirrors TextMeshPro, whose Left/Right alignment is physical: Left hugs the
+        /// rect's left edge even for an RTL (Arabic/Hebrew) paragraph. Plain <c>UniText</c> keeps the
+        /// inherited paragraph-relative (start/end) meaning.</summary>
+        protected override bool UsePhysicalAlignment => true;
+
         private void ApplyAlignment(TextAlignmentOptions value)
         {
             int bits = (int)value;
@@ -545,6 +550,7 @@ namespace OpenGlyph
                 baseDirection = BaseDirection,
                 enableWordWrap = WordWrap,
                 TmpJustification = UseTmpJustification,
+                PhysicalAlignment = UsePhysicalAlignment,
             };
             TextProcessor.EnsureFirstPass(src.AsSpan(), settings);
         }
