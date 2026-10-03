@@ -68,25 +68,36 @@ namespace LightSide
 
         [Header("Shared Glyph Atlas (Render Architecture R2)")]
         [SerializeField]
-        [Tooltip("Max pages (Texture2DArray slices) PER shared glyph-atlas array before LRU eviction " +
-                 "begins reusing pages. 0 (default) = unbounded: the array grows and never evicts, so " +
-                 "behaviour is identical to the legacy per-font atlas until a budget is configured. " +
-                 "Set a positive cap to bound glyph memory under variable fonts; least-recently-used, " +
-                 "unreferenced glyphs are then evicted and re-rasterized on demand.")]
+        [Tooltip("NOT ACTIVE YET — this budget is currently IGNORED by the runtime (see " +
+                 "Documentation/Design/MemoryBudgets.md). The atlas runs unbounded regardless of this " +
+                 "value because the render path does not reference-count glyphs or advance the atlas " +
+                 "LRU clock, so enforcing a budget could evict on-screen glyphs and draw wrong text. " +
+                 "The field is kept so existing assets load and for when budgets are properly wired.\n\n" +
+                 "Intended meaning: max pages (Texture2DArray slices) PER shared glyph-atlas array " +
+                 "before LRU eviction begins reusing pages. 0 (default) = unbounded: the array grows " +
+                 "and never evicts, so behaviour is identical to the legacy per-font atlas until a " +
+                 "budget is configured. Set a positive cap to bound glyph memory under variable fonts; " +
+                 "least-recently-used, unreferenced glyphs are then evicted and re-rasterized on demand.")]
         [Min(0)]
         private int sharedAtlasPageBudget = 0;
 
         /// <summary>
         /// Max pages per shared glyph-atlas array before eviction. 0 = unbounded (no eviction;
         /// unchanged legacy behaviour). See <see cref="GlyphAtlasArray.PageBudget"/>.
+        /// NOTE: this value is CURRENTLY IGNORED by the runtime — <see cref="SharedGlyphAtlas"/>
+        /// forces every budget to 0 (see Documentation/Design/MemoryBudgets.md). The accessor still
+        /// returns the configured value (used by the inactive-budget warning and tests).
         /// </summary>
         public static int SharedAtlasPageBudget => Instance != null ? Instance.sharedAtlasPageBudget : 0;
 
         [SerializeField]
-        [Tooltip("Max RESIDENT bytes PER shared glyph-atlas array before LRU eviction begins " +
-                 "(pages x size^2 x bytesPerPixel). 0 (default) = unbounded. This is the " +
-                 "mobile-relevant knob: a 1024x1024 Alpha8 page is 1 MB and an RGBA32 page is 4 MB, " +
-                 "so e.g. 8388608 (8 MB) caps an Alpha8 array at 8 pages. Least-recently-used, " +
+        [Tooltip("NOT ACTIVE YET — currently IGNORED by the runtime (see " +
+                 "Documentation/Design/MemoryBudgets.md); the atlas runs unbounded regardless of this " +
+                 "value. Kept so existing assets load and for when budgets are properly wired.\n\n" +
+                 "Intended meaning: max RESIDENT bytes PER shared glyph-atlas array before LRU " +
+                 "eviction begins (pages x size^2 x bytesPerPixel). 0 (default) = unbounded. This is " +
+                 "the mobile-relevant knob: a 1024x1024 Alpha8 page is 1 MB and an RGBA32 page is " +
+                 "4 MB, so e.g. 8388608 (8 MB) caps an Alpha8 array at 8 pages. Least-recently-used, " +
                  "unreferenced glyphs are evicted and re-rasterized on demand. Enforced together " +
                  "with the page budget (whichever is hit first).")]
         [Min(0)]
@@ -95,22 +106,31 @@ namespace LightSide
         /// <summary>
         /// Max resident bytes per shared glyph-atlas array before eviction. 0 = unbounded. The byte
         /// equivalent of <see cref="SharedAtlasPageBudget"/>; see <see cref="GlyphAtlasArray.ByteBudget"/>.
+        /// NOTE: CURRENTLY IGNORED by the runtime (see <see cref="SharedGlyphAtlas"/> /
+        /// Documentation/Design/MemoryBudgets.md); the accessor still returns the configured value.
         /// </summary>
         public static long SharedAtlasByteBudgetPerArray => Instance != null ? Instance.sharedAtlasByteBudgetPerArray : 0;
 
         [SerializeField]
-        [Tooltip("Max RESIDENT bytes across ALL shared glyph-atlas arrays combined before global " +
-                 "LRU eviction. 0 (default) = unbounded. A process-wide ceiling on glyph memory, " +
-                 "evaluated after each frame's atlas growth; when exceeded, the globally " +
-                 "least-recently-used unreferenced glyphs are evicted across every array until the " +
-                 "total is back under budget. Use this to bound total glyph memory on devices with a " +
-                 "hard budget (Quest 3S), independent of how many fonts/variations are in play.")]
+        [Tooltip("NOT ACTIVE YET — currently IGNORED by the runtime (see " +
+                 "Documentation/Design/MemoryBudgets.md). This global ceiling has no runtime enforcer " +
+                 "at all; the atlas runs unbounded regardless of this value. Kept so existing assets " +
+                 "load and for when budgets are properly wired.\n\n" +
+                 "Intended meaning: max RESIDENT bytes across ALL shared glyph-atlas arrays combined " +
+                 "before global LRU eviction. 0 (default) = unbounded. A process-wide ceiling on " +
+                 "glyph memory, evaluated after each frame's atlas growth; when exceeded, the " +
+                 "globally least-recently-used unreferenced glyphs are evicted across every array " +
+                 "until the total is back under budget. Use this to bound total glyph memory on " +
+                 "devices with a hard budget (Quest 3S), independent of how many fonts/variations " +
+                 "are in play.")]
         [Min(0)]
         private long sharedAtlasByteBudgetGlobal = 0;
 
         /// <summary>
         /// Max resident bytes across all shared glyph-atlas arrays before global eviction. 0 =
         /// unbounded. See <see cref="SharedGlyphAtlas.EnforceGlobalByteBudget"/>.
+        /// NOTE: CURRENTLY IGNORED by the runtime — the global budget has no active enforcer
+        /// (see Documentation/Design/MemoryBudgets.md); the accessor still returns the configured value.
         /// </summary>
         public static long SharedAtlasByteBudgetGlobal => Instance != null ? Instance.sharedAtlasByteBudgetGlobal : 0;
 
