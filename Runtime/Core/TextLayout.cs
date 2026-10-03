@@ -202,7 +202,8 @@ namespace LightSide
             ref int glyphCount,
             out float width,
             out float height,
-            ReadOnlySpan<int> codepoints = default)
+            ReadOnlySpan<int> codepoints = default,
+            ReadOnlySpan<byte> lineAlignments = default)
         {
             glyphCount = 0;
             width = 0;
@@ -263,9 +264,23 @@ namespace LightSide
 
                 float x;
                 var isRtlLine = (line.paragraphBaseLevel & 1) == 1;
+                // Per-line alignment override (TMP <align=...>): the first codepoint of the line carrying
+                // an override decides the line's alignment; lines without one use the base alignment.
+                var lineHAlign = baseHAlign;
+                if (!lineAlignments.IsEmpty)
+                {
+                    var end = Math.Min(line.range.End, lineAlignments.Length);
+                    for (var c = line.range.start; c < end; c++)
+                    {
+                        var v = lineAlignments[c];
+                        if (v == 0) continue;
+                        lineHAlign = (HorizontalAlignment)(v - 1);
+                        break;
+                    }
+                }
                 // Left/Right are paragraph-relative (start/end) in the engine. Physical alignment
                 // (TMP parity) swaps them for RTL paragraphs so Left always means the rect's left edge.
-                var hAlign = physicalAlign && isRtlLine ? ToPhysical(baseHAlign) : baseHAlign;
+                var hAlign = physicalAlign && isRtlLine ? ToPhysical(lineHAlign) : lineHAlign;
                 if (hasFiniteWidth)
                     x = ComputeLineStartX(lineWidth, isRtlLine, availableWidth, hAlign);
                 else
@@ -358,6 +373,11 @@ namespace LightSide
                 // LAST glyph of each visible cluster (never between a base and its marks).
                 int prevClusterApplied = int.MinValue;
 
+                // TMP <indent> opened mid-line: the pen jumps to the indent position (relative to the
+                // line's content origin, i.e. after its start margin). LTR lines only.
+                var jumpCp = isRtlLine ? 0 : line.indentJumpCp;
+                var lineOriginX = x;
+
                 for (var r = runStart; r < runEnd; r++)
                 {
                     ref readonly var run = ref runs[r];
@@ -376,6 +396,11 @@ namespace LightSide
                     for (var g = glyphStart; g < glyphEnd; g++)
                     {
                         ref readonly var glyph = ref glyphs[g];
+                        if (jumpCp > 0 && glyph.cluster == jumpCp)
+                        {
+                            x = lineOriginX + (line.indentJumpX - line.startMargin) * glyphScale;
+                            jumpCp = 0;
+                        }
                         var glyphX = x + glyph.offsetX * glyphScale;
                         var advanceScaled = glyph.advanceX * glyphScale;
 

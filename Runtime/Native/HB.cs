@@ -4,6 +4,21 @@ using static System.Runtime.InteropServices.CallingConvention;
 
 namespace LightSide
 {
+    /// <summary>
+    /// HarfBuzz <c>hb_feature_t</c>: an OpenType feature <see cref="tag"/> set to <see cref="value"/>
+    /// over the cluster range [<see cref="start"/>, <see cref="end"/>). Cluster values are indices into
+    /// the full context the run is shaped with.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HBFeature
+    {
+        public uint tag;
+        public uint value;
+        public uint start;
+        public uint end;
+    }
+
+
     internal static unsafe class HB
     {
         #region Enums & Constants
@@ -250,6 +265,19 @@ namespace LightSide
         {
             if (font == IntPtr.Zero || buffer == IntPtr.Zero) return;
             ut_hb_shape(font, buffer, IntPtr.Zero, 0);
+        }
+
+        /// <summary>Builds an OpenType tag from four ASCII characters (e.g. "smcp").</summary>
+        public static uint Tag(char a, char b, char c, char d) =>
+            ((uint)a << 24) | ((uint)b << 16) | ((uint)c << 8) | d;
+
+        /// <summary>Shapes with an explicit feature list (<paramref name="count"/> leading entries).</summary>
+        public static void Shape(IntPtr font, IntPtr buffer, HBFeature[] features, int count)
+        {
+            if (font == IntPtr.Zero || buffer == IntPtr.Zero) return;
+            if (features == null || count <= 0) { ut_hb_shape(font, buffer, IntPtr.Zero, 0); return; }
+            fixed (HBFeature* p = features)
+                ut_hb_shape(font, buffer, (IntPtr)p, (uint)count);
         }
 
         public static int GetGlyphCount(IntPtr buffer)

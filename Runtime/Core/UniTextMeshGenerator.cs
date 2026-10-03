@@ -250,6 +250,21 @@ namespace LightSide
         /// <summary>Current number of triangle indices in the mesh buffers.</summary>
         public int triangleCount;
 
+        /// <summary>
+        /// Optional per-cluster visibility mask (non-zero = hidden) set by the component before
+        /// generation (TMP <c>maxVisibleCharacters</c>/<c>Words</c>/<c>Lines</c>). Hidden glyphs emit no
+        /// quad; decoration modifiers skip them via <see cref="IsClusterHidden"/>. Null = all visible.
+        /// </summary>
+        public byte[] ClusterHidden;
+
+        /// <summary>True when <paramref name="cluster"/> is hidden by <see cref="ClusterHidden"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsClusterHidden(int cluster)
+        {
+            var h = ClusterHidden;
+            return h != null && (uint)cluster < (uint)h.Length && h[cluster] != 0;
+        }
+
         [ThreadStatic] private static FastIntDictionary<PooledList<int>> glyphsByAtlas;
 
         private PooledBuffer<Vector3> vertices;
@@ -931,6 +946,13 @@ namespace LightSide
             {
                 var glyphIndex = glyphIndices[i];
                 ref var glyph = ref positionedGlyphs[glyphIndex];
+
+                // TMP maxVisibleCharacters/Words/Lines: hidden clusters emit no geometry at all (no quad,
+                // no OnGlyph), so the typewriter effect is a mesh-only rebuild — no reshape, no relayout.
+                var hidden = ClusterHidden;
+                if (hidden != null && (uint)glyph.cluster < (uint)hidden.Length && hidden[glyph.cluster] != 0)
+                    continue;
+
                 var cacheIndex = glyph.shapedGlyphIndex;
 
                 ref var cachedData = ref glyphCache[cacheIndex];

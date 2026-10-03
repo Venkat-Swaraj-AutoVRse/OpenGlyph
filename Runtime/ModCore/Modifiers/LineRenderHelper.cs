@@ -185,6 +185,56 @@ namespace LightSide
             gen.triangleCount += 18;
         }
 
+        /// <summary>
+        /// Appends one solid quad [x0,x1]×[y0,y1] (mesh space) in <paramref name="color"/> to the current
+        /// segment. All four UVs sample the centre of the underscore glyph — fully inside its distance
+        /// field — so the quad is opaque in every SDF/MSDF shader (TextMeshPro's highlight technique).
+        /// Returns false when the underscore glyph is not in the current font/atlas.
+        /// </summary>
+        public static bool DrawSolidQuad(UniTextFontProvider fontProvider, float x0, float y0, float x1, float y1, Color32 color)
+        {
+            var gen = UniTextMeshGenerator.Current;
+            if (gen == null || fontProvider == null || gen.font == null) return false;
+
+            var maybeGlyph = GetUnderscoreGlyph(fontProvider, out var glyphFont);
+            if (!maybeGlyph.HasValue) return false;
+            var g = maybeGlyph.Value;
+            if (g.glyphRect.width == 0 || glyphFont != gen.font || g.atlasIndex != gen.CurrentAtlasIndex) return false;
+
+            gen.EnsureCapacity(4, 6);
+            float atlasSize = gen.atlasSize;
+            var u = (g.glyphRect.x + g.glyphRect.width * 0.5f) / atlasSize;
+            var v = (g.glyphRect.y + g.glyphRect.height * 0.5f) / atlasSize;
+            var uv = new Vector4(u, v, gen.gradientScale, gen.xScale);
+            var uv1 = new Vector4(gen.spreadRatio, 0, 0, 0);
+
+            var verts = gen.Vertices;
+            var uvs0 = gen.Uvs0;
+            var uvs1 = gen.Uvs1;
+            var colors = gen.Colors;
+            var tris = gen.Triangles;
+            var vi = gen.vertexCount;
+            var ti = gen.triangleCount;
+
+            verts[vi + 0] = new Vector3(x0, y0, 0);
+            verts[vi + 1] = new Vector3(x0, y1, 0);
+            verts[vi + 2] = new Vector3(x1, y1, 0);
+            verts[vi + 3] = new Vector3(x1, y0, 0);
+            for (var i = 0; i < 4; i++) { uvs0[vi + i] = uv; uvs1[vi + i] = uv1; colors[vi + i] = color; }
+
+            var rel = vi - gen.CurrentSegmentVertexStart;
+            tris[ti + 0] = rel + 0;
+            tris[ti + 1] = rel + 1;
+            tris[ti + 2] = rel + 2;
+            tris[ti + 3] = rel + 2;
+            tris[ti + 4] = rel + 3;
+            tris[ti + 5] = rel + 0;
+
+            gen.vertexCount += 4;
+            gen.triangleCount += 6;
+            return true;
+        }
+
 
         private static Glyph? GetUnderscoreGlyph(UniTextFontProvider fontProvider, out UniTextFont font)
         {

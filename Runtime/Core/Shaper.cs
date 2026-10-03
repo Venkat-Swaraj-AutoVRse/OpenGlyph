@@ -408,6 +408,71 @@ namespace LightSide
 
         #endregion
 
+        #region Feature probe
+
+        private static readonly System.Collections.Generic.Dictionary<(int fontHash, uint tag), bool> featureSupport = new();
+        [ThreadStatic] private static HBFeature[] probeFeature;
+        private static readonly int[] ProbeText = { 'a', 'b', 'c', 'e', 'h', 'n', 'o', 's', 'x' };
+
+        /// <summary>
+        /// Whether shaping <paramref name="font"/> with the OpenType feature <paramref name="tag"/> turned on
+        /// substitutes different glyphs for plain lowercase Latin (e.g. <c>smcp</c> small capitals). Probed
+        /// once per font by shaping a short sample with and without the feature; cached. Thread-safe.
+        /// </summary>
+        public static bool FontSubstitutesFeature(UniTextFont font, uint tag)
+        {
+            if (font == null || !font.HasFontData) return false;
+            var hash = font.FontDataHash;
+            lock (fontCacheLock)
+            {
+                if (featureSupport.TryGetValue((hash, tag), out var known)) return known;
+            }
+
+            var entry = GetOrCreateCacheByInstanceId(font);
+            bool result = false;
+            if (entry != null && entry.IsValid)
+            {
+                var buffer = AcquireBuffer();
+                if (buffer != IntPtr.Zero)
+                {
+                    int Shape1(bool on, Span<uint> ids)
+                    {
+                        HB.ClearBuffer(buffer);
+                        HB.SetDirection(buffer, HB.DIRECTION_LTR);
+                        HB.SetScript(buffer, HB.Script.Latin);
+                        HB.AddCodepoints(buffer, ProbeText, 0, ProbeText.Length);
+                        if (on)
+                        {
+                            probeFeature ??= new HBFeature[1];
+                            probeFeature[0] = new HBFeature { tag = tag, value = 1, start = 0, end = uint.MaxValue };
+                            HB.Shape(entry.hbFont, buffer, probeFeature, 1);
+                        }
+                        else HB.Shape(entry.hbFont, buffer);
+                        var infos = HB.GetGlyphInfos(buffer);
+                        var n = Math.Min(infos.Length, ids.Length);
+                        for (int i = 0; i < n; i++) ids[i] = infos[i].glyphId;
+                        return n;
+                    }
+
+                    Span<uint> off = stackalloc uint[ProbeText.Length];
+                    Span<uint> onIds = stackalloc uint[ProbeText.Length];
+                    var nOff = Shape1(false, off);
+                    var nOn = Shape1(true, onIds);
+                    if (nOff == nOn)
+                    {
+                        for (int i = 0; i < nOff; i++)
+                            if (off[i] != onIds[i] && onIds[i] != 0) { result = true; break; }
+                    }
+                    HB.ClearBuffer(buffer);
+                }
+            }
+
+            lock (fontCacheLock) { featureSupport[(hash, tag)] = result; }
+            return result;
+        }
+
+        #endregion
+
         #region Shaping
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -433,7 +498,9 @@ namespace LightSide
             TextDirection direction,
             VariationKey variationKey = default,
             uint[] variationTags = null,
-            float[] variationCoords = null)
+            float[] variationCoords = null,
+            HBFeature[] features = null,
+            int featureCount = 0)
         {
             if (itemLength == 0)
                 return new ShapingResult(ReadOnlySpan<ShapedGlyph>.Empty, 0);
@@ -477,7 +544,10 @@ namespace LightSide
             HB.SetFlags(buffer, HB.BUFFER_FLAG_REMOVE_DEFAULT_IGNORABLES);
             HB.AddCodepoints(buffer, context, itemOffset, itemLength);
 
-            HB.Shape(fontEntry.hbFont, buffer);
+            if (featureCount > 0 && features != null)
+                HB.Shape(fontEntry.hbFont, buffer, features, featureCount);
+            else
+                HB.Shape(fontEntry.hbFont, buffer);
 
             var glyphInfos = HB.GetGlyphInfos(buffer);
             int glyphCount = glyphInfos.Length;

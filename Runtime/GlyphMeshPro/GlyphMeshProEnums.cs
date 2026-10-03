@@ -132,8 +132,8 @@ namespace OpenGlyph
 
     /// <summary>
     /// Text overflow handling. Mirrors TextMeshPro's <c>TextOverflowModes</c>.
-    /// Round 1 implements Overflow/Ellipsis/Masking/Truncate; ScrollRect/Page/Linked
-    /// are present for API parity but fall back to Overflow (see parity doc).
+    /// All modes are implemented: ScrollRect behaves as Overflow (as in TMP), Page shows
+    /// <c>pageToDisplay</c>, Linked hands the overflow to <c>linkedTextComponent</c>.
     /// </summary>
     public enum TextOverflowModes
     {

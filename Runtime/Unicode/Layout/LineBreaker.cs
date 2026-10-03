@@ -34,21 +34,24 @@ namespace LightSide
             ref ShapedRun[] orderedRunsOut,
             ref int orderedRunCount,
             ReadOnlySpan<float> startMargins,
-            float widthTolerance = 1f)
+            float widthTolerance = 1f,
+            int firstCodepoint = 0,
+            ReadOnlySpan<float> indentJumps = default)
         {
             tempLines = linesOut;
             tempLineCount = 0;
             tempOrderedRuns = orderedRunsOut;
             tempOrderedRunCount = 0;
 
-            if (runs.IsEmpty)
+            if (runs.IsEmpty || firstCodepoint >= codepoints.Length)
             {
                 lineCount = 0;
                 orderedRunCount = 0;
                 return;
             }
 
-            WrapLines(codepoints, runs, glyphs, cpWidths, breakTypes, maxWidth, startMargins, widthTolerance);
+            WrapLines(codepoints, runs, glyphs, cpWidths, breakTypes, maxWidth, startMargins, widthTolerance,
+                firstCodepoint < 0 ? 0 : firstCodepoint, indentJumps);
             ReorderRunsPerLine(paragraphs);
 
             linesOut = tempLines;
@@ -78,12 +81,17 @@ namespace LightSide
             ReadOnlySpan<LineBreakType> breakTypes,
             float maxWidth,
             ReadOnlySpan<float> startMargins,
-            float widthTolerance = 1f)
+            float widthTolerance = 1f,
+            int firstCodepoint = 0,
+            ReadOnlySpan<float> indentJumps = default)
         {
             searchStartRunIdx = 0;
             ResetRunClusterOrder(runs.Length);
+            pendingJumpCp = 0;
+            pendingJumpX = 0f;
 
             var cpCount = codepoints.Length;
+            var hasJumps = indentJumps.Length >= cpCount && cpCount > 0;
 
             // TMP parity: in justified/flush modes a line may EXCEED the box by a small factor
             // (TMP uses 1.05) before it wraps, so a word that nearly fits stays on the line and is
@@ -93,7 +101,9 @@ namespace LightSide
             var tolerance = widthTolerance > 0f ? widthTolerance : 1f;
             var toleranceWidth = float.IsInfinity(maxWidth) ? maxWidth : maxWidth * tolerance;
 
-            var lineStartCp = 0;
+            // firstCodepoint > 0 (TMP linked overflow, firstVisibleCharacter): everything before it is
+            // simply not laid out — no line covers it, so its glyphs are never positioned or drawn.
+            var lineStartCp = firstCodepoint;
             float lineWidth = 0;
             var lastBreakCp = -1;
             float widthAtLastBreak = 0;
@@ -101,16 +111,28 @@ namespace LightSide
             var rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
             var effectiveMaxWidth = toleranceWidth - rawMargin;
 
-            for (var cpIdx = 0; cpIdx < cpCount; cpIdx++)
+            for (var cpIdx = firstCodepoint; cpIdx < cpCount; cpIdx++)
             {
-                lineWidth += cpWidths[cpIdx];
+                // TMP <indent> opened mid-line: the pen jumps to the absolute indent position (it may
+                // move backwards, as in TMP). The jump is never applied at a line's first codepoint —
+                // that case is the line's start margin.
+                if (hasJumps && cpIdx > lineStartCp && indentJumps[cpIdx] >= 0f)
+                {
+                    lineWidth = indentJumps[cpIdx] - rawMargin + cpWidths[cpIdx];
+                    pendingJumpCp = cpIdx;
+                    pendingJumpX = indentJumps[cpIdx];
+                }
+                else
+                {
+                    lineWidth += cpWidths[cpIdx];
+                }
 
                 var breakType = GetBreakTypeAfter(breakTypes, cpIdx);
 
                 while (lineWidth > effectiveMaxWidth)
                     if (lastBreakCp >= 0 && lastBreakCp >= lineStartCp)
                     {
-                        CreateLineFromCodepoints(runs, glyphs, lineStartCp, lastBreakCp, rawMargin);
+                        CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, lastBreakCp, rawMargin);
                         lineStartCp = lastBreakCp + 1;
                         lineWidth -= widthAtLastBreak;
                         lastBreakCp = -1;
@@ -120,7 +142,7 @@ namespace LightSide
                     }
                     else if (cpIdx > lineStartCp)
                     {
-                        CreateLineFromCodepoints(runs, glyphs, lineStartCp, cpIdx - 1, rawMargin);
+                        CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, cpIdx - 1, rawMargin);
                         lineStartCp = cpIdx;
                         lineWidth = cpWidths[cpIdx];
                         lastBreakCp = -1;
@@ -135,7 +157,7 @@ namespace LightSide
 
                 if (breakType == LineBreakType.Mandatory)
                 {
-                    CreateLineFromCodepoints(runs, glyphs, lineStartCp, cpIdx, rawMargin);
+                    CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, cpIdx, rawMargin);
                     lineStartCp = cpIdx + 1;
                     lineWidth = 0;
                     lastBreakCp = -1;
@@ -153,12 +175,13 @@ namespace LightSide
             }
 
             if (lineStartCp < cpCount)
-                CreateLineFromCodepoints(runs, glyphs, lineStartCp, cpCount - 1, rawMargin);
+                CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, cpCount - 1, rawMargin);
         }
 
         private void CreateLineFromCodepoints(
             ReadOnlySpan<ShapedRun> runs,
             ReadOnlySpan<ShapedGlyph> glyphs,
+            ReadOnlySpan<float> jumpWidths,
             int startCp, int endCp, float startMargin = 0f)
         {
             if (startCp > endCp) return;
@@ -212,6 +235,20 @@ namespace LightSide
             float actualLineWidth = 0;
             for (var i = lineRunStart; i < tempOrderedRunCount; i++) actualLineWidth += tempOrderedRuns[i].width;
 
+            // Mid-line indent jump inside this line: the line extends from its margin to the jump target
+            // plus everything after the jump (the text before the jump is overdrawn, as in TMP).
+            var jumpCp = 0;
+            var jumpX = 0f;
+            if (pendingJumpCp > startCp && pendingJumpCp <= endCp)
+            {
+                jumpCp = pendingJumpCp;
+                jumpX = pendingJumpX;
+                float before = 0f;
+                for (var c = startCp; c < jumpCp && c < jumpWidths.Length; c++) before += jumpWidths[c];
+                actualLineWidth = actualLineWidth - before + (jumpX - startMargin);
+                pendingJumpCp = 0;
+            }
+
             EnsureLineCapacity(tempLineCount + 1);
             tempLines[tempLineCount++] = new TextLine
             {
@@ -219,9 +256,16 @@ namespace LightSide
                 runStart = lineRunStart,
                 runCount = lineRunCount,
                 width = actualLineWidth,
-                startMargin = startMargin
+                startMargin = startMargin,
+                indentJumpCp = jumpCp,
+                indentJumpX = jumpX
             };
         }
+
+        // Indent-jump bookkeeping for the line currently being built (see WrapLines).
+        private int pendingJumpCp;
+        private float pendingJumpX;
+
 
         // Per-run cluster order, computed lazily once per BreakLines call (see FindGlyphRangeInLine).
         private const byte OrderUnknown = 0, OrderAscending = 1, OrderDescending = 2, OrderUnordered = 3;

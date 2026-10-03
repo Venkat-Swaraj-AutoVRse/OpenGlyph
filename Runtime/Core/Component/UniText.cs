@@ -1166,7 +1166,8 @@ namespace LightSide
                 lastKnownWidth = width;
 
                 var effectiveFontSize = autoSize ? maxFontSize : fontSize;
-                var canReuse = textProcessor != null && textProcessor.CanReuseLines(width, effectiveFontSize, wordWrap);
+                var layoutWidth = GetLayoutRect(rect).width;
+                var canReuse = textProcessor != null && textProcessor.CanReuseLines(layoutWidth, effectiveFontSize, wordWrap);
 
                 if (canReuse)
                 {
@@ -1320,6 +1321,8 @@ namespace LightSide
                 Cat.Meow("[UniText] FontProvider created", this);
             }
 
+            ConfigureTextProcessor(textProcessor);
+
             UniTextDebug.EndSample();
             return true;
         }
@@ -1370,6 +1373,38 @@ namespace LightSide
         /// override this to true.
         /// </summary>
         protected virtual bool UseTmpJustification => false;
+
+        /// <summary>
+        /// Text-area margins (x = left, y = top, z = right, w = bottom) that inset the RectTransform rect
+        /// for layout and mesh placement (TextMeshPro <c>margin</c>). Plain <c>UniText</c> has none.
+        /// Negative values grow the area.
+        /// </summary>
+        protected virtual Vector4 LayoutMargins => Vector4.zero;
+
+        /// <summary>The rect text is laid out in: the RectTransform rect inset by <see cref="LayoutMargins"/>.</summary>
+        protected Rect GetLayoutRect(Rect rect)
+        {
+            var m = LayoutMargins;
+            if (m == Vector4.zero) return rect;
+            return new Rect(rect.xMin + m.x, rect.yMin + m.w,
+                Mathf.Max(0f, rect.width - m.x - m.z), Mathf.Max(0f, rect.height - m.y - m.w));
+        }
+
+        /// <summary>
+        /// Called whenever the component is about to drive its <see cref="TextProcessor"/> (every dirty
+        /// rebuild, on the main thread) so a subclass can push its layout inputs onto it (e.g. the
+        /// TextMeshPro spacing fields). The default does nothing.
+        /// </summary>
+        protected virtual void ConfigureTextProcessor(TextProcessor processor) { }
+
+        /// <summary>
+        /// Called right before mesh data is generated from the positioned glyphs (possibly on a worker
+        /// thread: pure data work only). A subclass may set <see cref="UniTextMeshGenerator.ClusterHidden"/>.
+        /// </summary>
+        protected virtual void OnBeforeGenerateMeshData(UniTextMeshGenerator generator) { }
+
+        /// <summary>Called on the main thread after this component's mesh was applied to its renderers.</summary>
+        protected virtual void OnAfterMeshApplied() { }
 
         #endregion
 
@@ -1433,6 +1468,18 @@ namespace LightSide
             UpdateSubMeshes();
 
             UniTextDebug.EndSample();
+        }
+
+        /// <summary>
+        /// Runs this component's first pass (markup parse, style source, shaping) synchronously on the
+        /// main thread, exactly as the canvas batch does, if it is not already valid. For subclasses that
+        /// answer layout queries before the next canvas update. No-op while disabled or with empty text.
+        /// </summary>
+        protected void RunFirstPassNow()
+        {
+            if (!isActiveAndEnabled || sourceText.IsEmpty) return;
+            if (!ValidateAndInitialize()) return;
+            DoFirstPass();
         }
 
         protected override void UpdateMaterial() { }

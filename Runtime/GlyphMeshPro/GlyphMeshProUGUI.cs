@@ -374,8 +374,9 @@ namespace OpenGlyph
         }
 
         /// <summary>Mirrors <c>TMP_Text.overflowMode</c>. Overflow/Ellipsis/Truncate map to the engine's
-        /// <see cref="UniText.Overflow"/> modes and Masking maps to Clip; ScrollRect/Page/Linked fall back to
-        /// Overflow with a one-time warning (parity doc).</summary>
+        /// <see cref="UniText.Overflow"/> modes and Masking maps to Clip. ScrollRect behaves as Overflow (as
+        /// in TMP). Page shows <see cref="pageToDisplay"/>; Linked truncates and hands the overflowing text
+        /// to <see cref="linkedTextComponent"/>.</summary>
         public TextOverflowModes overflowMode
         {
             get => m_overflowMode;
@@ -384,11 +385,10 @@ namespace OpenGlyph
                 if (m_overflowMode == value) return;
                 m_overflowMode = value;
                 ApplyOverflowMode(value);
+                PushProcessorInputs();
                 SetDirty(DirtyFlags.Layout);
             }
         }
-
-        private static bool s_warnedUnsupportedOverflow;
 
         private void ApplyOverflowMode(TextOverflowModes mode)
         {
@@ -398,16 +398,10 @@ namespace OpenGlyph
                 case TextOverflowModes.Ellipsis: mapped = TextOverflow.Ellipsis; break;
                 case TextOverflowModes.Truncate: mapped = TextOverflow.Truncate; break;
                 case TextOverflowModes.Masking: mapped = TextOverflow.Clip; break;
-                case TextOverflowModes.Overflow: mapped = TextOverflow.Overflow; break;
-                default:
-                    mapped = TextOverflow.Overflow;
-                    if (!s_warnedUnsupportedOverflow)
-                    {
-                        s_warnedUnsupportedOverflow = true;
-                        Debug.LogWarning("[GlyphMeshProUGUI] overflowMode " + mode +
-                                         " is not supported; falling back to Overflow.");
-                    }
-                    break;
+                // Linked keeps the lines that fit; the rest goes to the linked component.
+                case TextOverflowModes.Linked: mapped = TextOverflow.Truncate; break;
+                // ScrollRect is Overflow in TMP too; Page selects lines in the engine (PageToDisplay).
+                default: mapped = TextOverflow.Overflow; break;
             }
             Overflow = mapped;
         }
@@ -416,39 +410,38 @@ namespace OpenGlyph
         // Spacing / margin
         // =====================================================================
 
-        /// <summary>Mirrors <c>TMP_Text.characterSpacing</c>. Applied via the engine's
-        /// character-spacing span during processing (adapter path).</summary>
+        /// <summary>Mirrors <c>TMP_Text.characterSpacing</c>: extra advance after every character, in
+        /// em/100 of the font size (TMP units). Changing it reshapes the text.</summary>
         public float characterSpacing
         {
             get => m_characterSpacing;
-            set { if (m_characterSpacing == value) return; m_characterSpacing = value; SetDirty(DirtyFlags.Layout); }
+            set { if (m_characterSpacing == value) return; m_characterSpacing = value; PushProcessorInputs(); SetDirty(DirtyFlags.Text); }
         }
 
-        /// <summary>Mirrors <c>TMP_Text.wordSpacing</c>.</summary>
+        /// <summary>Mirrors <c>TMP_Text.wordSpacing</c>: extra advance after each whitespace character, em/100.</summary>
         public float wordSpacing
         {
             get => m_wordSpacing;
-            set { if (m_wordSpacing == value) return; m_wordSpacing = value; SetDirty(DirtyFlags.Layout); }
+            set { if (m_wordSpacing == value) return; m_wordSpacing = value; PushProcessorInputs(); SetDirty(DirtyFlags.Text); }
         }
 
-        /// <summary>Mirrors <c>TMP_Text.lineSpacing</c>. Stored as adapter state; the engine
-        /// applies line spacing through its layout config rather than a public processor setter,
-        /// so Round 1 records the value for API parity and migration (parity doc notes the wiring
-        /// as the engine-config pass).</summary>
+        /// <summary>Mirrors <c>TMP_Text.lineSpacing</c>: extra advance between lines, em/100 of the font
+        /// size. Negative values pull lines together (they may overlap, as in TMP).</summary>
         public float lineSpacing
         {
             get => m_lineSpacing;
-            set { if (m_lineSpacing == value) return; m_lineSpacing = value; SetDirty(DirtyFlags.Layout); }
+            set { if (m_lineSpacing == value) return; m_lineSpacing = value; PushProcessorInputs(); SetDirty(DirtyFlags.Layout); }
         }
 
-        /// <summary>Mirrors <c>TMP_Text.paragraphSpacing</c>.</summary>
+        /// <summary>Mirrors <c>TMP_Text.paragraphSpacing</c>: extra advance after a paragraph break (newline), em/100.</summary>
         public float paragraphSpacing
         {
             get => m_paragraphSpacing;
-            set { if (m_paragraphSpacing == value) return; m_paragraphSpacing = value; SetDirty(DirtyFlags.Layout); }
+            set { if (m_paragraphSpacing == value) return; m_paragraphSpacing = value; PushProcessorInputs(); SetDirty(DirtyFlags.Layout); }
         }
 
-        /// <summary>Mirrors <c>TMP_Text.margin</c> (x=left, y=top, z=right, w=bottom).</summary>
+        /// <summary>Mirrors <c>TMP_Text.margin</c> (x=left, y=top, z=right, w=bottom): insets the text area;
+        /// negative values grow it. Positive margins are added to the preferred size, as in TMP.</summary>
         public virtual Vector4 margin
         {
             get => m_margin;
@@ -459,15 +452,12 @@ namespace OpenGlyph
         // Rich text / direction / visibility caps
         // =====================================================================
 
-        /// <summary>Mirrors <c>TMP_Text.richText</c>. The OpenGlyph engine always parses rich-text
-        /// span tags; there is no engine toggle to disable parsing in Round 1. The flag is stored
-        /// for API parity and migration. When set to <c>false</c> the component tags the text as
-        /// literal by escaping the opening angle bracket so markup is shown verbatim (adapter path;
-        /// see parity doc — a native parse-off switch is a Round 2 gap).</summary>
+        /// <summary>Mirrors <c>TMP_Text.richText</c>. When false, tags in <see cref="text"/> are shown literally
+        /// (the run is wrapped in a literal span); <see cref="fontStyle"/> flags still apply.</summary>
         public bool richText
         {
             get => m_richText;
-            set { if (m_richText == value) return; m_richText = value; SetDirty(DirtyFlags.Text); }
+            set { if (m_richText == value) return; m_richText = value; ApplyStyledSource(); SetDirty(DirtyFlags.Text); }
         }
 
         /// <summary>Mirrors <c>TMP_Text.isRightToLeftText</c>.</summary>
@@ -477,25 +467,26 @@ namespace OpenGlyph
             set => BaseDirection = value ? TextDirection.RightToLeft : TextDirection.LeftToRight;
         }
 
-        /// <summary>Mirrors <c>TMP_Text.maxVisibleCharacters</c>.</summary>
+        /// <summary>Mirrors <c>TMP_Text.maxVisibleCharacters</c>. Characters at or past this index are not
+        /// drawn; changing it only regenerates the mesh (typewriter effects are cheap).</summary>
         public int maxVisibleCharacters
         {
             get => m_maxVisibleCharacters;
-            set { if (m_maxVisibleCharacters == value) return; m_maxVisibleCharacters = value; SetDirty(DirtyFlags.Layout); }
+            set { if (m_maxVisibleCharacters == value) return; m_maxVisibleCharacters = value; SetDirty(DirtyFlags.Color); }
         }
 
         /// <summary>Mirrors <c>TMP_Text.maxVisibleWords</c>.</summary>
         public int maxVisibleWords
         {
             get => m_maxVisibleWords;
-            set { if (m_maxVisibleWords == value) return; m_maxVisibleWords = value; SetDirty(DirtyFlags.Layout); }
+            set { if (m_maxVisibleWords == value) return; m_maxVisibleWords = value; SetDirty(DirtyFlags.Color); }
         }
 
         /// <summary>Mirrors <c>TMP_Text.maxVisibleLines</c>.</summary>
         public int maxVisibleLines
         {
             get => m_maxVisibleLines;
-            set { if (m_maxVisibleLines == value) return; m_maxVisibleLines = value; SetDirty(DirtyFlags.Layout); }
+            set { if (m_maxVisibleLines == value) return; m_maxVisibleLines = value; SetDirty(DirtyFlags.Color); }
         }
 
         // =====================================================================
@@ -510,51 +501,34 @@ namespace OpenGlyph
             return GetPreferredValues(rect.width, rect.height);
         }
 
-        /// <summary>Mirrors <c>TMP_Text.GetPreferredValues(width, height)</c>. Drives the engine's
-        /// first pass synchronously if it has not run yet (so the value is correct in EditMode /
-        /// headless without waiting for a canvas update — matching TMP's force-generate behaviour).</summary>
+        /// <summary>Mirrors <c>TMP_Text.GetPreferredValues(width, height)</c> (outer size; the text area is
+        /// that size minus <see cref="margin"/>). Runs the engine's first pass synchronously if needed (so
+        /// the value is correct in EditMode / headless without waiting for a canvas update — matching TMP's
+        /// force-generate behaviour). Positive margins are added to the result, as in TMP.</summary>
         public Vector2 GetPreferredValues(float width, float height)
         {
-            if (TextProcessor == null) return Vector2.zero;
-            EnsureEngineFirstPass(width, height);
-            if (!TextProcessor.HasValidFirstPassData) return Vector2.zero;
+            EnsureEngineFirstPass();
+            if (TextProcessor == null || !TextProcessor.HasValidFirstPassData) return Vector2.zero;
 
+            var m = m_margin;
+            float innerW = width > 0 ? Mathf.Max(0f, width - m.x - m.z) : TextProcessSettings.FloatMax;
             float fs = AutoSize ? MaxFontSize : FontSize;
             float w = TextProcessor.GetPreferredWidth(fs);
-            float measureWidth = width > 0 ? width : TextProcessSettings.FloatMax;
-            TextProcessor.EnsureLines(measureWidth, fs, WordWrap, HorizontalAlignment, UseTmpJustification);
+            TextProcessor.EnsureLines(innerW, fs, WordWrap, HorizontalAlignment, UseTmpJustification);
             float h = TextProcessor.GetPreferredHeight(fs, 0f, OverEdge, UnderEdge, LeadingDistribution);
+            w += Mathf.Max(0f, m.x) + Mathf.Max(0f, m.z);
+            h += Mathf.Max(0f, m.y) + Mathf.Max(0f, m.w);
             return new Vector2(w, h);
         }
 
-        /// <summary>Runs the engine's first pass over the current text + settings if it is not already
-        /// valid. Lets layout queries (preferredWidth/Height, textInfo) work before the canvas tick.</summary>
-        private void EnsureEngineFirstPass(float width, float height)
+        /// <summary>Runs the engine's first pass (markup parse + shaping) over the current text + settings
+        /// if it is not already valid — the same code the canvas batch runs. Lets layout queries
+        /// (preferredWidth/Height, textInfo) work before the canvas tick.</summary>
+        private void EnsureEngineFirstPass()
         {
-            if (TextProcessor == null) return;
-            if (TextProcessor.HasValidFirstPassData) return;
-            var src = Text;
-            if (string.IsNullOrEmpty(src)) return;
-
-            float fs = AutoSize ? MaxFontSize : FontSize;
-            var settings = new TextProcessSettings
-            {
-                MaxWidth = width > 0 ? width : TextProcessSettings.FloatMax,
-                MaxHeight = height > 0 ? height : TextProcessSettings.FloatMax,
-                HorizontalAlignment = HorizontalAlignment,
-                VerticalAlignment = VerticalAlignment,
-                OverEdge = OverEdge,
-                UnderEdge = UnderEdge,
-                LeadingDistribution = LeadingDistribution,
-                fontSize = fs,
-                baseDirection = BaseDirection,
-                enableWordWrap = WordWrap,
-                TmpJustification = UseTmpJustification,
-                PhysicalAlignment = UsePhysicalAlignment,
-            };
-            TextProcessor.EnsureFirstPass(src.AsSpan(), settings);
+            if (string.IsNullOrEmpty(Text)) return;
+            RunFirstPassNow();
         }
-
         /// <summary>Mirrors <c>TMP_Text.GetPreferredValues(string)</c>.</summary>
         public Vector2 GetPreferredValues(string sourceText)
         {
@@ -593,14 +567,12 @@ namespace OpenGlyph
         public virtual void ForceMeshUpdate(bool ignoreActiveState = false, bool forceTextReparsing = false)
         {
             SetDirty(DirtyFlags.Text); // Text flag = full rebuild per engine DirtyFlags
-            if (TextProcessor == null) return;
-            var rect = rectTransform.rect;
+            var rect = GetLayoutRect(rectTransform.rect);
             float measureW = rect.width > 0 ? rect.width : TextProcessSettings.FloatMax;
-            float measureH = rect.height > 0 ? rect.height : TextProcessSettings.FloatMax;
             // Drive the engine synchronously so queries right after this call see fresh values,
             // without waiting for the canvas update loop (which does not tick in batchmode/EditMode).
-            EnsureEngineFirstPass(measureW, measureH);
-            if (TextProcessor.HasValidFirstPassData)
+            EnsureEngineFirstPass();
+            if (TextProcessor != null && TextProcessor.HasValidFirstPassData)
             {
                 float fs = AutoSize ? MaxFontSize : FontSize;
                 TextProcessor.EnsureLines(measureW, fs, WordWrap, HorizontalAlignment, UseTmpJustification);
@@ -646,7 +618,9 @@ namespace OpenGlyph
 
             info.EnsureCharacterCapacity(glyphs.Length);
 
-            string src = Text ?? string.Empty;
+            string src = CleanText ?? string.Empty;
+            bool masked = ComputeHiddenMask();
+            var mask = m_hiddenMask;
             float lastBaseline = float.NaN;
             int line = -1;
             int lineFirst = 0;
@@ -669,7 +643,7 @@ namespace OpenGlyph
                     info.lineInfo[line].baseline = g.y;
                 }
 
-                bool visible = line < m_maxVisibleLines && i < m_maxVisibleCharacters;
+                bool visible = !masked || (uint)g.cluster >= (uint)mask.Length || mask[g.cluster] == 0;
                 info.characterInfo[i] = new GlyphCharacterInfo
                 {
                     character = (g.cluster >= 0 && g.cluster < src.Length) ? src[g.cluster] : '\0',
@@ -687,6 +661,8 @@ namespace OpenGlyph
 
             info.characterCount = glyphs.Length;
             info.lineCount = line + 1;
+            info.wordCount = CountWords(Buffers);
+            info.pageCount = TextProcessor.PageCount;
         }
 
         private static void CloseLine(GlyphTextInfo info, int line, int first, int last, float startX)
@@ -739,6 +715,7 @@ namespace OpenGlyph
             ApplyOverflowMode(m_overflowMode);
             FontWeight = (m_fontStyle & FontStyles.Bold) != 0 ? 700 : 400;
             FontStyleAxis = (m_fontStyle & FontStyles.Italic) != 0 ? StyleAxis.Italic : StyleAxis.Normal;
+            PushProcessorInputs();
             WordWrap = m_textWrappingMode == TextWrappingModes.Normal
                        || m_textWrappingMode == TextWrappingModes.PreserveWhitespace;
             ApplyStyledSource();

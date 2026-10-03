@@ -30,7 +30,7 @@ namespace LightSide
             if (!sourceText.IsEmpty && textProcessor != null && textProcessor.HasValidFirstPassData)
             {
                 var effectiveFontSize = autoSize ? maxFontSize : fontSize;
-                cachedPreferredWidth = textProcessor.GetPreferredWidth(effectiveFontSize);
+                cachedPreferredWidth = textProcessor.GetPreferredWidth(effectiveFontSize) + PositiveMarginsX;
             }
 
             UniTextDebug.EndSample();
@@ -48,7 +48,7 @@ namespace LightSide
                 return;
             }
 
-            var rect = rectTransform.rect;
+            var rect = GetLayoutRect(rectTransform.rect);
             if (rect.width <= 0)
             {
                 hasValidLayoutCache = false;
@@ -79,6 +79,7 @@ namespace LightSide
             cachedPreferredHeight = (autoSize && wordWrap)
                 ? textProcessor.GetPreferredHeight(maxFontSize, 0f, overEdge, underEdge, leadingDistribution)
                 : textProcessor.GetPreferredHeight(cachedEffectiveFontSize, 0f, overEdge, underEdge, leadingDistribution);
+            cachedPreferredHeight += PositiveMarginsY;
 
             UniTextDebug.EndSample();
         }
@@ -108,7 +109,7 @@ namespace LightSide
             if (!autoSize) return;
             if (textProcessor == null || !textProcessor.HasValidFirstPassData) return;
 
-            var rect = rectTransform.rect;
+            var rect = GetLayoutRect(rectTransform.rect);
             if (rect.width <= 0 || rect.height <= 0) return;
 
             textProcessor.EnsureLines(rect.width, maxFontSize, wordWrap, horizontalAlignment, UseTmpJustification);
@@ -159,6 +160,10 @@ namespace LightSide
             return textProcessor.FindOptimalFontSize(
                 minFontSize, maxFontSize, width, height, settings);
         }
+
+        // TMP adds only POSITIVE margins to the preferred (rendered) size.
+        private float PositiveMarginsX { get { var m = LayoutMargins; return Mathf.Max(0f, m.x) + Mathf.Max(0f, m.z); } }
+        private float PositiveMarginsY { get { var m = LayoutMargins; return Mathf.Max(0f, m.y) + Mathf.Max(0f, m.w); } }
 
         private void InvalidateLayoutCache()
         {
