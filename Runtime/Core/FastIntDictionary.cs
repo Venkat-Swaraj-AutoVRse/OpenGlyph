@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace LightSide
 {
@@ -13,9 +14,20 @@ namespace LightSide
     /// Designed for hot paths where standard Dictionary overhead is too high.
     /// </para>
     /// <para>
-    /// Writes are not thread-safe and require external synchronization.
-    /// Reads (TryGetValue, ContainsKey) are safe against concurrent Grow
-    /// because mask is derived from the snapshotted entries array length.
+    /// <b>Threading.</b> A SINGLE writer concurrent with any number of readers is safe; concurrent
+    /// writers still require external synchronisation. The single-writer/many-reader guarantee is
+    /// established with memory barriers (not locks), so it stays allocation-free:
+    /// <list type="bullet">
+    /// <item><see cref="AddOrUpdate"/> writes <c>key</c> and <c>value</c> FIRST, then publishes the
+    /// slot by writing <c>hasValue</c> with <see cref="Volatile.Write(ref bool,bool)"/> LAST. A
+    /// reader that observes <c>hasValue == true</c> (read with <see cref="Volatile.Read(ref bool)"/>)
+    /// is therefore guaranteed to observe the fully-written <c>key</c>/<c>value</c> — no torn slot,
+    /// including on weak memory models (ARM).</item>
+    /// <item><see cref="Grow"/> builds a fresh, fully-populated array and publishes it with
+    /// <see cref="Volatile.Write{T}(ref T,T)"/>; readers snapshot <c>entries</c> once with
+    /// <see cref="Volatile.Read{T}(ref T)"/> and derive the mask from that snapshot, so a grow in
+    /// flight never changes the array a reader is walking.</item>
+    /// </list>
     /// Grows automatically at 75% load factor.
     /// </para>
     /// </remarks>
@@ -43,11 +55,15 @@ namespace LightSide
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetValue(int key, out T value)
         {
-            var e = entries;
+            // Snapshot the array once (a concurrent Grow publishes a NEW array via Volatile.Write; this
+            // Volatile.Read either sees the old or the new one whole, never a half-swapped reference).
+            var e = Volatile.Read(ref entries);
             var m = e.Length - 1;
             var idx = key & m;
 
-            while (e[idx].hasValue)
+            // Volatile.Read of hasValue pairs with the Volatile.Write in AddOrUpdate: observing true
+            // here guarantees the matching key/value stores are also visible (no torn slot on ARM).
+            while (Volatile.Read(ref e[idx].hasValue))
             {
                 if (e[idx].key == key)
                 {
@@ -84,30 +100,38 @@ namespace LightSide
             var m = e.Length - 1;
             var idx = key & m;
 
-            while (e[idx].hasValue)
+            while (Volatile.Read(ref e[idx].hasValue))
             {
                 if (e[idx].key == key)
                 {
+                    // Updating an EXISTING slot: a reader already past the hasValue gate may read this
+                    // value concurrently. For reference/large value types this store is not atomic, but
+                    // the single-writer/many-reader contract only guarantees torn-free SLOT PUBLICATION
+                    // (key↔value↔hasValue consistency), which an in-place value update does not break:
+                    // the slot stays occupied with the same key throughout. Callers needing a coherent
+                    // read of an updated value must still synchronise externally.
                     e[idx].value = value;
                     return;
                 }
                 idx = (idx + 1) & m;
             }
 
+            // Publish a NEW slot: write key and value FIRST, then release-publish hasValue LAST so a
+            // reader that sees hasValue==true is guaranteed to see the key/value already stored.
             e[idx].key = key;
             e[idx].value = value;
-            e[idx].hasValue = true;
+            Volatile.Write(ref e[idx].hasValue, true);
             count++;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool ContainsKey(int key)
         {
-            var e = entries;
+            var e = Volatile.Read(ref entries);
             var m = e.Length - 1;
             var idx = key & m;
 
-            while (e[idx].hasValue)
+            while (Volatile.Read(ref e[idx].hasValue))
             {
                 if (e[idx].key == key)
                     return true;
@@ -189,7 +213,10 @@ namespace LightSide
                 }
             }
 
-            entries = newEntries;
+            // Publish the fully-populated new array LAST. A concurrent reader's Volatile.Read(entries)
+            // sees either the old array (walked to completion against its own mask) or this new one,
+            // never a partially-filled array (every slot above was written before this release store).
+            Volatile.Write(ref entries, newEntries);
         }
 
         private static int NextPowerOfTwo(int v)

@@ -383,6 +383,10 @@ namespace LightSide
     #endif
             if (isInitialized) return;
 
+            // EnsureInitialized runs from the main-thread render callbacks, so this records the main
+            // thread for UniTextThreadGuard before any worker is ever dispatched.
+            UniTextThreadGuard.CaptureMainThread();
+
             var d = CanvasUpdateRegistry.instance;
             EmojiFont.EnsureInitialized();
             Canvas.preWillRenderCanvases += OnPreWillRenderCanvases;
@@ -477,6 +481,11 @@ namespace LightSide
 
             if (useParallel && UseParallel)
             {
+                // Warm the shared pipeline components that DoFirstPass touches, on the MAIN thread,
+                // before any worker runs. The shared LineBreakAlgorithm lazily builds its
+                // DictionarySegmenter (which resolves dictionaries via TextAsset.bytes — main-thread
+                // only); forcing it here guarantees a worker never triggers that build off-thread.
+                _ = SharedPipelineComponents.LineBreakAlgorithm;
                 UniTextWorkerPool.Execute(componentsBuffer.data, count, static comp => comp.DoFirstPass());
             }
             else
@@ -569,6 +578,16 @@ namespace LightSide
             UniTextDebug.EndSample();
 
             UniTextDebug.BeginSample("MeshDataGeneration");
+
+            // MAIN-THREAD prepare: fire Rebuilding, resolve materials per fontId, and synthesise each
+            // component's base style — every Unity-touching / non-thread-safe step — BEFORE dispatch,
+            // so the generation pass below is safe to run on worker threads. Always run serially here
+            // regardless of the parallel decision (this is the "main thread barrier" the fix adds).
+            for (var i = 0; i < count; i++)
+            {
+                componentsBuffer[i].PrepareForMeshGenerationMainThread();
+            }
+
             if (useParallel && UseParallel)
             {
                 UniTextWorkerPool.Execute(componentsBuffer.data, count, static comp => comp.DoGenerateMeshData());
@@ -654,12 +673,51 @@ namespace LightSide
             }
         }
 
-        private void DoGenerateMeshData()
+        /// <summary>
+        /// MAIN-THREAD prepare step, run for every dirty component BEFORE mesh generation is dispatched
+        /// (possibly to worker threads). It performs every Unity-touching / non-thread-safe operation
+        /// that <see cref="DoGenerateMeshData"/> used to do inline, so the generation pass itself is
+        /// pure data work safe to run on a worker:
+        /// <list type="bullet">
+        /// <item>fires the public <see cref="Rebuilding"/> event (BaseLineModifier etc. subscribe);</item>
+        /// <item>resolves + caches this component's materials per fontId (<see cref="UniTextFontProvider.PrepareMaterials"/>);</item>
+        /// <item>synthesises the base <see cref="GlyphStyle"/> from the legacy appearance (reads Material
+        /// properties) when the unified renderer is on, caching it for the worker-side coordinator.</item>
+        /// </list>
+        /// </summary>
+        private void PrepareForMeshGenerationMainThread()
         {
             if (textProcessor == null || !textProcessor.HasValidFirstPassData) return;
             if (meshGenerator == null) return;
 
+            // Fire the public rebuild event here (main thread), NOT inside DoGenerateMeshData which may
+            // run on a worker. Subscribers (e.g. BaseLineModifier.OnRebuilding) re-read buffers; doing
+            // that on the main thread before dispatch is safe and matches the pre-parallel ordering.
+            UniTextThreadGuard.AssertMainThread("UniText.Rebuilding");
             Rebuilding?.Invoke();
+
+            // Resolve all materials now so GetMaterials(fontId) is a pure cache read on the worker.
+            fontProvider?.PrepareMaterials();
+
+            // Pre-synthesise the base style for the unified renderer (reads Material properties → main
+            // thread only). overrideStyle uses the component-authored style, which needs no Unity reads.
+            if (UseUnifiedRenderer)
+            {
+                preparedBaseStyle = overrideStyle
+                    ? this.style.ToGlyphStyle()
+                    : AppearanceStyleShim.StyleFor(fontProvider?.Appearance, fontProvider?.MainFont);
+                hasPreparedBaseStyle = true;
+            }
+            else
+            {
+                hasPreparedBaseStyle = false;
+            }
+        }
+
+        private void DoGenerateMeshData()
+        {
+            if (textProcessor == null || !textProcessor.HasValidFirstPassData) return;
+            if (meshGenerator == null) return;
 
             ref readonly var cached = ref cachedTransformData;
 

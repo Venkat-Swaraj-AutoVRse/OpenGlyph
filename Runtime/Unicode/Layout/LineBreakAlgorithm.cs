@@ -18,17 +18,26 @@ namespace LightSide
     internal sealed class LineBreakAlgorithm
     {
         private readonly UnicodeDataProvider dataProvider;
-        private DictionarySegmenter dictionarySegmenter;
+        private readonly DictionarySegmenter dictionarySegmenter;
 
         public LineBreakAlgorithm(UnicodeDataProvider dataProvider)
         {
             this.dataProvider = dataProvider ?? throw new ArgumentNullException(nameof(dataProvider));
+            // Build the dictionary segmenter EAGERLY, on the thread that constructs this algorithm.
+            // That is always the main thread (SharedPipelineComponents warms the shared instance at
+            // init, and the layout pipeline constructs per-pass instances on the main thread), and the
+            // segmenter's constructor resolves dictionaries via TextAsset.bytes — a main-thread-only
+            // Unity API. The previous `dictionarySegmenter ??= new DictionarySegmenter(...)` could run
+            // that build on a parallel worker thread the first time text was segmented. See
+            // GetBreakOpportunitiesWithSegmentation.
+            dictionarySegmenter = new DictionarySegmenter(dataProvider);
         }
 
         public LineBreakAlgorithm()
         {
             dataProvider = UnicodeData.Provider ?? throw new InvalidOperationException(
                 "UnicodeData not initialized. Call UnicodeData.EnsureInitialized() first.");
+            dictionarySegmenter = new DictionarySegmenter(dataProvider);
         }
 
         /// <summary>
@@ -43,7 +52,6 @@ namespace LightSide
         public void GetBreakOpportunitiesWithSegmentation(ReadOnlySpan<int> codePoints, Span<LineBreakType> breaks)
         {
             GetBreakOpportunities(codePoints, breaks);
-            dictionarySegmenter ??= new DictionarySegmenter(dataProvider);
             dictionarySegmenter.InjectBreaks(codePoints, breaks.Slice(0, codePoints.Length + 1));
         }
 
