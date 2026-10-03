@@ -278,18 +278,6 @@ namespace OpenGlyph
         // Color / gradient
         // =====================================================================
 
-        /// <summary>Mirrors <c>TMP_Text.color</c>. Overrides the inherited <c>Graphic.color</c> to
-        /// keep the plain-face style's face colour in sync when <see cref="m_plainFaceStyle"/> is on.</summary>
-        public override Color color
-        {
-            get => base.color;
-            set
-            {
-                base.color = value;
-                if (m_plainFaceStyle && isActiveAndEnabled) ApplyPlainFaceDefault();
-            }
-        }
-
         /// <summary>Mirrors <c>TMP_Text.enableVertexGradient</c>.</summary>
         public bool enableVertexGradient
         {
@@ -723,14 +711,14 @@ namespace OpenGlyph
         /// TMP's look — by overriding the engine style with a clean <see cref="UniTextStyle"/>
         /// (zero outline / underlay / glow). This prevents the ambient default <c>UniTextAppearance</c>
         /// material (whose disabled-underlay serialized default would otherwise be read by the
-        /// appearance shim) from adding a dark halo/shadow around every glyph. Face colour follows
-        /// the component <c>color</c>. Clearing <see cref="m_plainFaceStyle"/> restores the engine's
-        /// appearance-driven styling.</summary>
+        /// appearance shim) from adding a dark halo/shadow around every glyph. The face stays white:
+        /// the component <c>color</c> already reaches the glyphs as vertex colour, so copying it into
+        /// the face too applied it twice (alpha 0.5 rendered as ~0.25). Clearing
+        /// <see cref="m_plainFaceStyle"/> restores the engine's appearance-driven styling.</summary>
         private void ApplyPlainFaceDefault()
         {
             if (!m_plainFaceStyle) return;
             var plain = UniTextStyle.Default; // white face, no outline/underlay/glow
-            plain.faceColor = color;          // keep the glyph face tinted by the component colour
             Style = plain;
             OverrideStyle = true;             // use Style, not the appearance material
             // The component-authored style is honoured only on the UNIFIED renderer path; the legacy
