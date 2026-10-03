@@ -416,6 +416,30 @@ namespace LightSide.Tests
             Assert.AreEqual(layout0, StaticCounter(typeof(TextProcessor), "LayoutCount"), "typewriter must not re-layout");
         }
 
+        [TestCase(Legacy)]
+        [TestCase(Unified)]
+        public void MaxVisibleCharacters_StartingAtZero_RevealsTheRightGlyphs(UniText.UnifiedRendererMode mode)
+        {
+            // Leave stale glyph-cache entries in the shared pool: render other text, then destroy it.
+            for (var k = 0; k < 3; k++)
+            {
+                var other = Make("1. Hanging indent mark", 600, 200, mode); // same pooled-array size class as s
+                Object.DestroyImmediate(other.gameObject);
+            }
+            const string s = "The quick brown fox";
+            var c = Make(s, 600, 200, mode, g => g.maxVisibleCharacters = 0);
+            Assert.AreEqual(0, QuadCount(c), "nothing visible at 0");
+            c.maxVisibleCharacters = int.MaxValue;
+            Render();
+            var reference = Make(s, 600, 200, mode);
+            var a = Quads(c); var b = Quads(reference);
+            Assert.AreEqual(b.Count, a.Count);
+            for (var i = 0; i < a.Count; i++)
+                for (var v = 0; v < 4; v++)
+                    Assert.AreEqual(b[i].v[v].x - b[0].v[0].x, a[i].v[v].x - a[0].v[0].x, 0.01f,
+                        $"quad {i} vertex {v}: revealed glyph geometry must match an unlimited component");
+        }
+
         [Test]
         public void MaxVisibleWords_And_MaxVisibleLines_HideLikeTmp()
         {

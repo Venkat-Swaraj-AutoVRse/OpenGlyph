@@ -951,7 +951,12 @@ namespace LightSide
                 // no OnGlyph), so the typewriter effect is a mesh-only rebuild — no reshape, no relayout.
                 var hidden = ClusterHidden;
                 if (hidden != null && (uint)glyph.cluster < (uint)hidden.Length && hidden[glyph.cluster] != 0)
+                {
+                    // The cache is marked valid after this pass; an entry skipped here must not keep
+                    // stale data from a previous user of the pooled array.
+                    if (!useCache) glyphCache[glyph.shapedGlyphIndex].isValid = false;
                     continue;
+                }
 
                 var cacheIndex = glyph.shapedGlyphIndex;
 

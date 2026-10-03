@@ -274,6 +274,11 @@ Target: Quest / world-space text without a Canvas. Design:
 - Rich-text tags with no engine rule: `<mspace>`, `<space>`, `<width>`, `<margin>` (inline), `<alpha>`.
 - `<mark>` `padding=` / `color=` attributes; `<font>` `material=` attribute (ignored).
 - `TMP_ColorGradient` presets (`colorGradientPreset`).
+- Wrapping counts a trailing space against the width (TMP does not), so a line can wrap one word earlier than TMP.
+- Wrapping counts a trailing space against the width (TMP does not), so a line can wrap one word
+  earlier than TMP.
+- `maxVisibleCharacters` hides by cluster: a ligature (e.g. `ff`) is shown as soon as its first
+  character is visible; TMP (no ligatures by default) shows one character at a time.
 - Mid-line `<line-indent>` (only the line-start case is applied) and an `<indent>` jump followed by
   a wrap that breaks BEFORE the jump on the same line (rare; the wrap width is then approximate).
 
@@ -368,6 +373,16 @@ is not a bundled fixture; Thai vowel/tone marks and Khmer subscript conjuncts ex
 same multi-glyph-cluster property.)
 
 ## Round 3 — stored-only properties made real + missing TMP features
+
+![TextMesh Pro (left) and GlyphMeshProUGUI (right) with characterSpacing, lineSpacing, SmallCaps, a mark highlight, a hanging indent and maxVisibleCharacters](../.github/assets/features/gmp-tmp-parity.png)
+
+![maxVisibleCharacters typewriter in TextMesh Pro and GlyphMeshProUGUI, one character per frame at 15 fps](../.github/assets/features/gmp-typewriter.gif)
+
+Rendered offscreen in the Editor with the same Noto Sans font, size (32 pt / 28 pt) and rect for both
+components. Expected differences: GlyphMeshPro draws the highlight behind the text (TMP draws it over);
+HarfBuzz applies the font's `ff` ligature, so at `maxVisibleCharacters = 13` the ligature that starts at
+the 13th character also shows the 14th `f`; and in the typewriter GlyphMeshPro wraps "over" one word
+earlier, because the engine counts the trailing space when wrapping (pre-existing, see the open gaps).
 
 All Round 3 tests live in `Tests/Editor/GlyphMeshProParity3Tests.cs`. Where a real
 `TextMeshProUGUI` can be built in the test host (the tests give TMP a runtime settings instance and a

@@ -81,6 +81,12 @@ PreserveWhitespace wrapping modes, and the world-space `GlyphMeshPro` (MeshRende
 TMP font assets are not used — fonts are `UniTextFont` assets. Full mapping:
 [GlyphMeshPro-Parity.md](Documentation/GlyphMeshPro-Parity.md).
 
+![TextMesh Pro and GlyphMeshProUGUI side by side on a dark background: characterSpacing 12, lineSpacing 40, SmallCaps, a mark highlight, a hanging indent and maxVisibleCharacters 13 render the same in both columns](.github/assets/features/gmp-tmp-parity.png)
+
+![Typewriter animation: maxVisibleCharacters grows by one character per frame in TextMesh Pro (left) and GlyphMeshProUGUI (right)](.github/assets/features/gmp-typewriter.gif)
+
+The typewriter only rebuilds the mesh: changing `maxVisibleCharacters` never reshapes or re-lays out the text.
+
 ## Showcase
 
 | Rich text | Layout |
