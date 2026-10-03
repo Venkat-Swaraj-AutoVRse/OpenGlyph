@@ -506,16 +506,12 @@ namespace LightSide
             {
                 if (fontStack == value) return;
                 
-#if UNITY_EDITOR
                 UnlistenConfigChanged();
-#endif
                 if (fontStack != null) fontStack.Changed -= OnConfigChanged;
                 fontStack = value;
                 if (fontStack != null) fontStack.Changed += OnConfigChanged;
 
-#if UNITY_EDITOR
                 ListenConfigChanged();
-#endif
                 SetDirty(DirtyFlags.Font);
             }
         }
@@ -527,15 +523,11 @@ namespace LightSide
             set
             {
                 if (appearance == value) return;
-    #if UNITY_EDITOR
                 UnlistenConfigChanged();
-    #endif
 
                 appearance = value;
                 if (fontProvider != null) fontProvider.Appearance = value;
-    #if UNITY_EDITOR
                 ListenConfigChanged();
-    #endif
                 SetDirty(DirtyFlags.Material);
             }
         }
@@ -1118,18 +1110,14 @@ namespace LightSide
         private void Sub()
         {
             if (fontStack != null) fontStack.Changed += OnConfigChanged;
-#if UNITY_EDITOR
             ListenConfigChanged();
-#endif
             EmojiFont.DisableChanged += OnEmojiFontDisableChanged;
         }
 
         private void UnSub()
         {
             if (fontStack != null) fontStack.Changed -= OnConfigChanged;
-#if UNITY_EDITOR
             UnlistenConfigChanged();
-#endif
             EmojiFont.DisableChanged -= OnEmojiFontDisableChanged;
         }
 
@@ -1199,7 +1187,6 @@ namespace LightSide
         }
 
 
-    #if UNITY_EDITOR
 
         /// <summary>Configs we subscribed to Changed event (for correct unsubscription).</summary>
         private readonly List<ModRegisterConfig> subscribedConfigs = new();
@@ -1246,7 +1233,6 @@ namespace LightSide
         {
             ReInitModifiers();
         }
-    #endif
 
         // Editor AND player: a component with no font stack / appearance of its own falls back to the
         // project defaults in UniTextSettings. (Editor-only, the player threw every frame instead.)
