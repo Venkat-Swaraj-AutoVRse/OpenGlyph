@@ -499,6 +499,70 @@ namespace LightSide.Tests
         }
 
         [Test]
+        public void Alignment_Justified_KeepsNearFittingWord_OnLine_NotWrapped()
+        {
+            // TMP parity (deterministic, headless): a justified line may overrun the box by up to 5%
+            // before it wraps, so a word that nearly fits stays on the line (then inter-word
+            // justification compresses it back) instead of wrapping to the next line — exactly the
+            // "quickly stays on line 2 in TMP, moves to line 3 in ours" case from the review image.
+            //
+            // Fails WITHOUT the LineBreaker 1.05 width tolerance: with no tolerance, Left and Justified
+            // wrap at the identical width, so their line counts are equal. WITH the fix, Justified packs
+            // the near-fitting word onto the earlier line, so it produces STRICTLY FEWER lines at some
+            // width. We scan widths and assert such a width exists (and that justified never produces
+            // MORE lines than left at any width — the tolerance only ever packs more).
+            float full = RunOpenGlyph(Paragraph, 100000f, wrap: false).preferred.x;
+            bool foundStrictlyFewer = false;
+            for (int d = 3; d <= 10; d++)
+            {
+                float w = full / d;
+                int leftLines = PositionedLineWidths(Paragraph, w, wrap: true, HorizontalAlignment.Left).Count;
+                int justLines = PositionedLineWidths(Paragraph, w, wrap: true, HorizontalAlignment.Justified).Count;
+                Assert.LessOrEqual(justLines, leftLines,
+                    $"At width {w:F0} justified ({justLines}) produced MORE lines than left ({leftLines}); " +
+                    "the 1.05 tolerance must only ever pack more, never fewer.");
+                if (justLines < leftLines) foundStrictlyFewer = true;
+            }
+            Assert.IsTrue(foundStrictlyFewer,
+                "At no tested width did justified keep a near-fitting word on the line (fewer lines than " +
+                "left). The LineBreaker justified/flush width tolerance (1.05) is missing or ineffective.");
+        }
+
+        [Test]
+        public void Compare_Justified_LineCount_MatchesTMP()
+        {
+            RequireTmp();
+            // The review-image scenario: the SAME paragraph, SAME width, TopJustified in both. With the
+            // 1.05 wrap tolerance OpenGlyph's justified line breaks match TMP's (± 0 lines in the common
+            // case, within 1 as a tolerance for sub-pixel metric differences between the two SDF stacks).
+            GameObject canvasGo = null;
+            try
+            {
+                const string para =
+                    "The quick brown fox jumps over the lazy dog while five boxing wizards jump quickly to vex the gymnast.";
+                float width = 360f;
+                canvasGo = new GameObject("Canvas", typeof(Canvas));
+                var go = new GameObject("TMP", typeof(RectTransform));
+                go.transform.SetParent(canvasGo.transform, false);
+                var tmp = go.AddComponent<TextMeshProUGUI>();
+                tmp.font = _tmpFont;
+                tmp.fontSize = FontSize;
+                tmp.textWrappingMode = TextWrappingModes.Normal;
+                tmp.alignment = TMPro.TextAlignmentOptions.TopJustified;
+                ((RectTransform)go.transform).sizeDelta = new Vector2(width, 100000f);
+                tmp.text = para;
+                tmp.ForceMeshUpdate();
+                int tmpLines = tmp.textInfo.lineCount;
+
+                int ogLines = PositionedLineWidths(para, width, wrap: true, HorizontalAlignment.Justified).Count;
+                Debug.Log($"[Parity] justified lineCount TMP={tmpLines} OpenGlyph={ogLines} width={width:F1}");
+                Assert.LessOrEqual(Mathf.Abs(tmpLines - ogLines), 1,
+                    $"Justified line count differs by more than 1 (TMP {tmpLines} vs OpenGlyph {ogLines}).");
+            }
+            finally { if (canvasGo != null) Object.DestroyImmediate(canvasGo); }
+        }
+
+        [Test]
         public void Alignment_Justified_FillsNonLastLines_LastStaysRagged()
         {
             // Round 2: Justified distributes inter-word slack so every line EXCEPT the paragraph's last
@@ -511,20 +575,27 @@ namespace LightSide.Tests
             Assert.GreaterOrEqual(leftW.Count, 3, "Need a multi-line wrap for the test.");
 
             var justW = PositionedLineWidths(Paragraph, boxW, wrap: true, HorizontalAlignment.Justified);
-            Assert.AreEqual(leftW.Count, justW.Count, "Justification must not change the line count/breaks.");
+            // TMP parity: justified wrapping may KEEP a word on a line that overruns the box by up to
+            // 5% (then compress it back), so justified can pack MORE words per line than left-aligned —
+            // its line count is <= the left-aligned count, NOT necessarily equal. (Round 1 asserted
+            // equality; that was the pre-parity behaviour this PR deliberately changes.)
+            Assert.LessOrEqual(justW.Count, leftW.Count,
+                "Justified must not produce MORE lines than left (the 1.05 wrap tolerance only ever packs more).");
+            Assert.GreaterOrEqual(justW.Count, 3, "Justified paragraph should still be multi-line.");
 
             int last = justW.Count - 1;
             for (int i = 0; i < last; i++)
             {
-                Assert.Greater(justW[i], leftW[i] + 0.5f,
-                    $"Justified line {i} ({justW[i]:F1}) must be wider than ragged ({leftW[i]:F1}).");
+                // Each non-last justified line fills the box: spread lines reach ~boxW, and a line that
+                // overran within the 1.05 tolerance is COMPRESSED back to the box — neither overflows.
                 Assert.GreaterOrEqual(justW[i], boxW * 0.90f,
                     $"Justified line {i} ({justW[i]:F1}) should fill ~box width ({boxW}).");
                 Assert.LessOrEqual(justW[i], boxW * 1.02f,
                     $"Justified line {i} ({justW[i]:F1}) must not overflow the box ({boxW}).");
             }
-            Assert.AreEqual(leftW[last], justW[last], 1.5f,
-                "Justified must leave the paragraph's LAST line un-justified (ragged).");
+            // The paragraph's LAST line stays ragged (un-justified) and never overflows the box.
+            Assert.LessOrEqual(justW[last], boxW * 1.02f,
+                $"Justified LAST line ({justW[last]:F1}) must not overflow the box ({boxW}).");
 
             // Flush: non-last lines still fill; the last line is justified too when it had slack.
             var flushW = PositionedLineWidths(Paragraph, boxW, wrap: true, HorizontalAlignment.Flush);

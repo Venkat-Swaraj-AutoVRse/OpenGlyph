@@ -262,14 +262,18 @@ namespace LightSide
                 }
 
                 // ---- Justification (Justified/Flush) --------------------------------------------
-                // Distribute the leftover horizontal slack across inter-word whitespace so the line
-                // fills the available width. Justified skips the LAST line of a paragraph (a line that
-                // ends the text or ends at a hard newline); Flush justifies every line. Only when the
-                // line is narrower than the box (never squeeze), width is finite, and there is at least
-                // one whitespace gap to absorb the slack.
+                // Distribute the horizontal slack across inter-word whitespace so the line fills the
+                // available width. Justified skips the LAST line of a paragraph (a line that ends the
+                // text or ends at a hard newline); Flush justifies every line. The slack may be
+                // NEGATIVE: TMP's wrap test keeps a word on a justified line that overruns the box by
+                // up to 5% (see LineBreaker widthTolerance), then justification COMPRESSES the gaps to
+                // pull it back inside the box — which is why "quickly" stays on TMP's line 2 instead of
+                // wrapping. We mirror that: distribute (availableWidth - lineWidth)/gaps whether that is
+                // positive (spread) or negative (compress). Requires finite width, an LTR line, and at
+                // least one whitespace gap.
                 float justifyExtraPerGap = 0f;
                 if ((hAlign == HorizontalAlignment.Justified || hAlign == HorizontalAlignment.Flush)
-                    && hasFiniteWidth && !isRtlLine && lineWidth < availableWidth)
+                    && hasFiniteWidth && !isRtlLine)
                 {
                     bool isLastLineOfParagraph =
                         i == lineCount - 1 || EndsAtHardBreak(in line, codepoints);
