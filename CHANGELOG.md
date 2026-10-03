@@ -38,6 +38,21 @@ through phase 1c.
   device pixel grid. Adds **Smooth** (anti-aliased grayscale bitmap) and **Mono**
   (1-bit) render modes for ordinary vector fonts, selectable per font asset.
 
+#### Changed
+- **Shared glyph-atlas memory budgets are disabled at runtime (temporary).** The per-array
+  page/byte budgets and the global byte budget on `UniTextSettings`
+  (`SharedAtlasPageBudget`, `SharedAtlasByteBudgetPerArray`, `SharedAtlasByteBudgetGlobal`)
+  are **no longer enforced**: `SharedGlyphAtlas` reads every budget as `0` (unbounded)
+  regardless of the configured values, so the atlas never evicts through the runtime.
+  They were disabled because the eviction machinery only evicts refcount-0 cells on an
+  LRU clock, but the render path never calls `Acquire`/`Release` or `BeginFrame` — so a
+  non-zero budget could evict **on-screen** glyphs and draw wrong text. The eviction code
+  and its unit tests are retained; the serialized settings fields are kept (existing assets
+  load unchanged) and marked *"not active yet"* in their tooltips, and a single warning is
+  logged once per session if a non-zero budget is set. See
+  `Documentation/Design/MemoryBudgets.md` for the full rationale and the conditions to
+  re-enable.
+
 #### Known limitations
 - **MSDF 'W' junction residual.** A small corner-rounding residual remains at the
   'W' apex. This is inherent to the algorithm, not a bug: msdfgen v1.12 (85e8b3d)
