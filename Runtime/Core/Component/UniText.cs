@@ -1155,6 +1155,7 @@ namespace LightSide
         private void DeInit()
         {
             ClearAllRenderers();
+            ReleaseVertexEffects();
             DestroyAttributeParser();
             MeshApplied?.Invoke();
 

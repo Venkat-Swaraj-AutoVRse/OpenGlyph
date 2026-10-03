@@ -166,6 +166,11 @@ namespace LightSide
         /// <remarks>Valid during <see cref="OnGlyph"/> callback. Maps back to codepoint indices.</remarks>
         public int currentCluster;
 
+        /// <summary>Index of the first of the current glyph's 4 quad vertices in the vertex buffer.</summary>
+        /// <remarks>Valid during <see cref="OnGlyph"/>. Unlike <c>vertexCount - 4</c> it stays correct when an
+        /// earlier <see cref="OnGlyph"/> handler appended geometry of its own.</remarks>
+        public int currentGlyphVertexStart;
+
         /// <summary>True when the current glyph's run used a real bold face (Phase 2: suppress synthetic bold).</summary>
         /// <remarks>Valid during <see cref="OnGlyph"/> callback.</remarks>
         public bool currentRealBold;
@@ -311,6 +316,10 @@ namespace LightSide
         /// Access current glyph data via <see cref="Current"/> or public fields.
         /// </remarks>
         public Action OnGlyph;
+
+        /// <summary>Invoked for each glyph right BEFORE <see cref="OnGlyph"/>: the component's base fill
+        /// (whole-text gradient) writes here so span modifiers (<c>&lt;color&gt;</c>, <c>&lt;gradient&gt;</c>) override it.</summary>
+        public Action OnGlyphBase;
 
         /// <summary>Invoked after all mesh generation is complete.</summary>
         public Action OnRebuildEnd;
@@ -1120,7 +1129,9 @@ namespace LightSide
 
                 vertexCount += 4;
                 triangleCount += 6;
+                currentGlyphVertexStart = i0;
 
+                OnGlyphBase?.Invoke();
                 OnGlyph?.Invoke();
 
                 verts = vertices.data;

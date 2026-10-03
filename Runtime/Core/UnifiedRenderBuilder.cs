@@ -97,6 +97,7 @@ namespace LightSide
             foreach (var kv in SharedGroups)
                 if (kv.Value.mesh != null) UnityEngine.Object.DestroyImmediate(kv.Value.mesh);
             SharedGroups.Clear();
+            LastOutputGroups.Clear();
         }
 
     #if UNITY_EDITOR
@@ -191,7 +192,11 @@ namespace LightSide
             public bool direct;
             public int directStart, directTriStart;
 
-            public void ClearBuffers() { vertCount = 0; triCount = 0; pageSize = 0; segments = 0; direct = false; }
+            // Where each run of this group's merged vertices came from in the generator buffers (in
+            // merged order). Read by the vertex-effect capture to map merged vertices back to glyphs.
+            public readonly List<SourceRange> sources = new();
+
+            public void ClearBuffers() { vertCount = 0; triCount = 0; pageSize = 0; segments = 0; direct = false; sources.Clear(); }
 
             public void EnsureVerts(int required)
             {
@@ -224,6 +229,20 @@ namespace LightSide
         }
 
         private static readonly Dictionary<TextureFormat, Group> SharedGroups = new();
+
+        /// <summary>A run of merged vertices: <c>count</c> vertices at <c>dstStart</c> in the merged mesh came from
+        /// generator vertex <c>srcStart</c> onwards (<c>srcStart</c> = -1 when merged from a mesh readback).</summary>
+        internal struct SourceRange { public int srcStart, count, dstStart; }
+
+        // The groups behind the entries of the last Build's output, in output order.
+        private static readonly List<Group> LastOutputGroups = new();
+
+        /// <summary>
+        /// Source ranges of output entry <paramref name="outputIndex"/> of the LAST <see cref="Build"/> call
+        /// (main thread, valid until the next Build). Null when the index is out of range.
+        /// </summary>
+        internal static List<SourceRange> LastBuildSources(int outputIndex) =>
+            (uint)outputIndex < (uint)LastOutputGroups.Count ? LastOutputGroups[outputIndex].sources : null;
 
         private struct SegRef { public int index, slice, mode; public Group group; }
         private static readonly List<SegRef> Resolved = new();
@@ -282,6 +301,7 @@ namespace LightSide
         {
             using var _ = s_BuildMarker.Auto();
             output.Clear();
+            LastOutputGroups.Clear();
             if (segments == null || segments.Count == 0) return;
 
             var genSegs = source != null && source.HasGeneratedData ? source.GeneratedSegments : null;
@@ -390,6 +410,7 @@ namespace LightSide
                 // Array bound via material _MainTexArray; CanvasRenderer texture MUST be null (a
                 // Texture2DArray trips a native kTexDim2D assert in CanvasRenderer.SetTexture).
                 output.Add(new UniTextRenderData(m, MaterialArrayFor(kv.Key, mat), (Texture)null, 0));
+                LastOutputGroups.Add(g);
             }
         }
 
@@ -407,6 +428,7 @@ namespace LightSide
             var baseIndex = g.vertCount;
             g.EnsureVerts(baseIndex + count);
 
+            g.sources.Add(new SourceRange { srcStart = start, count = count, dstStart = baseIndex });
             Array.Copy(src.Vertices, start, g.verts, baseIndex, count);
             Array.Copy(src.Colors, start, g.colors, baseIndex, count);
             Array.Copy(src.Uvs0, start, g.uv0, baseIndex, count);
@@ -437,6 +459,7 @@ namespace LightSide
         {
             WriteUv1(src.Uvs1, seg.vertexStart, src.Uvs1, seg.vertexStart, seg.vertexCount, slice, glyphMode, baseStyleIdx, spanStyles);
             g.direct = true;
+            g.sources.Add(new SourceRange { srcStart = seg.vertexStart, count = seg.vertexCount, dstStart = 0 });
             g.directStart = seg.vertexStart;
             g.directTriStart = seg.triangleStart;
             g.vertCount = seg.vertexCount;
@@ -485,6 +508,7 @@ namespace LightSide
             _tmpTri.Clear(); src.GetTriangles(_tmpTri, 0);
 
             var count = _tmpV.Count;
+            g.sources.Add(new SourceRange { srcStart = -1, count = count, dstStart = baseIndex });
             bool haveColors = _tmpC.Count == count;
             bool haveNormals = _tmpN.Count == count;
             bool haveUv1 = _tmpUv1.Count == count;
