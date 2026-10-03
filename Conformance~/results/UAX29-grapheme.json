@@ -1,0 +1,13 @@
+{
+  "standard": "UAX29-grapheme",
+  "name": "Unicode Text Segmentation (grapheme clusters)",
+  "unicodeVersion": "17.0.0",
+  "dataFile": "GraphemeBreakTest.txt",
+  "total": 766,
+  "passed": 766,
+  "failed": 0,
+  "excluded": 0,
+  "exclusions": [],
+  "failureClasses": {},
+  "firstFailures": []
+}

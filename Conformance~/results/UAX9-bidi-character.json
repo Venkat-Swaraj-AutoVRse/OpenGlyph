@@ -1,0 +1,13 @@
+{
+  "standard": "UAX9-bidi-character",
+  "name": "Unicode Bidirectional Algorithm (BidiCharacterTest)",
+  "unicodeVersion": "17.0.0",
+  "dataFile": "BidiCharacterTest.txt",
+  "total": 91707,
+  "passed": 91707,
+  "failed": 0,
+  "excluded": 0,
+  "exclusions": [],
+  "failureClasses": {},
+  "firstFailures": []
+}

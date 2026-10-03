@@ -1,0 +1,13 @@
+{
+  "standard": "UAX24-script-extensions",
+  "name": "Unicode Script_Extensions property (ScriptExtensions.txt)",
+  "unicodeVersion": "17.0.0",
+  "dataFile": "ScriptExtensions.txt",
+  "total": 669,
+  "passed": 669,
+  "failed": 0,
+  "excluded": 0,
+  "exclusions": [],
+  "failureClasses": {},
+  "firstFailures": []
+}
