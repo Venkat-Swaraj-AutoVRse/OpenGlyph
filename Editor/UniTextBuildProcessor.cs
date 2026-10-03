@@ -90,6 +90,8 @@ namespace LightSide
         internal static readonly (string name, string consequence)[] RuntimeFoundShaders =
         {
             ("UniText/Uber", "the unified renderer and GlyphMeshPro will draw white quads in the player"),
+            // UniTextWorldMaterials creates the world-space (MeshRenderer) materials via Shader.Find.
+            ("UniText/World/Uber", "UniTextWorld / GlyphMeshPro world text will fall back to the Canvas shader (no lighting, depth or culling options)"),
             // UniTextAppearance resolves the MSDF material for MSDF fonts via Shader.Find("UniText/MSDF SSD").
             ("UniText/MSDF SSD", "MSDF fonts will have no shader in the player"),
         };
