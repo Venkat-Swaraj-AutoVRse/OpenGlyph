@@ -420,9 +420,10 @@ namespace LightSide.Tests
                 Assert.AreEqual(0f, s.outlineWidth, 1e-4, "Default outline width must be 0.");
                 Assert.AreEqual(0f, s.underlayColor.a, 1e-4, "Default underlay (halo/shadow) must be fully transparent.");
                 Assert.AreEqual(0f, s.glowColor.a, 1e-4, "Default glow must be fully transparent.");
-                // Face colour follows the component colour.
-                comp.color = Color.red;
-                Assert.AreEqual(Color.red, comp.Style.faceColor, "Plain-face colour should follow the component colour.");
+                // The component colour reaches the glyphs as VERTEX colour only; copying it into the
+                // face as well applied it twice (QA B10: alpha 0.5 rendered as ~0.25).
+                comp.color = new Color(1f, 0f, 0f, 0.5f);
+                Assert.AreEqual(Color.white, comp.Style.faceColor, "Plain face must stay white; colour comes from the vertex colour.");
             }
             finally { DestroyComponent(comp); }
         }

@@ -143,14 +143,13 @@ namespace OpenGlyph.EditorTools
 
             if (serializedObject.ApplyModifiedProperties())
             {
-                // Re-apply adapter state onto the engine for the serialized changes.
+                // Re-apply adapter state onto the engine for the serialized changes. (Re-assigning a
+                // property to itself was a no-op: its setter skips unchanged values.)
                 foreach (var t in targets)
                 {
                     if (t is GlyphMeshProUGUI g)
                     {
-                        g.alignment = g.alignment;             // re-split into engine H/V
-                        g.fontStyle = g.fontStyle;             // re-apply weight/axis
-                        g.textWrappingMode = g.textWrappingMode;
+                        g.RefreshFromSerializedState();
                         EditorUtility.SetDirty(g);
                     }
                 }
