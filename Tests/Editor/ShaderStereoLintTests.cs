@@ -8,8 +8,8 @@ namespace LightSide.Tests
     /// Regression (QA B1/B2): UniText_Uber (the unified renderer) and the three Bitmap shaders had no
     /// stereo macros, so on Quest (single-pass instanced / multiview) their text would draw in one eye.
     /// Every vertex/fragment UI shader in the package must declare the instance id on its input, the
-    /// stereo output on its v2f, and initialise both in the vertex shader. Surface shaders are skipped
-    /// (Unity generates their stereo plumbing). A shader whose vertex program comes from a shared
+    /// stereo output on its v2f, and initialise both in the vertex shader. (Surface shaders were removed in batch 5.)
+    /// A shader whose vertex program comes from a shared
     /// cginc is checked through that include.
     /// </summary>
     public class ShaderStereoLintTests

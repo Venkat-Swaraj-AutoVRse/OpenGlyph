@@ -21,7 +21,6 @@ namespace LightSide.Tests
             "UniText/MSDF-Face",
             "UniText/MSDF SSD",
             "UniText/MSDF Overlay",
-            "UniText/MSDF (Surface)",
             "UniText/Mobile/MSDF",
             "UniText/Mobile/MSDF-Base",
             "UniText/Mobile/MSDF-Face",
@@ -29,7 +28,6 @@ namespace LightSide.Tests
             "UniText/Mobile/MSDF Overlay",
             "UniText/Mobile/MSDF - Masking",
             "UniText/Mobile/MSDF - 2 Pass",
-            "UniText/Mobile/MSDF (Surface)",
         };
 
         [Test]
@@ -71,10 +69,10 @@ namespace LightSide.Tests
             string[] sdf =
             {
                 "UniText/SDF", "UniText/SDF-Base", "UniText/SDF-Face", "UniText/SDF SSD",
-                "UniText/SDF Overlay", "UniText/SDF (Surface)",
+                "UniText/SDF Overlay",
                 "UniText/Mobile/SDF", "UniText/Mobile/SDF-Base", "UniText/Mobile/SDF-Face",
                 "UniText/Mobile/SDF SSD", "UniText/Mobile/SDF Overlay",
-                "UniText/Mobile/SDF - Masking", "UniText/Mobile/SDF - 2 Pass", "UniText/Mobile/SDF (Surface)",
+                "UniText/Mobile/SDF - Masking", "UniText/Mobile/SDF - 2 Pass",
             };
             var failures = new List<string>();
             foreach (var name in sdf)
