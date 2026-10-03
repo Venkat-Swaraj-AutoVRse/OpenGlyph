@@ -229,7 +229,8 @@ SubShader {
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 
-			half d = UniTextSampleMSDF(_MainTex, input.atlas) * input.param.x;  // * scale
+			half rawD = UniTextSampleMSDF(_MainTex, input.atlas);  // raw distance (unscaled), for UniTextFieldGate
+			half d = rawD * input.param.x;  // * scale
 
 			float scale = input.param.x;
 			float outlineBias = input.param.y;
@@ -241,8 +242,9 @@ SubShader {
 
 			// Underlay (shadow) - rendered behind everything
 			#if UNDERLAY_ON
-			half ud = UniTextSampleMSDF(_MainTex, input.texcoord2.xy) * input.texcoord2.z;
-			result = SDFLayer(ud, input.texcoord2.w, input.underlayColor);
+			half rawUd = UniTextSampleMSDF(_MainTex, input.texcoord2.xy);
+			half ud = rawUd * input.texcoord2.z;
+			result = SDFLayer(ud, input.texcoord2.w, input.underlayColor) * UniTextFieldGate(rawUd, _MainTex_TexelSize.w);
 			#endif
 
 			#if UNDERLAY_INNER
@@ -274,7 +276,7 @@ SubShader {
 			float softnessFactor = _OutlineSoftness * _ScaleRatioA * normFactor;
 			float scaleSoftness = scale / (1 + softnessFactor);
 			half dSoftness = UniTextSampleMSDF(_MainTex, input.atlas) * scaleSoftness;
-			half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor);
+			half4 outlineResult = SDFLayer(dSoftness, outlineBias, outlineColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 			result = BlendOver(result, outlineResult);
 			#endif
 

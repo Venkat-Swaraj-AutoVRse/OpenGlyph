@@ -149,6 +149,18 @@ half4 SDFOutlineLayer(half d, float biasOuter, float biasInner, half4 color)
     return color * outerFade * innerFade;
 }
 
+// Exterior-floor gate: zeroes a layer where the atlas field is clamped at 0 (outside the encoded
+// spread), so a dilation bias cannot floor at positive coverage across the padded quad. Knee is
+// 0.5 texel; exactly 1 for rawDist >= 1/(2*atlasSize). See UniText_Uber.shader "EXTERIOR-FLOOR GATE".
+// rawDist = unscaled distance sample (MSDF: the median); atlasSize = _MainTex_TexelSize.w.
+#ifndef UNITEXT_FIELD_GATE_DEFINED
+#define UNITEXT_FIELD_GATE_DEFINED
+float UniTextFieldGate(float rawDist, float atlasSize)
+{
+    return saturate(rawDist * atlasSize * 2.0);
+}
+#endif // UNITEXT_FIELD_GATE_DEFINED
+
 // Apply UI clipping
 half4 ApplyClipping(half4 color, half4 mask)
 {
