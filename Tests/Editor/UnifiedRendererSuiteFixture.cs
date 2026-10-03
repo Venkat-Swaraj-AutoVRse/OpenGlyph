@@ -30,6 +30,11 @@ namespace LightSide.Tests
         [OneTimeSetUp]
         public void PinRendererModeIfRequested()
         {
+            // The unified merged meshes are process-wide (shared like legacy SharedMeshes); tests read
+            // a component's merged geometry back after other components have built, so keep a private
+            // per-component copy for the whole suite. Allocation tests turn this off locally.
+            UnifiedRenderBuilder.SnapshotMeshesForTests = true;
+
             bool unified = IsSet("UNITEXT_FORCE_UNIFIED");
             bool legacy = IsSet("UNITEXT_FORCE_LEGACY");
             if (unified && legacy)
@@ -48,6 +53,7 @@ namespace LightSide.Tests
         [OneTimeTearDown]
         public void Restore()
         {
+            UnifiedRenderBuilder.SnapshotMeshesForTests = false;
             if (_applied) UniTextSettings.SetUseUnifiedRendererForTests(_previous);
         }
     }

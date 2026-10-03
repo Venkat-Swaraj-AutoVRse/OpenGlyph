@@ -62,14 +62,63 @@ namespace LightSide
             return m;
         }
 
-        /// <summary>Drops the shared material + style table (test reset). Does not touch the arrays (SharedGlyphAtlas owns those).</summary>
+        /// <summary>One-element material array per format, reused for every output entry (no per-Build array).</summary>
+        private static Material[] MaterialArrayFor(TextureFormat format, Material mat)
+        {
+            if (!SharedMaterialArrays.TryGetValue(format, out var arr))
+            {
+                arr = new Material[1];
+                SharedMaterialArrays[format] = arr;
+            }
+            arr[0] = mat;
+            return arr;
+        }
+
+        private static readonly Dictionary<TextureFormat, Material[]> SharedMaterialArrays = new();
+
+        // Last bindings written to each shared material (skip redundant per-component re-binds).
+        private struct Bound { public Material mat; public Texture array, style; public float styleH, atlasSize; }
+        private static readonly Dictionary<TextureFormat, Bound> BoundState = new();
+
+        /// <summary>Drops the shared material + style table + merge scratch (test reset). Does not touch the arrays (SharedGlyphAtlas owns those).</summary>
         public static void ResetShared()
         {
             foreach (var m in SharedMaterials.Values) if (m != null) UnityEngine.Object.DestroyImmediate(m);
             SharedMaterials.Clear();
+            SharedMaterialArrays.Clear();
+            BoundState.Clear();
             SharedStyles.Reset();
             StencilCopies.Clear();
+            DestroySharedGroups();
         }
+
+        private static void DestroySharedGroups()
+        {
+            foreach (var kv in SharedGroups)
+                if (kv.Value.mesh != null) UnityEngine.Object.DestroyImmediate(kv.Value.mesh);
+            SharedGroups.Clear();
+        }
+
+    #if UNITY_EDITOR
+        static UnifiedRenderBuilder()
+        {
+            Reseter.UnmanagedCleaning += DestroySharedGroups;
+        }
+
+        /// <summary>
+        /// EDITOR/TEST: the merged mesh is shared by every component (CanvasRenderer.SetMesh copies
+        /// it), so after the next component builds it no longer holds this component's geometry. When
+        /// true, each component keeps a private copy of its merged meshes for test readback. The
+        /// EditMode suite fixture turns it on; it is never on in a player.
+        /// </summary>
+        internal static bool SnapshotMeshesForTests;
+    #endif
+
+        /// <summary>TEST INSTRUMENTATION: number of times a merge buffer (vertex channels or indices) was reallocated.</summary>
+        internal static long BufferGrowths;
+
+        /// <summary>TEST INSTRUMENTATION: number of merged-mesh objects the builder has created.</summary>
+        internal static long MeshesCreated;
 
         // Mask (stencil) copies of the shared materials. StencilMaterial.Add copies a material ONCE and
         // caches it, but the shared material's array/style bindings change on every Build (the array is
@@ -117,6 +166,10 @@ namespace LightSide
         // shrunk). Bulk channels are block-copied and the mesh is set from array ranges. The earlier
         // List<T>-per-vertex Add loop cost ~0.35 ms per 7.6k-vertex component on Windows, the largest
         // part of a unified rebuild.
+        // The groups (arrays AND mesh) are PROCESS-WIDE, like the legacy SharedMeshes: Build is
+        // main-thread only and CanvasRenderer.SetMesh copies the mesh, so nothing has to outlive the
+        // Build + UpdateSubMeshes of one component. Per-component groups made every new component grow
+        // its own ~1 MB array chain and Mesh, all garbage on destroy (37 GCs per 1,000 creates vs 1).
         private sealed class Group
         {
             public Vector3[] verts = Array.Empty<Vector3>();
@@ -132,11 +185,18 @@ namespace LightSide
             public Mesh mesh;
             public int pageSize;
 
-            public void ClearBuffers() { vertCount = 0; triCount = 0; pageSize = 0; }
+            // Segments of this format in the current Build; when exactly one comes from the generator
+            // the mesh is uploaded straight from the generator's buffers (direct, no merge copy).
+            public int segments;
+            public bool direct;
+            public int directStart, directTriStart;
+
+            public void ClearBuffers() { vertCount = 0; triCount = 0; pageSize = 0; segments = 0; direct = false; }
 
             public void EnsureVerts(int required)
             {
                 if (verts.Length >= required) return;
+                System.Threading.Interlocked.Increment(ref BufferGrowths);
                 var cap = Math.Max(required, Math.Max(256, verts.Length * 2));
                 Array.Resize(ref verts, cap);
                 Array.Resize(ref normals, cap);
@@ -148,6 +208,7 @@ namespace LightSide
             public void EnsureTris(int required)
             {
                 if (tris.Length >= required) return;
+                System.Threading.Interlocked.Increment(ref BufferGrowths);
                 Array.Resize(ref tris, Math.Max(required, Math.Max(384, tris.Length * 2)));
             }
 
@@ -162,13 +223,16 @@ namespace LightSide
             }
         }
 
-        private readonly Dictionary<TextureFormat, Group> _groups = new();
-        private readonly List<Vector4> _tmpUv = new();
-        private readonly List<Vector4> _tmpUv1 = new();
-        private readonly List<Vector3> _tmpV = new();
-        private readonly List<Vector3> _tmpN = new();
-        private readonly List<Color32> _tmpC = new();
-        private readonly List<int> _tmpTri = new();
+        private static readonly Dictionary<TextureFormat, Group> SharedGroups = new();
+
+        private struct SegRef { public int index, slice, mode; public Group group; }
+        private static readonly List<SegRef> Resolved = new();
+        private static readonly List<Vector4> _tmpUv = new();
+        private static readonly List<Vector4> _tmpUv1 = new();
+        private static readonly List<Vector3> _tmpV = new();
+        private static readonly List<Vector3> _tmpN = new();
+        private static readonly List<Color32> _tmpC = new();
+        private static readonly List<int> _tmpTri = new();
 
         private static UberDrawGroup.GlyphMode ModeFromFormat(TextureFormat f) => f switch
         {
@@ -226,7 +290,8 @@ namespace LightSide
             // Shared style table (dedups identical styles across all components) -> stable styleIdx.
             int baseStyleIdx = SharedStyles.GetOrAdd(style);
 
-            foreach (var kv in _groups) kv.Value.ClearBuffers();
+            UniTextThreadGuard.AssertMainThread("UnifiedRenderBuilder.Build");
+            foreach (var kv in SharedGroups) kv.Value.ClearBuffers();
 
             for (var si = 0; si < segments.Count; si++)
             {
@@ -247,18 +312,29 @@ namespace LightSide
                 if (!arr.AddPage(page.GetInstanceID(), page, pageRev, out int slice))
                     continue;
 
-                if (!_groups.TryGetValue(dstFormat, out var g)) { g = new Group(); _groups[dstFormat] = g; }
+                if (!SharedGroups.TryGetValue(dstFormat, out var g)) { g = new Group(); SharedGroups[dstFormat] = g; }
                 g.pageSize = page.width;
-                if (genSegs != null)
-                    AppendFromGenerator(g, source, in genSegs.buffer[si], slice, (int)mode, baseStyleIdx, spanStyles);
-                else
-                    AppendSegment(g, seg.mesh, slice, (int)mode, baseStyleIdx, spanStyles);
+                g.segments++;
+                Resolved.Add(new SegRef { index = si, group = g, slice = slice, mode = (int)mode });
             }
+
+            for (var ri = 0; ri < Resolved.Count; ri++)
+            {
+                var r = Resolved[ri];
+                var g = r.group;
+                if (genSegs == null)
+                    AppendSegment(g, segments[r.index].mesh, r.slice, r.mode, baseStyleIdx, spanStyles);
+                else if (g.segments == 1)
+                    UseGeneratorDirect(g, source, in genSegs.buffer[r.index], r.slice, r.mode, baseStyleIdx, spanStyles);
+                else
+                    AppendFromGenerator(g, source, in genSegs.buffer[r.index], r.slice, r.mode, baseStyleIdx, spanStyles);
+            }
+            Resolved.Clear();
 
             // Build/refresh the shared style texture AFTER span rows have been added above.
             var styleTex = SharedStyles.Apply();
 
-            foreach (var kv in _groups)
+            foreach (var kv in SharedGroups)
             {
                 var g = kv.Value;
                 if (g.vertCount == 0) continue;
@@ -268,25 +344,52 @@ namespace LightSide
                 if (g.mesh == null) g.mesh = NewMesh();
                 var m = g.mesh;
                 m.Clear();
-                m.SetVertices(g.verts, 0, g.vertCount);
-                m.SetNormals(g.normals, 0, g.vertCount);
-                m.SetColors(g.colors, 0, g.vertCount);
-                m.SetUVs(0, g.uv0, 0, g.vertCount);
-                m.SetUVs(1, g.uv1, 0, g.vertCount);
-                m.SetTriangles(g.tris, 0, g.triCount, 0);
+                if (g.direct)
+                {
+                    // Single generated segment for this format: upload straight from the generator's
+                    // buffers (UV1 already rewritten in place); no normals, like the legacy meshes.
+                    m.SetVertices(source.Vertices, g.directStart, g.vertCount);
+                    m.SetColors(source.Colors, g.directStart, g.vertCount);
+                    m.SetUVs(0, source.Uvs0, g.directStart, g.vertCount);
+                    m.SetUVs(1, source.Uvs1, g.directStart, g.vertCount);
+                    m.SetTriangles(source.Triangles, g.directTriStart, g.triCount, 0);
+                }
+                else
+                {
+                    m.SetVertices(g.verts, 0, g.vertCount);
+                    // When every normal is the UGUI forward normal (always, for generator-merged text) the
+                    // channel is left off, exactly like the legacy segment meshes: the canvas supplies the
+                    // default normal for the requested Normal channel, and CanvasRenderer does not have to
+                    // store 12 bytes per vertex per component (~100 KB per 2,405-char component).
+                    if (g.constNormals < g.vertCount)
+                        m.SetNormals(g.normals, 0, g.vertCount);
+                    m.SetColors(g.colors, 0, g.vertCount);
+                    m.SetUVs(0, g.uv0, 0, g.vertCount);
+                    m.SetUVs(1, g.uv1, 0, g.vertCount);
+                    m.SetTriangles(g.tris, 0, g.triCount, 0);
+                }
 
                 // SHARED material (batches across components) carrying the shared array + style texture.
                 var mat = MaterialFor(kv.Key);
-                mat.SetTexture(MainTexArray, arr.Texture);
-                mat.SetTexture(StyleTex, styleTex);
-                mat.SetFloat(StyleTexWidth, SharedStyles.Width);
-                mat.SetFloat(StyleTexHeight, Mathf.Max(1, SharedStyles.Count));
-                mat.SetFloat(AtlasSize, g.pageSize > 0 ? g.pageSize : 1024);
-                SyncStencilCopies(mat);
+                float styleH = Mathf.Max(1, SharedStyles.Count);
+                float atlasSize = g.pageSize > 0 ? g.pageSize : 1024;
+                // The bindings are identical for every component sharing the format; only touch the
+                // material (and its stencil copies) when one of them actually changed.
+                if (!BoundState.TryGetValue(kv.Key, out var bound) || bound.mat != mat || bound.array != arr.Texture ||
+                    bound.style != styleTex || bound.styleH != styleH || bound.atlasSize != atlasSize)
+                {
+                    mat.SetTexture(MainTexArray, arr.Texture);
+                    mat.SetTexture(StyleTex, styleTex);
+                    mat.SetFloat(StyleTexWidth, SharedStyles.Width);
+                    mat.SetFloat(StyleTexHeight, styleH);
+                    mat.SetFloat(AtlasSize, atlasSize);
+                    SyncStencilCopies(mat);
+                    BoundState[kv.Key] = new Bound { mat = mat, array = arr.Texture, style = styleTex, styleH = styleH, atlasSize = atlasSize };
+                }
 
                 // Array bound via material _MainTexArray; CanvasRenderer texture MUST be null (a
                 // Texture2DArray trips a native kTexDim2D assert in CanvasRenderer.SetTexture).
-                output.Add(new UniTextRenderData(m, mat, (Texture)null, 0));
+                output.Add(new UniTextRenderData(m, MaterialArrayFor(kv.Key, mat), (Texture)null, 0));
             }
         }
 
@@ -309,28 +412,7 @@ namespace LightSide
             Array.Copy(src.Uvs0, start, g.uv0, baseIndex, count);
             g.FillConstNormals(baseIndex, baseIndex + count);
 
-            var srcUv1 = src.Uvs1;
-            var dstUv1 = g.uv1;
-            int lastLocal = -1, lastShared = baseStyleIdx;
-            for (int i = 0; i < count; i++)
-            {
-                var u = srcUv1[start + i];
-                // UV1.x is the real spreadRatio (Padding/PointSize), UV1.w the per-glyph LOCAL
-                // span-style id (0 = base); see AppendSegment.
-                int styleIdx = baseStyleIdx;
-                if (spanStyles != null)
-                {
-                    int local = (int)(u.w + 0.5f);
-                    if (local == lastLocal) styleIdx = lastShared;
-                    else if (local <= 0) { lastLocal = local; lastShared = baseStyleIdx; }
-                    else
-                    {
-                        styleIdx = SharedStyles.GetOrAdd(spanStyles.StyleAt(local));
-                        lastLocal = local; lastShared = styleIdx;
-                    }
-                }
-                dstUv1[baseIndex + i] = new Vector4(u.x, slice, glyphMode, styleIdx);
-            }
+            WriteUv1(src.Uvs1, start, g.uv1, baseIndex, count, slice, glyphMode, baseStyleIdx, spanStyles);
 
             var triCount = seg.triangleCount;
             var triBase = g.triCount;
@@ -343,6 +425,50 @@ namespace LightSide
 
             g.vertCount = baseIndex + count;
             g.triCount = triBase + triCount;
+        }
+
+        /// <summary>
+        /// The only generated segment of its format: rewrite its UV1 in place in the generator's buffer
+        /// (the buffers are scratch, returned right after UpdateRendering) and upload the mesh straight
+        /// from the generator's arrays. Its indices are already segment-local, so nothing is copied.
+        /// </summary>
+        private static void UseGeneratorDirect(Group g, UniTextMeshGenerator src, in GeneratedMeshSegment seg,
+            int slice, int glyphMode, int baseStyleIdx, SpanStyleCollector spanStyles)
+        {
+            WriteUv1(src.Uvs1, seg.vertexStart, src.Uvs1, seg.vertexStart, seg.vertexCount, slice, glyphMode, baseStyleIdx, spanStyles);
+            g.direct = true;
+            g.directStart = seg.vertexStart;
+            g.directTriStart = seg.triangleStart;
+            g.vertCount = seg.vertexCount;
+            g.triCount = seg.triangleCount;
+        }
+
+        /// <summary>
+        /// Writes (spreadRatio, slice, glyphMode, styleIdx) for <paramref name="count"/> vertices. UV1.x
+        /// is the real spreadRatio (Padding/PointSize), UV1.w the per-glyph LOCAL span-style id (0 =
+        /// base) mapped to a shared style row. <paramref name="dst"/> may be <paramref name="src"/>.
+        /// </summary>
+        private static void WriteUv1(Vector4[] src, int srcStart, Vector4[] dst, int dstStart, int count,
+            int slice, int glyphMode, int baseStyleIdx, SpanStyleCollector spanStyles)
+        {
+            int lastLocal = -1, lastShared = baseStyleIdx;
+            for (int i = 0; i < count; i++)
+            {
+                var u = src[srcStart + i];
+                int styleIdx = baseStyleIdx;
+                if (spanStyles != null)
+                {
+                    int local = (int)(u.w + 0.5f);
+                    if (local == lastLocal) styleIdx = lastShared;
+                    else if (local <= 0) { lastLocal = local; lastShared = baseStyleIdx; }
+                    else
+                    {
+                        styleIdx = SharedStyles.GetOrAdd(spanStyles.StyleAt(local));
+                        lastLocal = local; lastShared = styleIdx;
+                    }
+                }
+                dst[dstStart + i] = new Vector4(u.x, slice, glyphMode, styleIdx);
+            }
         }
 
         private void AppendSegment(Group g, Mesh src, int slice, int glyphMode, int baseStyleIdx, SpanStyleCollector spanStyles)
@@ -409,17 +535,20 @@ namespace LightSide
 
         private static Mesh NewMesh()
         {
+            System.Threading.Interlocked.Increment(ref MeshesCreated);
             var m = new Mesh { name = "UniText Uber Mesh", hideFlags = HideFlags.DontSave };
             m.MarkDynamic();
             return m;
         }
 
-        /// <summary>Disposes this component's per-component meshes. The shared material/style table are process-wide (freed via <see cref="ResetShared"/>).</summary>
-        public void Dispose()
-        {
-            foreach (var kv in _groups)
-                if (kv.Value.mesh != null) UnityEngine.Object.DestroyImmediate(kv.Value.mesh);
-            _groups.Clear();
-        }
+        /// <summary>
+        /// The builder holds no per-instance state (the merge buffers and meshes are process-wide), so
+        /// there is nothing to free here; kept for API compatibility. Shared state is freed via
+        /// <see cref="ResetShared"/>.
+        /// </summary>
+        public void Dispose() { }
+
+        /// <summary>Process-wide instance used by components (the builder is stateless).</summary>
+        internal static readonly UnifiedRenderBuilder Shared = new();
     }
 }
