@@ -67,6 +67,11 @@ namespace LightSide
         /// <summary>Synthesises a <see cref="GlyphStyle"/> directly from a material array (1 = single pass, 2 = outline+face).</summary>
         public static GlyphStyle StyleFromMaterials(Material[] mats)
         {
+            // Threading tripwire: reads Material.HasProperty/GetColor/GetFloat/IsKeywordEnabled below,
+            // all main-thread-only. The parallel path must synthesise the base style on the main-thread
+            // prepare step; reaching here on a worker means that prepare was bypassed.
+            UniTextThreadGuard.AssertMainThread("AppearanceStyleShim.StyleFromMaterials");
+
             if (mats == null || mats.Length == 0 || mats[0] == null)
                 return GlyphStyle.Default;
 

@@ -137,17 +137,30 @@ namespace LightSide
 
         private static void Shutdown()
         {
-            if (!isInitialized) return;
+            // Serialise against ForceShutdown / EnsureInitialized (all take the same type lock) so the
+            // worker/event arrays are not nulled from under us mid-iteration, and null-guard every
+            // slot in case a concurrent ForceShutdown already tore them down.
+            lock (typeof(UniTextWorkerPool))
+            {
+                if (!isInitialized) return;
 
-            isShuttingDown = true;
+                isShuttingDown = true;
 
-            for (var i = 0; i < ThreadCount; i++)
-                workReady[i].Set();
+                var ready = workReady;
+                if (ready != null)
+                    for (var i = 0; i < ready.Length; i++)
+                        ready[i]?.Set();
 
-            for (var i = 0; i < ThreadCount; i++)
-                workers[i].Join(100);
+                // Give each worker time to drain its current cycle rather than abandoning one mid-run.
+                // A single worker only ever runs one component-batch slice, bounded by one text layout,
+                // so a short join is ample; this never blocks app quit for long.
+                var ws = workers;
+                if (ws != null)
+                    for (var i = 0; i < ws.Length; i++)
+                        ws[i]?.Join(500);
 
-            isInitialized = false;
+                isInitialized = false;
+            }
         }
 
         private static void WorkerLoop(int threadIdx)
@@ -163,11 +176,19 @@ namespace LightSide
                     break;
                 }
 
+                // Woken to EXIT (shutdown Set the event without a matching barrier.Reset): leave
+                // without signalling. Execute is not waiting on a fresh cycle in this case (it breaks
+                // on isShuttingDown), so there is no barrier to decrement here.
                 if (isShuttingDown) break;
 
                 var localBarrier = barrier;
                 if (localBarrier == null) break;
 
+                // Woken to WORK. From here the barrier was Reset to ThreadCount by Execute and is
+                // waiting for exactly one Signal from each worker, so this cycle MUST signal exactly
+                // once no matter what — including if the action throws or isShuttingDown flips while we
+                // run. The try/finally guarantees that, which is what lets Execute wait unconditionally
+                // for completion instead of bailing on a timeout while workers are still live.
                 try
                 {
                     var starts = threadStartIndices;
@@ -197,14 +218,11 @@ namespace LightSide
                         Interlocked.Increment(ref exceptionCount);
                     }
                 }
-
-                try
+                finally
                 {
-                    localBarrier.Signal();
-                }
-                catch (ObjectDisposedException)
-                {
-                    break;
+                    try { localBarrier.Signal(); }
+                    catch (ObjectDisposedException) { }
+                    catch (InvalidOperationException) { } // barrier already fully signalled / disposed
                 }
             }
         }
@@ -264,22 +282,41 @@ namespace LightSide
             for (var i = 0; i < ThreadCount; i++)
                 workReady[i].Set();
 
+            // ALWAYS wait for every worker to finish before returning. The previous code bailed after
+            // BarrierTimeoutMs and then cleared currentComponents/currentAction while workers might
+            // still be running action(comp) against them — a use-after-free of the batch state. Each
+            // worker now signals exactly once per cycle (WorkerLoop's try/finally), so this wait
+            // completes in normal operation; the timeout only emits ONE diagnostic warning and then
+            // keeps waiting. The sole early exit is a real shutdown (isShuttingDown), which Joins the
+            // workers itself.
             try
             {
                 var localBarrier = barrier;
-                if (localBarrier != null && !isShuttingDown)
+                if (localBarrier != null)
                 {
                     const int pollIntervalMs = 10;
                     var elapsed = 0;
-                    while (!localBarrier.Wait(pollIntervalMs) && !isShuttingDown && elapsed < BarrierTimeoutMs)
+                    var warned = false;
+                    while (!localBarrier.Wait(pollIntervalMs))
                     {
+                        if (isShuttingDown) break;
                         elapsed += pollIntervalMs;
+                        if (!warned && elapsed >= BarrierTimeoutMs)
+                        {
+                            warned = true;
+                            Debug.LogWarning(
+                                $"[UniTextWorkerPool] Parallel text pass exceeded {BarrierTimeoutMs}ms; " +
+                                "still waiting for all workers to finish (not abandoning them — doing so " +
+                                "would free the batch state out from under a running worker).");
+                        }
                     }
                 }
             }
             catch (ObjectDisposedException) { }
             catch (InvalidOperationException) { }
 
+            // Safe to clear now: either every worker signalled (work done, no worker still touches
+            // these) or a shutdown is in progress and Shutdown/ForceShutdown Joins the workers.
             currentComponents = null;
             currentAction = null;
 

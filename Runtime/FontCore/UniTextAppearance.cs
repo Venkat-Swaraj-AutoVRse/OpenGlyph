@@ -117,6 +117,12 @@ namespace LightSide
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Material[] GetMaterials(UniTextFont font)
         {
+            // Threading tripwire: this can Shader.Find / new Material / write the plain msdfVariantCache
+            // Dictionary, all of which are main-thread-only / not thread-safe. In parallel mesh
+            // generation the materials are resolved up front on the main-thread prepare step and
+            // handed to workers; reaching here off the main thread means that prepare was bypassed.
+            UniTextThreadGuard.AssertMainThread("UniTextAppearance.GetMaterials");
+
             if (font is EmojiFont)
             {
                 emojiMaterials ??= new[] { EmojiFont.Material };

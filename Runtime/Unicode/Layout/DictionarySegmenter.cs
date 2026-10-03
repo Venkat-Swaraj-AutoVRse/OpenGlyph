@@ -101,13 +101,21 @@ namespace LightSide
                 $"to enable it. See Documentation/GettingStarted.md (\u201cWord segmentation\u201d).");
         }
 
-        // Reusable candidate-length scratch for the 3-word lookahead (word lengths are
-        // small; POSSIBLE_WORD_LIST_MAX in ICU is 20).
-        private readonly int[] _cand0 = new int[64];
-        private readonly int[] _cand1 = new int[64];
+        // Reusable candidate-length scratch for the 3-word lookahead (word lengths are small;
+        // POSSIBLE_WORD_LIST_MAX in ICU is 20). THREAD-STATIC: the one shared DictionarySegmenter
+        // (held by the single static LineBreakAlgorithm in SharedPipelineComponents) is used
+        // concurrently by parallel DoFirstPass layout passes on worker threads, so this scratch must
+        // be per-thread or two passes would stomp each other's candidate lists mid-scan. Each worker
+        // lazily allocates its own on first use via the accessors below.
+        [ThreadStatic] private static int[] _cand0Ts;
+        [ThreadStatic] private static int[] _cand1Ts;
 
-        // Reusable grapheme-boundary scratch for the whole codepoint buffer.
-        private bool[] _graphemeScratch = Array.Empty<bool>();
+        // Reusable grapheme-boundary scratch for the whole codepoint buffer — also per-thread for the
+        // same reason (a parallel pass writes the full buffer's grapheme boundaries into it).
+        [ThreadStatic] private static bool[] _graphemeScratchTs;
+
+        private static int[] Cand0 => _cand0Ts ??= new int[64];
+        private static int[] Cand1 => _cand1Ts ??= new int[64];
 
         public DictionarySegmenter(UnicodeDataProvider provider)
         {
@@ -207,9 +215,9 @@ namespace LightSide
                     // a dictionary is present (avoids the O(n) pass for pure non-SA text).
                     if (!graphemeReady)
                     {
-                        if (_graphemeScratch.Length < n + 1)
-                            _graphemeScratch = new bool[n + 1];
-                        graphemeBoundaries = _graphemeScratch.AsSpan(0, n + 1);
+                        if (_graphemeScratchTs == null || _graphemeScratchTs.Length < n + 1)
+                            _graphemeScratchTs = new bool[n + 1];
+                        graphemeBoundaries = _graphemeScratchTs.AsSpan(0, n + 1);
                         _graphemeBreaker.GetBreakOpportunities(codepoints, graphemeBoundaries);
                         graphemeReady = true;
                     }
@@ -236,6 +244,11 @@ namespace LightSide
             var trie = ResolveTrie(snap, codepoints[start]);
             if (trie == null)
                 return;
+
+            // Per-thread candidate scratch (see the [ThreadStatic] fields): captured once here so the
+            // rest of this method reads/writes its OWN thread's buffers, never a sibling worker's.
+            var _cand0 = Cand0;
+            var _cand1 = Cand1;
 
             int rangeEnd = end - start;               // run-relative length
             int current = 0;                          // run-relative scan position
