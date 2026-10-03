@@ -286,7 +286,10 @@ Replace the append-only shelf with a **managed atlas**:
   fresh page and retire the old one; the generation counter invalidates stale
   UVs so meshes rebuild. Runs incrementally / off the hot frame.
 - **Budget settings** on `UniTextSettings` (per-mode page count / MB cap). Over
-  budget → force eviction before new allocation.
+  budget → force eviction before new allocation. **(CURRENTLY INACTIVE — the runtime
+  never refcounts or advances the LRU clock, so `SharedGlyphAtlas` forces every budget
+  to 0 and no eviction happens; see `Documentation/Design/MemoryBudgets.md` for why and
+  the conditions to re-enable.)**
 - **Variable fonts:** `VariationKey`-keyed cells are the biggest consumer;
   refcount + LRU bounds them to the working set actually on screen, instead of
   "every instance ever shown."
@@ -388,6 +391,9 @@ retained only as rejected-path rationale.
    This round ships the budget *mechanism* (refcount + LRU + page reuse) with the
    default of **no eviction** (budget unset ⇒ behaviour unchanged), and the
    benchmark in step 4 produces the numbers the defaults will be set from.
+   **Update: the budget mechanism is now explicitly DISABLED in the runtime (not merely
+   defaulted off) because it is not safely wired — `SharedGlyphAtlas` ignores the settings
+   values and runs unbounded. See the status banner in `Documentation/Design/MemoryBudgets.md`.**
 
 ---
 
