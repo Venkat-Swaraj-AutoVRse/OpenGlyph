@@ -1,0 +1,13 @@
+{
+  "standard": "UAX14-linebreak",
+  "name": "Unicode Line Breaking Algorithm",
+  "unicodeVersion": "17.0.0",
+  "dataFile": "LineBreakTest.txt",
+  "total": 19338,
+  "passed": 19338,
+  "failed": 0,
+  "excluded": 0,
+  "exclusions": [],
+  "failureClasses": {},
+  "firstFailures": []
+}
