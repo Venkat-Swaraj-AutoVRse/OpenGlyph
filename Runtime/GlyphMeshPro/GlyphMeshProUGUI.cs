@@ -322,6 +322,11 @@ namespace OpenGlyph
             }
         }
 
+        /// <summary>GlyphMeshPro mirrors TextMeshPro, so it opts into TMP-compatible justification
+        /// (5% wrap overrun + word/character spacing split). Plain <c>UniText</c> keeps the inherited
+        /// <c>false</c>, so this scoping change leaves every existing plain-UniText layout untouched.</summary>
+        protected override bool UseTmpJustification => true;
+
         private void ApplyAlignment(TextAlignmentOptions value)
         {
             int bits = (int)value;
@@ -493,7 +498,7 @@ namespace OpenGlyph
             float fs = AutoSize ? MaxFontSize : FontSize;
             float w = TextProcessor.GetPreferredWidth(fs);
             float measureWidth = width > 0 ? width : TextProcessSettings.FloatMax;
-            TextProcessor.EnsureLines(measureWidth, fs, WordWrap, HorizontalAlignment);
+            TextProcessor.EnsureLines(measureWidth, fs, WordWrap, HorizontalAlignment, UseTmpJustification);
             float h = TextProcessor.GetPreferredHeight(fs, 0f, OverEdge, UnderEdge, LeadingDistribution);
             return new Vector2(w, h);
         }
@@ -520,6 +525,7 @@ namespace OpenGlyph
                 fontSize = fs,
                 baseDirection = BaseDirection,
                 enableWordWrap = WordWrap,
+                TmpJustification = UseTmpJustification,
             };
             TextProcessor.EnsureFirstPass(src.AsSpan(), settings);
         }
@@ -572,7 +578,7 @@ namespace OpenGlyph
             if (TextProcessor.HasValidFirstPassData)
             {
                 float fs = AutoSize ? MaxFontSize : FontSize;
-                TextProcessor.EnsureLines(measureW, fs, WordWrap, HorizontalAlignment);
+                TextProcessor.EnsureLines(measureW, fs, WordWrap, HorizontalAlignment, UseTmpJustification);
             }
         }
 
