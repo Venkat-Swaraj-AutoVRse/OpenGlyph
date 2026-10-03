@@ -184,22 +184,26 @@ namespace LightSide
 
         public static event Action Changed;
 
-    #if UNITY_EDITOR
-        [Header("Editor Defaults")]
+        // Serialized in players too: a component with no font stack / appearance of its own (created
+        // from code via AddComponent, or a prefab/scene saved before the editor filled the field)
+        // falls back to these at runtime. Editor-only, they were stripped from builds and every such
+        // component threw ArgumentNullException(fontStack) each frame and rendered nothing on device.
+        [Header("Defaults")]
         [SerializeField]
-        [Tooltip("Default fonts assigned to new UniText components.")]
+        [Tooltip("Default fonts for UniText components that have none assigned (editor and player).")]
         private UniTextFontStack defaultFontStack;
 
         [SerializeField]
-        [Tooltip("Default appearance assigned to new UniText components.")]
+        [Tooltip("Default appearance for UniText components that have none assigned (editor and player).")]
         private UniTextAppearance defaultAppearance;
 
-        /// <summary>Gets the default fonts for new UniText components (Editor only).</summary>
+        /// <summary>Default fonts for UniText components that have none assigned.</summary>
         public static UniTextFontStack DefaultFontStack => Instance?.defaultFontStack;
 
-        /// <summary>Gets the default appearance for new UniText components (Editor only).</summary>
+        /// <summary>Default appearance for UniText components that have none assigned.</summary>
         public static UniTextAppearance DefaultAppearance => Instance?.defaultAppearance;
 
+    #if UNITY_EDITOR
         [SerializeField]
         [Tooltip("Render Architecture R2 sub-task 3: when ON, imported/changed prefabs and scenes are " +
                  "AUTO-migrated from legacy appearance/material settings to component styles via " +
