@@ -27,5 +27,7 @@ namespace LightSide
         public const string LineAlignment = "linealign";
         /// <summary>Per-codepoint packed RGBA highlight colour (<c>&lt;mark&gt;</c>); 0 = none.</summary>
         public const string Mark = "mark";
+        /// <summary>Per-codepoint float: seconds a <see cref="UniTextReveal"/> waits before this codepoint's unit (<c>&lt;pause&gt;</c>).</summary>
+        public const string RevealPause = "revealpause";
     }
 }

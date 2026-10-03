@@ -12,7 +12,7 @@ Shader "UniText/Uber"
     {
         [PerRendererData] _MainTexArray ("Atlas Array", 2DArray) = "" {}
         [PerRendererData] _StyleTex ("Style Table", 2D) = "white" {}
-        _StyleTexWidth ("Style Table Width", Float) = 8
+        _StyleTexWidth ("Style Table Width", Float) = 12
         _StyleTexHeight ("Style Table Height", Float) = 1
 
         // Legacy SDF/MSDF coverage constants (ported from UniText/SDF-Face + SDF-Base). These are
@@ -84,9 +84,24 @@ Shader "UniText/Uber"
                 float4 uv0      : TEXCOORD0;
                 float4 uv1      : TEXCOORD1;
                 float4 worldPos : TEXCOORD2;
-                float4 cov      : TEXCOORD3; // x=baseWeight, y=normFactor, z=baseScale (projection-derived, legacy)
+                float4 cov      : TEXCOORD3; // x=baseWeight, y=normFactor, z=baseScale (projection-derived, legacy), w=outline2Softness
+                // Wave 2 effect layers, fetched from the style row ONCE per vertex (the style is constant
+                // over a glyph quad) so a glyph without them costs no extra fragment texture reads.
+                float4 glowColor : TEXCOORD4;  // rgba (a may exceed 1 = intensity)
+                float4 glowP     : TEXCOORD5;  // glowOffset, glowOuter, glowPower, outline2Width
+                float4 o2Color   : TEXCOORD6;  // outline2 rgba
+                float4 isColor   : TEXCOORD7;  // inner shadow rgba
+                float4 isP       : TEXCOORD8;  // inner shadow offX, offY, dilate, softness
                 UNITY_VERTEX_OUTPUT_STEREO // single-pass instanced / multiview (Quest), as the legacy shaders
             };
+
+            // Fetch style texel (row = styleIdx, col = index) from the point-sampled float texture.
+            float4 StyleTexel(float styleIdx, int col)
+            {
+                float u = (col + 0.5) / max(_StyleTexWidth, 1.0);
+                float v = (styleIdx + 0.5) / max(_StyleTexHeight, 1.0);
+                return tex2Dlod(_StyleTex, float4(u, v, 0, 0));
+            }
 
             v2f vert(appdata v)
             {
@@ -122,15 +137,18 @@ Shader "UniText/Uber"
                         abs(dot(UnityObjectToWorldNormal(v.normal.xyz), normalize(WorldSpaceViewDir(v.vertex)))));
 
                 o.cov = float4(baseWeight, normFactor, baseScale, 0);
-                return o;
-            }
 
-            // Fetch style texel (row = styleIdx, col = index) from the point-sampled float texture.
-            float4 StyleTexel(float styleIdx, int col)
-            {
-                float u = (col + 0.5) / max(_StyleTexWidth, 1.0);
-                float v = (styleIdx + 0.5) / max(_StyleTexHeight, 1.0);
-                return tex2Dlod(_StyleTex, float4(u, v, 0, 0));
+                // Wave 2: effect layer parameters (glow, second outline, inner shadow) per glyph.
+                float styleIdxV = v.uv1.w;
+                float4 o2Scal = StyleTexel(styleIdxV, 9);   // outline2Width, outline2Softness
+                float4 glowRaw = StyleTexel(styleIdxV, 6);  // glowOffset, glowOuter, glowInner, glowPower
+                o.glowColor = StyleTexel(styleIdxV, 3);
+                o.glowP = float4(glowRaw.x, glowRaw.y, glowRaw.w, o2Scal.x);
+                o.o2Color = StyleTexel(styleIdxV, 7);
+                o.isColor = StyleTexel(styleIdxV, 8);
+                o.isP = StyleTexel(styleIdxV, 10);
+                o.cov.w = o2Scal.y;
+                return o;
             }
 
             half Median3(half3 rgb)
@@ -243,6 +261,61 @@ Shader "UniText/Uber"
                 col.rgb = outline.rgb * (1 - face.a) + face.rgb;
                 col.a = saturate(outline.a + face.a);
 
+                // ---- Wave 2 layers (each costs nothing unless its colour alpha > 0; per-glyph data, so
+                // the branch is coherent across a glyph) -------------------------------------------
+                float fxGate = 1.0;
+                float fxNorm = i.cov.y;
+                float fxBaseW = i.cov.x;
+                float fxScale = i.cov.z * abs(i.uv0.w) * i.uv0.z;
+                if (mode != 2) fxGate = saturate(dist * _AtlasSize * 2.0);
+
+                // Inner shadow: the face minus a shifted copy of the glyph, drawn ON the face.
+                if (i.isColor.a > 0 && mode != 2)
+                {
+                    float offsetFactorI = sqrt(72.0 * i.uv0.z * fxNorm / 0.1) / 9.0;
+                    float2 iOff = i.isP.xy * offsetFactorI / max(_AtlasSize, 1.0);
+                    half4 it = UNITY_SAMPLE_TEX2DARRAY(_MainTexArray, float3(i.uv0.xy - iOff, slice));
+                    half iDist = (mode == 1) ? Median3(it.rgb) : it.a;
+                    float iScale = fxScale / (1.0 + max(i.isP.w, 0.0) * fxNorm);
+                    float iNorm = (fxBaseW + (faceDilate + i.isP.z) * 0.5) * fxNorm;
+                    float iBias = (0.5 - iNorm) * iScale - 0.5;
+                    half shifted = saturate(iDist * iScale - iBias) * saturate(iDist * _AtlasSize * 2.0);
+                    fixed4 s = i.isColor; s.rgb *= s.a;
+                    s *= (1 - shifted) * alpha;
+                    col.rgb = col.rgb * (1 - s.a) + s.rgb;
+                }
+
+                // Second outline band, outside the outline (same SDF ramp, wider bias).
+                if (i.o2Color.a > 0 && mode != 2)
+                {
+                    float o2Scale = fxScale / (1.0 + max(i.cov.w, 0.0) * fxNorm);
+                    float o2Norm = (fxBaseW + (faceDilate + outlineWidth + i.glowP.w) * 0.5) * fxNorm;
+                    float o2Bias = (0.5 - o2Norm) * o2Scale - 0.5;
+                    half o2A = saturate(dist * o2Scale - o2Bias) * fxGate;
+                    fixed4 o2 = i.o2Color; o2.rgb *= o2.a; o2 *= o2A;
+                    col.rgb = o2.rgb * (1 - col.a) + col.rgb;
+                    col.a = saturate(o2.a + col.a);
+                }
+
+                // Vertex tint (gradient / per-vertex <color>) on face + outlines; the glow below keeps
+                // its own colour. col is PREMULTIPLIED, so tint rgb only (alpha is applied at the end).
+                col.rgb *= i.color.rgb;
+
+                // Soft outer glow, behind the text: falls off from the face edge over glowOuter
+                // (fraction of the atlas spread) with exponent glowPower; glowOffset moves the start.
+                if (i.glowColor.a > 0 && mode != 2)
+                {
+                    float edge = 0.5 - (fxBaseW + faceDilate * 0.5) * fxNorm - i.glowP.x * 0.5 * fxNorm;
+                    float range = max(i.glowP.y * 0.5 * fxNorm, 1e-4);
+                    float tg = saturate((edge - dist) / range);
+                    float g = pow(1.0 - tg, max(i.glowP.z, 0.01));
+                    g *= saturate(dist * 16.0); // fade out at the clamped field floor instead of a hard cut
+                    float ga = saturate(i.glowColor.a * g);
+                    fixed4 gl = fixed4(i.glowColor.rgb * ga, ga);
+                    col.rgb = gl.rgb * (1 - col.a) + col.rgb;
+                    col.a = saturate(gl.a + col.a);
+                }
+
                 // Underlay / drop shadow (offset sample of the SAME slice). Faithful port of legacy
                 // UniText/SDF-SSD: the offset uses ComputeUnderlayOffsetFactor (NOT a flat texel step),
                 // the ramp is SDFLayer, and the layer is composited BEHIND face+outline via premultiplied
@@ -280,15 +353,14 @@ Shader "UniText/Uber"
                     float uFieldGate = saturate(uDist * _AtlasSize * 2.0);
                     fixed4 uPremult = underlayColor; uPremult.rgb *= uPremult.a;
                     fixed4 uResult = uPremult * (saturate(ud - layerBias) * uFieldGate);
+                    uResult.rgb *= i.color.rgb; // tinted like the face (col was tinted above)
                     fixed4 blended;
                     blended.rgb = uResult.rgb * (1 - col.a) + col.rgb;
                     blended.a = saturate(uResult.a + col.a);
                     col = blended;
                 }
 
-                // Vertex tint (gradient / per-vertex <color>). col is already PREMULTIPLIED, so tint
-                // rgb by vertex rgb and scale the whole premultiplied value by vertex alpha.
-                col.rgb *= i.color.rgb;
+                // Vertex alpha scales the whole premultiplied result (reveal / fade / CanvasGroup).
                 col *= i.color.a;
 
                 // UI clip rect.

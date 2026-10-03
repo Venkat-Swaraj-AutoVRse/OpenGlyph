@@ -24,7 +24,7 @@ namespace LightSide
     [TypeGroup("Appearance", 3)]
     public sealed class SpanStyleModifier : GlyphModifier<SpanStyleOverride>
     {
-        public enum Kind { Outline, Underlay, Dilate, Softness, Style }
+        public enum Kind { Outline, Underlay, Dilate, Softness, Style, Glow, InnerShadow, Outline2 }
 
         [UnityEngine.SerializeField]
         private Kind kind = Kind.Outline;
@@ -80,6 +80,19 @@ namespace LightSide
                     var sheet = uniText != null ? uniText.StyleSheet : null;
                     if (sheet == null || !sheet.TryGet(parameter, out var named)) return false;
                     ov.set = SpanStyleOverride.F.Face; ov.whole = named.ToGlyphStyle();
+                    return true;
+                case Kind.Glow:
+                    if (!SpanStyleMarkup.TryParseGlow(parameter, out var gc, out var gs, out var gp)) return false;
+                    ov.set = SpanStyleOverride.F.Glow; ov.glowColor = gc; ov.glowOuter = gs; ov.glowPower = gp;
+                    return true;
+                case Kind.InnerShadow:
+                    if (!SpanStyleMarkup.TryParseUnderlay(parameter, out var ic, out var ix, out var iy, out var id, out var isf)) return false;
+                    ov.set = SpanStyleOverride.F.InnerShadow; ov.innerShadowColor = ic; ov.innerShadowOffsetX = ix;
+                    ov.innerShadowOffsetY = iy; ov.innerShadowDilate = id; ov.innerShadowSoftness = isf;
+                    return true;
+                case Kind.Outline2:
+                    if (!SpanStyleMarkup.TryParseOutline2(parameter, out var o2c, out var o2w, out var o2s)) return false;
+                    ov.set = SpanStyleOverride.F.Outline2; ov.outline2Color = o2c; ov.outline2Width = o2w; ov.outline2Softness = o2s;
                     return true;
             }
             return false;

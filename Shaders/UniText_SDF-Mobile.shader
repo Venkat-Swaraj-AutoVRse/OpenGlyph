@@ -1,6 +1,6 @@
 // Simplified SDF shader (single-pass):
 // - No Shading Option (bevel / bump / env map)
-// - No Glow Option
+// - Optional soft outer glow (GLOW_ON)
 // - Renders Face, Outline, and Underlay in one pass
 
 Shader "UniText/Mobile/SDF" {
@@ -18,6 +18,11 @@ Properties {
 	_UnderlayOffsetY 	("Border OffsetY", Range(-1,1)) = 0
 	_UnderlayDilate		("Border Dilate", Range(-1,1)) = 0
 	_UnderlaySoftness 	("Border Softness", Range(0,1)) = 0
+
+	_GlowColor			("Glow Color", Color) = (0, 1, 0, 0.5)
+	_GlowOffset			("Glow Offset", Range(-1,1)) = 0
+	_GlowOuter			("Glow Size", Range(0,1)) = 0.3
+	_GlowPower			("Glow Falloff", Range(0.1,4)) = 1.5
 
 	_WeightNormal		("Weight Normal", float) = 0
 	_WeightBold			("Weight Bold", float) = 1
@@ -81,6 +86,7 @@ SubShader {
 		#pragma fragment PixShader
 		#pragma shader_feature __ OUTLINE_ON
 		#pragma shader_feature __ UNDERLAY_ON UNDERLAY_INNER
+		#pragma shader_feature __ GLOW_ON
 
 		#pragma multi_compile __ UNITY_UI_CLIP_RECT
 		#pragma multi_compile __ UNITY_UI_ALPHACLIP
@@ -103,6 +109,9 @@ SubShader {
 			#if (UNDERLAY_ON | UNDERLAY_INNER)
 			float2 underlayUV   : TEXCOORD3;
 			half2  underlayParam: TEXCOORD4;  // scale, bias
+			#endif
+			#if GLOW_ON
+			half4  glowParam    : TEXCOORD5;  // edge (raw distance), 1/range, falloff, opacity
 			#endif
 		};
 
@@ -173,6 +182,9 @@ SubShader {
 			output.uv = input.texcoord0.xy;
 			output.param = half4(scale, faceBias, outlineBias, color.a);
 			output.mask = ComputeMask(vert, pixelSize);
+			#if GLOW_ON
+			output.glowParam = UniTextGlowParam(baseWeight, normFactor, opacity);
+			#endif
 
 			return output;
 		}
@@ -198,6 +210,11 @@ SubShader {
 			half4 underlayColor = float4(_UnderlayColor.rgb * _UnderlayColor.a, _UnderlayColor.a);
 			half faceMask = saturate(d - input.param.y);
 			result = underlayColor * (1 - saturate(ud - input.underlayParam.y)) * faceMask;
+			#endif
+
+			// Soft outer glow (behind outline and face, over the underlay)
+			#if GLOW_ON
+			result = BlendOver(result, UniTextGlowLayer(rawD, input.glowParam));
 			#endif
 
 			// Outline layer

@@ -7,12 +7,18 @@ namespace LightSide
 {
         public class UniText_SDFShaderGUI : UniText_BaseShaderGUI
         {
-            static ShaderFeature s_OutlineFeature, s_UnderlayFeature;
+            static ShaderFeature s_OutlineFeature, s_UnderlayFeature, s_GlowFeature;
 
-            static bool s_Face = true, s_Outline = true, s_Underlay = true;
+            static bool s_Face = true, s_Outline = true, s_Underlay = true, s_Glow = true;
 
             static UniText_SDFShaderGUI()
             {
+                s_GlowFeature = new ShaderFeature()
+                {
+                    undoLabel = "Glow",
+                    keywords = new[] { "GLOW_ON" }
+                };
+
                 s_OutlineFeature = new ShaderFeature()
                 {
                     undoLabel = "Outline",
@@ -54,6 +60,14 @@ namespace LightSide
                     s_Underlay = BeginPanel("Underlay", s_UnderlayFeature, s_Underlay);
                     if (s_Underlay)
                         DoUnderlayPanel();
+                    EndPanel();
+                }
+
+                if (m_Material.HasProperty("_GlowColor"))
+                {
+                    s_Glow = BeginPanel("Glow", s_GlowFeature, s_Glow);
+                    if (s_Glow)
+                        DoGlowPanel();
                     EndPanel();
                 }
 
@@ -113,6 +127,18 @@ namespace LightSide
                 DoFloat("_UnderlayOffsetY", "Offset Y");
                 DoFloat("_UnderlayDilate", "Dilate");
                 DoFloat("_UnderlaySoftness", "Softness");
+                EditorGUI.indentLevel -= 1;
+                EditorGUILayout.Space();
+            }
+
+            void DoGlowPanel()
+            {
+                EditorGUI.indentLevel += 1;
+                DoColor("_GlowColor", "Color");
+                if (m_Material.HasProperty("_GlowOffset")) DoSlider("_GlowOffset", "Offset");
+                if (m_Material.HasProperty("_GlowInner")) DoSlider("_GlowInner", "Inner");
+                if (m_Material.HasProperty("_GlowOuter")) DoSlider("_GlowOuter", "Outer");
+                if (m_Material.HasProperty("_GlowPower")) DoSlider("_GlowPower", "Falloff");
                 EditorGUI.indentLevel -= 1;
                 EditorGUILayout.Space();
             }

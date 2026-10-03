@@ -43,6 +43,10 @@ and rendered as SDF/MSDF through Unity's Canvas — including in VR.
 | 🗣️ | **Language-aware shaping** | BCP 47 `Language` and `<lang=…>`: language-specific glyph forms (`locl`) and the right CJK system face for ja / ko / zh-Hans / zh-Hant / zh-HK ([below](#language-aware-shaping)). |
 | 📐 | **Content measurement, padding, fit steps** | `GetMinContentWidth()`, `GetMaxContentWidth()`, `GetHeightForWidth(w)`; box-model `Padding`; Auto Size `AutoSizeStep` for discrete sizes ([below](#layout-padding-measurement-and-auto-size-steps)). |
 | 🌍 | **Unity Localization** | Optional `LocalizeUniText` sets the text and its language on locale change; compiles only when `com.unity.localization` is installed ([below](#unity-localization)). |
+| ⌨️ | **Reveal / typewriter** | `UniTextReveal`: by grapheme, word or line, speed, delay, fade, slide, easing, events, `<pause=s>`; logical (RTL-correct) order; no re-layout per frame ([below](#reveal-and-text-animations)). |
+| 🌊 | **Text animations** | `<wave> <bounce> <pulse> <shake> <fade> <rainbow>` span tags on a shared clock; a per-frame vertex pass with 0 GC per frame ([below](#reveal-and-text-animations)). |
+| ✨ | **Glow, inner shadow, second outline** | SDF glow (colour, size, softness, intensity), inner shadow and a second stroke band, per span and for the whole text ([below](#glow-inner-shadow-second-outline)). |
+| 🎨 | **Radial and angular gradients** | `<gradient=name,radial>`, `<gradient=name,angular,deg>` and a whole-text `GradientFill`; both renderers ([below](#radial-and-angular-gradients)). |
 
 ## Drop-in TextMesh Pro API — GlyphMeshProUGUI
 
@@ -143,6 +147,61 @@ The measurements never change the component's rect or layout. [Padding.md](Docum
 With `com.unity.localization` installed, add **OpenGlyph > Localize UniText** next to a UniText: the
 `LocalizedString` drives `Text`, and the selected locale's code drives `Language`. Without the package
 the `OpenGlyph.Localization` assembly is skipped. [Localization.md](Documentation/Localization.md)
+
+## Effects and animation
+
+### Reveal and text animations
+
+```csharp
+UniTextReveal.RegisterPauseTag(step);                   // <pause=seconds>
+TextAnimationModifier.RegisterAll(step);                // <wave> <bounce> <pulse> <shake> <fade> <rainbow>
+step.Text = "Open valve A.<pause=0.6> Then press the <pulse><color=#ff4040>red</color></pulse> button.";
+
+var reveal = step.gameObject.AddComponent<UniTextReveal>();
+reveal.Unit = RevealUnit.Word;                           // Character (grapheme) | Word | Line
+reveal.UnitsPerSecond = 6f;
+reveal.FadeDuration = 0.2f;
+reveal.SlideOffset = new Vector2(0, -10);
+reveal.RevealCompleted += () => nextButton.SetActive(true);
+reveal.Restart();                                        // Play / Pause / Skip / Restart
+```
+
+Both are vertex effects on the mesh the text already has: once per rebuild the final mesh is captured,
+then each frame only vertex positions and colours change and are uploaded. No shaping, layout or mesh
+generation per frame, no managed allocation per frame, unified and legacy renderer, and components
+without animated text pay nothing. Reveal units follow logical order, so right-to-left text reveals
+from the right. [TextReveal.md](Documentation/TextReveal.md) · [TextAnimations.md](Documentation/TextAnimations.md)
+
+![Span animations looping: wave, bounce, pulse, shake, fade and rainbow](.github/assets/features/text-animations.gif)
+
+![UniTextReveal: character reveal with a pause, word reveal sliding up, and Hebrew revealed right to left](.github/assets/features/text-reveal.gif)
+
+### Glow, inner shadow, second outline
+
+```csharp
+label.Text = "<glow=#38BDF8,0.8,0.5,1.4>WARNING</glow> <glow=#000000,0.9,0.7>over a busy scene</glow> " +
+             "<innershadow=#7A3500,0.35,-0.35,0,0.3>Pressure</innershadow> " +
+             "<outline=#FFFFFF,0.15><outline2=#E11D48,0.25>STOP</outline2></outline>";
+```
+
+Register `SpanStyleModifier` kinds `Glow` / `InnerShadow` / `Outline2` with `GlowParseRule`,
+`InnerShadowParseRule`, `Outline2ParseRule`; the same fields exist on the component `Style`. They come from
+the glyph's distance field in the same pass (no extra geometry). Span styles need the unified renderer;
+the legacy mobile SDF/MSDF shaders gained a `GLOW_ON` glow. [GlowAndShadows.md](Documentation/GlowAndShadows.md)
+
+![Glow, inner shadow and second outline, each without and with the effect, including a dark glow over a grey panel](.github/assets/features/glow-effects.png)
+
+### Radial and angular gradients
+
+```csharp
+label.Text = "<gradient=ice,radial>RADIAL</gradient> <gradient=spectrum,angular,90>ANGULAR</gradient>";
+title.GradientFill = UniTextGradientFill.Radial(myGradient, new Vector2(0.5f, 0.5f));   // whole text
+```
+
+Vertex colours, so both renderers; `<color>` and `<gradient>` spans override the whole-text fill.
+[Gradients.md](Documentation/Gradients.md)
+
+![Linear, radial and angular gradients as span tags and as whole-text fills](.github/assets/features/gradients.png)
 
 ## Showcase
 
@@ -309,6 +368,7 @@ binaries but were not tested on device for this release.
 - [Unified vs legacy render path](Documentation/RenderPathComparison.md)
 - [System font fallback (any script)](Documentation/SystemFontFallback.md)
 - [OpenType features](Documentation/OpenTypeFeatures.md) · [Language-aware shaping](Documentation/LanguageShaping.md) · [Content measurement](Documentation/ContentMeasurement.md) · [Padding](Documentation/Padding.md) · [Auto Size fit steps](Documentation/AutoSizeSteps.md) · [Unity Localization](Documentation/Localization.md)
+- [Text reveal](Documentation/TextReveal.md) · [Text animations](Documentation/TextAnimations.md) · [Glow, inner shadow, second outline](Documentation/GlowAndShadows.md) · [Radial and angular gradients](Documentation/Gradients.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
 - [Changelog](CHANGELOG.md)
 

@@ -397,6 +397,8 @@ namespace LightSide
             EmojiFont.EnsureInitialized();
             Canvas.preWillRenderCanvases += OnPreWillRenderCanvases;
             Canvas.willRenderCanvases += OnWillRenderCanvases;
+            // After this frame's rebuilds (subscribed later = invoked later): per-frame vertex effects.
+            Canvas.willRenderCanvases += TickVertexEffects;
             componentsBuffer.EnsureCapacity(64);
             isInitialized = true;
 
@@ -767,6 +769,10 @@ namespace LightSide
             // Resolve all materials now so GetMaterials(fontId) is a pure cache read on the worker.
             fontProvider?.PrepareMaterials();
 
+            // Wave 2: the glyph-tagging hook for vertex effects is subscribed only while effects exist.
+            SyncVertexEffectHook();
+            SyncGradientFillHook();
+
             // Pre-synthesise the base style for the unified renderer (reads Material properties → main
             // thread only). overrideStyle uses the component-authored style, which needs no Unity reads.
             if (UseUnifiedRenderer)
@@ -834,7 +840,8 @@ namespace LightSide
             // is behaviour-preserving: identical geometry draws identically. This zeroes the cost of a
             // text change that does not change rendered output (trailing-whitespace edits, reassigning
             // equivalent text, score/timer updates landing on the same string). Opt-out via settings.
-            if (UniTextSettings.SkipUnchangedGeometryUpload && hasAppliedGeometry && subMeshRenderers.Count > 0)
+            if (UniTextSettings.SkipUnchangedGeometryUpload && hasAppliedGeometry && subMeshRenderers.Count > 0
+                && vertexEffects.Count == 0 && !isAnimatedRegistered)
             {
                 ulong fp = meshGenerator.GeometryFingerprint();
                 if (fp != 0 && fp == lastAppliedGeometryFingerprint)
@@ -886,6 +893,10 @@ namespace LightSide
             try
             {
                 UpdateRendering();
+                // Wave 2: animated components capture their final meshes (glyph table + own mesh) once
+                // per rebuild, while the generator buffers (glyph tags, segments) are still valid.
+                if (vertexEffects.Count > 0 || isAnimatedRegistered)
+                    CaptureVertexEffects(UseUnifiedRenderer ? unifiedRenderData : renderData, UseUnifiedRenderer);
             }
             finally
             {

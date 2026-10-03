@@ -48,12 +48,34 @@ namespace LightSide
         [Tooltip("Underlay softness.")]
         public float underlaySoftness;
 
-        [Tooltip("Glow colour. Alpha 0 = no glow.")]
+        [Tooltip("Glow colour. Alpha 0 = no glow. Alpha above 1 brightens the glow (intensity).")]
         public Color glowColor;
+        [Tooltip("Shifts where the glow starts (positive = further out).")]
         public float glowOffset;
+        [Tooltip("Glow size outside the edge, v[0,1] of the atlas spread.")]
         public float glowOuter;
+        [Tooltip("Legacy glow inner extent (desktop legacy SDF/MSDF shaders only).")]
         public float glowInner;
+        [Tooltip("Glow falloff exponent: 1 = linear, larger = softer (fades faster), smaller = harder.")]
         public float glowPower;
+
+        [Tooltip("Second outline band (outside the outline). Alpha 0 = none. Unified renderer only.")]
+        public Color outline2Color;
+        [Tooltip("Second outline width, v[0,1], added outside Outline Width.")]
+        [Range(0f, 1f)] public float outline2Width;
+        [Tooltip("Second outline edge softness, v[0,1].")]
+        [Range(0f, 1f)] public float outline2Softness;
+
+        [Tooltip("Inner shadow colour (drawn inside the face). Alpha 0 = none. Unified renderer only.")]
+        public Color innerShadowColor;
+        [Tooltip("Inner shadow horizontal offset (same units as the underlay offset).")]
+        public float innerShadowOffsetX;
+        [Tooltip("Inner shadow vertical offset.")]
+        public float innerShadowOffsetY;
+        [Tooltip("Inner shadow dilation.")]
+        public float innerShadowDilate;
+        [Tooltip("Inner shadow softness.")]
+        public float innerShadowSoftness;
 
         /// <summary>A plain opaque-white face with no outline/underlay/glow — matches <see cref="GlyphStyle.Default"/>.</summary>
         public static UniTextStyle Default => FromGlyphStyle(GlyphStyle.Default);
@@ -77,6 +99,14 @@ namespace LightSide
             glowOuter = glowOuter,
             glowInner = glowInner,
             glowPower = glowPower,
+            outline2Color = outline2Color,
+            outline2Width = outline2Width,
+            outline2Softness = outline2Softness,
+            innerShadowColor = innerShadowColor,
+            innerShadowOffsetX = innerShadowOffsetX,
+            innerShadowOffsetY = innerShadowOffsetY,
+            innerShadowDilate = innerShadowDilate,
+            innerShadowSoftness = innerShadowSoftness,
         };
 
         /// <summary>Builds an authored style from a runtime <see cref="GlyphStyle"/> (e.g. a shim-synthesised one, for migration).</summary>
@@ -98,6 +128,14 @@ namespace LightSide
             glowOuter = g.glowOuter,
             glowInner = g.glowInner,
             glowPower = g.glowPower,
+            outline2Color = g.outline2Color,
+            outline2Width = g.outline2Width,
+            outline2Softness = g.outline2Softness,
+            innerShadowColor = g.innerShadowColor,
+            innerShadowOffsetX = g.innerShadowOffsetX,
+            innerShadowOffsetY = g.innerShadowOffsetY,
+            innerShadowDilate = g.innerShadowDilate,
+            innerShadowSoftness = g.innerShadowSoftness,
         };
 
         public bool Equals(UniTextStyle o) => ToGlyphStyle().Equals(o.ToGlyphStyle());

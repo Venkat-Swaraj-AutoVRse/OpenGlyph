@@ -20,6 +20,9 @@ namespace LightSide
     ///   &lt;underlay=#RRGGBBAA,x,y,dilate,softness&gt;   drop-shadow colour + offset + dilate + softness
     ///   &lt;dilate=v&gt;                     face dilation v in [-1,1]
     ///   &lt;softness=v&gt;                   edge softness v in [0,1]
+    ///   &lt;glow=#RRGGBBAA,size,softness,intensity&gt;   soft outer glow (wave 2)
+    ///   &lt;innershadow=#RRGGBBAA,x,y,dilate,softness&gt; shadow inside the face (wave 2)
+    ///   &lt;outline2=#RRGGBBAA,width,softness&gt;       second stroke band outside the outline (wave 2)
     ///   &lt;style=Name&gt;                   a whole named UniTextStyle from the component StyleSheet
     /// </code>
     /// Tags nest and compose: an inner tag layers its field(s) over the style the outer tags produced.
@@ -36,6 +39,9 @@ namespace LightSide
             Underlay = 1 << 2,
             Dilate = 1 << 3,
             Softness = 1 << 4,
+            Glow = 1 << 5,
+            InnerShadow = 1 << 6,
+            Outline2 = 1 << 7,
         }
 
         public F set;
@@ -44,6 +50,9 @@ namespace LightSide
         public Color underlayColor; public float underlayOffsetX, underlayOffsetY, underlayDilate, underlaySoftness;
         public float faceDilate;
         public float softness;
+        public Color glowColor; public float glowOuter, glowPower, glowOffset;
+        public Color innerShadowColor; public float innerShadowOffsetX, innerShadowOffsetY, innerShadowDilate, innerShadowSoftness;
+        public Color outline2Color; public float outline2Width, outline2Softness;
 
         public bool IsNone => set == F.None;
 
@@ -66,6 +75,21 @@ namespace LightSide
             }
             if ((set & F.Dilate) != 0) s.faceDilate = faceDilate;
             if ((set & F.Softness) != 0) s.softness = softness;
+            if ((set & F.Glow) != 0)
+            {
+                s.glowColor = glowColor; s.glowOuter = glowOuter; s.glowPower = glowPower;
+                s.glowOffset = glowOffset; s.glowInner = 0f;
+            }
+            if ((set & F.InnerShadow) != 0)
+            {
+                s.innerShadowColor = innerShadowColor; s.innerShadowOffsetX = innerShadowOffsetX;
+                s.innerShadowOffsetY = innerShadowOffsetY; s.innerShadowDilate = innerShadowDilate;
+                s.innerShadowSoftness = innerShadowSoftness;
+            }
+            if ((set & F.Outline2) != 0)
+            {
+                s.outline2Color = outline2Color; s.outline2Width = outline2Width; s.outline2Softness = outline2Softness;
+            }
             return s;
         }
 
@@ -82,6 +106,22 @@ namespace LightSide
             }
             if ((inner.set & F.Dilate) != 0) { r.faceDilate = inner.faceDilate; r.set |= F.Dilate; }
             if ((inner.set & F.Softness) != 0) { r.softness = inner.softness; r.set |= F.Softness; }
+            if ((inner.set & F.Glow) != 0)
+            {
+                r.glowColor = inner.glowColor; r.glowOuter = inner.glowOuter; r.glowPower = inner.glowPower;
+                r.glowOffset = inner.glowOffset; r.set |= F.Glow;
+            }
+            if ((inner.set & F.InnerShadow) != 0)
+            {
+                r.innerShadowColor = inner.innerShadowColor; r.innerShadowOffsetX = inner.innerShadowOffsetX;
+                r.innerShadowOffsetY = inner.innerShadowOffsetY; r.innerShadowDilate = inner.innerShadowDilate;
+                r.innerShadowSoftness = inner.innerShadowSoftness; r.set |= F.InnerShadow;
+            }
+            if ((inner.set & F.Outline2) != 0)
+            {
+                r.outline2Color = inner.outline2Color; r.outline2Width = inner.outline2Width;
+                r.outline2Softness = inner.outline2Softness; r.set |= F.Outline2;
+            }
             return r;
         }
 
@@ -90,7 +130,12 @@ namespace LightSide
             outlineColor == o.outlineColor && outlineWidth == o.outlineWidth &&
             underlayColor == o.underlayColor && underlayOffsetX == o.underlayOffsetX && underlayOffsetY == o.underlayOffsetY &&
             underlayDilate == o.underlayDilate && underlaySoftness == o.underlaySoftness &&
-            faceDilate == o.faceDilate && softness == o.softness;
+            faceDilate == o.faceDilate && softness == o.softness &&
+            glowColor == o.glowColor && glowOuter == o.glowOuter && glowPower == o.glowPower && glowOffset == o.glowOffset &&
+            innerShadowColor == o.innerShadowColor && innerShadowOffsetX == o.innerShadowOffsetX &&
+            innerShadowOffsetY == o.innerShadowOffsetY && innerShadowDilate == o.innerShadowDilate &&
+            innerShadowSoftness == o.innerShadowSoftness &&
+            outline2Color == o.outline2Color && outline2Width == o.outline2Width && outline2Softness == o.outline2Softness;
         public override bool Equals(object obj) => obj is SpanStyleOverride o && Equals(o);
         public override int GetHashCode()
         {
@@ -98,6 +143,10 @@ namespace LightSide
             h.Add((int)set); h.Add(whole); h.Add(outlineColor); h.Add(outlineWidth);
             h.Add(underlayColor); h.Add(underlayOffsetX); h.Add(underlayOffsetY); h.Add(underlayDilate); h.Add(underlaySoftness);
             h.Add(faceDilate); h.Add(softness);
+            h.Add(glowColor); h.Add(glowOuter); h.Add(glowPower); h.Add(glowOffset);
+            h.Add(innerShadowColor); h.Add(innerShadowOffsetX); h.Add(innerShadowOffsetY);
+            h.Add(innerShadowDilate); h.Add(innerShadowSoftness);
+            h.Add(outline2Color); h.Add(outline2Width); h.Add(outline2Softness);
             return h.ToHashCode();
         }
     }
@@ -135,6 +184,37 @@ namespace LightSide
         }
 
         public static bool TryParseScalar(string param, out float v) => TryParseFloat(param, out v);
+
+        /// <summary>Maps a 0..1 glow softness to the falloff exponent the shaders use (0 = hard, 1 = soft).</summary>
+        public static float GlowPowerFromSoftness(float softness) => Mathf.Lerp(0.5f, 3f, Mathf.Clamp01(softness));
+
+        /// <summary>
+        /// <c>glow=#RRGGBBAA,size,softness,intensity</c>: colour, size v[0,1] of the atlas spread (default 0.5),
+        /// softness v[0,1] (default 0.5) and intensity (default 1, multiplies the colour alpha).
+        /// </summary>
+        public static bool TryParseGlow(string param, out Color color, out float size, out float power)
+        {
+            color = Color.white; size = 0.5f; power = GlowPowerFromSoftness(0.5f);
+            if (string.IsNullOrEmpty(param)) return false;
+            var parts = param.Split(',');
+            if (!TryParseHtmlColor(parts[0].Trim(), out color)) return false;
+            if (parts.Length > 1 && TryParseFloat(parts[1], out var s)) size = Mathf.Max(0f, s);
+            if (parts.Length > 2 && TryParseFloat(parts[2], out var soft)) power = GlowPowerFromSoftness(soft);
+            if (parts.Length > 3 && TryParseFloat(parts[3], out var intensity)) color.a *= Mathf.Max(0f, intensity);
+            return true;
+        }
+
+        /// <summary><c>outline2=#RRGGBBAA,width,softness</c> (width default 0.1, softness default 0).</summary>
+        public static bool TryParseOutline2(string param, out Color color, out float width, out float softness)
+        {
+            color = Color.black; width = 0.1f; softness = 0f;
+            if (string.IsNullOrEmpty(param)) return false;
+            var parts = param.Split(',');
+            if (!TryParseHtmlColor(parts[0].Trim(), out color)) return false;
+            if (parts.Length > 1 && TryParseFloat(parts[1], out var w)) width = Mathf.Max(0f, w);
+            if (parts.Length > 2 && TryParseFloat(parts[2], out var s)) softness = Mathf.Clamp01(s);
+            return true;
+        }
 
         private static bool TryParseFloat(string s, out float v) =>
             float.TryParse((s ?? string.Empty).Trim(), System.Globalization.NumberStyles.Float,
