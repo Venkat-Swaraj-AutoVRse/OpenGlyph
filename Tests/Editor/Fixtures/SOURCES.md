@@ -74,3 +74,14 @@ the upstream commit.
 
 No Lao font fixture is bundled yet; Lao segmentation is covered by the
 natural-text accuracy tests only.
+
+## Font fixture — `NotoSansDevanagari-Regular.ttf`
+
+Used by `ComplexScriptClusterTests` (Devanagari conjunct shaping: क्ष, स्ते). Test data only,
+like the other font fixtures. **License: OFL-1.1**, confirmed by the font's `name` ID 13
+("This Font Software is licensed under the SIL Open Font License, Version 1.1") and ID 14
+(https://openfontlicense.org).
+
+| File | Family / version (`name` ID 3) | Copyright | Source | SHA-256 |
+|------|------|-----------|--------|---------|
+| `NotoSansDevanagari-Regular.ttf` | `2.006;GOOG;NotoSansDevanagari-Regular` (static, no `fvar`) | 2022 The Noto Project Authors (https://github.com/notofonts/devanagari) | Noto Sans Devanagari 2.006 Regular, unmodified; no upstream commit pin recorded | `084a94d89eb54aafb93a056e15425c34fd859f6342875165d304837b3bcfc2d2` |
