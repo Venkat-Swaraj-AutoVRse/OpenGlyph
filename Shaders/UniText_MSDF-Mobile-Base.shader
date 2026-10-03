@@ -172,14 +172,16 @@ SubShader {
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 
-			half d = UniTextSampleMSDF(_MainTex, input.uv) * input.param.x;
+			half rawD = UniTextSampleMSDF(_MainTex, input.uv);  // raw distance (unscaled), for UniTextFieldGate
+			half d = rawD * input.param.x;
 			half4 result = half4(0, 0, 0, 0);
 
 			// Underlay layer (behind everything)
 			#if UNDERLAY_ON
-			half ud = UniTextSampleMSDF(_MainTex, input.underlayUV) * input.underlayParam.x;
+			half rawUd = UniTextSampleMSDF(_MainTex, input.underlayUV);
+			half ud = rawUd * input.underlayParam.x;
 			half4 underlayColor = float4(_UnderlayColor.rgb * _UnderlayColor.a, _UnderlayColor.a);
-			result = SDFLayer(ud, input.underlayParam.y, underlayColor);
+			result = SDFLayer(ud, input.underlayParam.y, underlayColor) * UniTextFieldGate(rawUd, _MainTex_TexelSize.w);
 			#endif
 
 			#if UNDERLAY_INNER
@@ -190,7 +192,7 @@ SubShader {
 
 			// Outline layer (same logic as Face, just different bias)
 			#ifdef OUTLINE_ON
-			half4 outlineResult = SDFLayer(d, input.param.y, input.outlineColor);
+			half4 outlineResult = SDFLayer(d, input.param.y, input.outlineColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 			result = BlendOver(result, outlineResult);
 			#endif
 

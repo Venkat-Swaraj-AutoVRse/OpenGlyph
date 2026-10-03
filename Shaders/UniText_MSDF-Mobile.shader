@@ -179,13 +179,15 @@ SubShader {
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 
-			half d = UniTextSampleMSDF(_MainTex, input.uv) * input.param.x;
+			half rawD = UniTextSampleMSDF(_MainTex, input.uv);  // raw distance (unscaled), for UniTextFieldGate
+			half d = rawD * input.param.x;
 			half4 result = half4(0, 0, 0, 0);
 
 			#if UNDERLAY_ON
-			half ud = UniTextSampleMSDF(_MainTex, input.underlayUV) * input.underlayParam.x;
+			half rawUd = UniTextSampleMSDF(_MainTex, input.underlayUV);
+			half ud = rawUd * input.underlayParam.x;
 			half4 underlayColor = float4(_UnderlayColor.rgb * _UnderlayColor.a, _UnderlayColor.a);
-			result = SDFLayer(ud, input.underlayParam.y, underlayColor);
+			result = SDFLayer(ud, input.underlayParam.y, underlayColor) * UniTextFieldGate(rawUd, _MainTex_TexelSize.w);
 			#endif
 
 			#if UNDERLAY_INNER
@@ -196,11 +198,11 @@ SubShader {
 			#endif
 
 			#ifdef OUTLINE_ON
-			half4 outlineResult = SDFLayer(d, input.param.z, input.outlineColor);
+			half4 outlineResult = SDFLayer(d, input.param.z, input.outlineColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 			result = BlendOver(result, outlineResult);
 			#endif
 
-			half4 faceResult = SDFLayer(d, input.param.y, input.faceColor);
+			half4 faceResult = SDFLayer(d, input.param.y, input.faceColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 			result = BlendOver(result, faceResult);
 
 			#if (UNDERLAY_ON | UNDERLAY_INNER)

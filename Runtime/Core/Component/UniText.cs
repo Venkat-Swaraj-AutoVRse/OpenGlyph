@@ -1746,6 +1746,7 @@ namespace LightSide
 
                     stencilMaterials[stencilIndex] = stencilMat;
                     matToUse = stencilMat;
+                    if (UnifiedRenderBuilder.IsSharedMaterial(mat)) UnifiedRenderBuilder.TrackStencilCopy(mat, stencilMat);
                 }
                 
                 r.SetMaterial(matToUse, i);

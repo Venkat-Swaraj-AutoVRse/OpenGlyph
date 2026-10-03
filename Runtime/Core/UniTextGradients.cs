@@ -69,14 +69,17 @@ namespace LightSide
 
         private void EnsureLookup()
         {
-            if (lookup != null) return;
+            if (System.Threading.Volatile.Read(ref lookup) != null) return;
 
-            lookup = new Dictionary<string, Gradient>(StringComparer.OrdinalIgnoreCase);
+            // Build fully, then publish: GradientModifier.OnApply runs on parallel first-pass workers,
+            // and publishing the dictionary before filling it let another worker see it empty.
+            var built = new Dictionary<string, Gradient>(StringComparer.OrdinalIgnoreCase);
             foreach (var ng in gradients)
             {
                 if (!string.IsNullOrEmpty(ng.name) && ng.gradient != null)
-                    lookup[ng.name] = ng.gradient;
+                    built[ng.name] = ng.gradient;
             }
+            System.Threading.Interlocked.CompareExchange(ref lookup, built, null);
         }
 
         public void Add(string gradientName, Gradient gradient)

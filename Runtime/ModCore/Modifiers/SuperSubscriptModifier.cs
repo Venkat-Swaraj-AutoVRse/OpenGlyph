@@ -20,7 +20,10 @@ namespace LightSide
     {
         public enum Kind { Superscript, Subscript }
 
-        private readonly Kind kind;
+        // Serialized: a readonly ctor-set field was lost on scene save/reload, so a deserialized <sub>
+        // modifier came back as Superscript and shared the "superscript" flags with the real one.
+        [UnityEngine.SerializeField]
+        private Kind kind;
         private PooledArrayAttribute<byte> flags; // 1 where this modifier's span applies
 
         // TMP defaults: subscript/superscript render at half size.
@@ -29,14 +32,16 @@ namespace LightSide
         private const float SuperRaiseFrac = 0.35f;
         private const float SubLowerFrac = 0.125f;
 
-        private readonly string key;
+        private string key => kind == Kind.Superscript ? "superscript" : "subscript";
+
+        /// <summary>Which tag this instance handles.</summary>
+        public Kind ScriptKind { get => kind; set => kind = value; }
 
         public SuperSubscriptModifier() : this(Kind.Superscript) { }
 
         public SuperSubscriptModifier(Kind kind)
         {
             this.kind = kind;
-            key = kind == Kind.Superscript ? "superscript" : "subscript";
         }
 
         protected override void OnEnable()

@@ -92,6 +92,7 @@ float4 PixShader(pixel_t input) : SV_Target
     UNITY_SETUP_INSTANCE_ID(input);
 
     float d = UNITEXT_SAMPLE_DF(_MainTex, input.texcoord0.xy);
+    float rawD = d;  // unscaled, for UniTextFieldGate
 
     // Screen-space derivative scale calculation
     float pixelSize = abs(ddx(input.texcoord0.y)) + abs(ddy(input.texcoord0.y));
@@ -122,21 +123,22 @@ float4 PixShader(pixel_t input) : SV_Target
     // Face layer (dilate normalized via normFactor)
     float normalizedFaceEffect = (0.5 - baseWeightTerm + _FaceDilate * _ScaleRatioA * 0.5) * normFactor;
     float faceBias = (0.5 - normalizedFaceEffect) * scaleSoftness - 0.5;
-    float4 faceColor = input.faceColor * saturate(d * scaleSoftness - faceBias);
+    float4 faceColor = input.faceColor * saturate(d * scaleSoftness - faceBias) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 
     // Outline layer (same logic as face, different dilate)
     #if OUTLINE_ON
     float normalizedOutlineEffect = (0.5 - baseWeightTerm + (_FaceDilate + _OutlineDilate) * _ScaleRatioA * 0.5) * normFactor;
     float outlineBias = (0.5 - normalizedOutlineEffect) * scaleSoftness - 0.5;
-    float4 outlineResult = input.outlineColor * saturate(d * scaleSoftness - outlineBias);
+    float4 outlineResult = input.outlineColor * saturate(d * scaleSoftness - outlineBias) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
     // Blend: outline behind face
     faceColor = BlendOver(outlineResult, faceColor);
     #endif
 
     // Underlay layer
     #if UNDERLAY_ON
-    float ud = UNITEXT_SAMPLE_DF(_MainTex, input.texcoord2.xy) * layerScale;
-    float4 underlayResult = input.underlayColor * saturate(ud - layerBias);
+    float rawUd = UNITEXT_SAMPLE_DF(_MainTex, input.texcoord2.xy);
+    float ud = rawUd * layerScale;
+    float4 underlayResult = input.underlayColor * saturate(ud - layerBias) * UniTextFieldGate(rawUd, _MainTex_TexelSize.w);
     faceColor = BlendOver(underlayResult, faceColor);
     #endif
 

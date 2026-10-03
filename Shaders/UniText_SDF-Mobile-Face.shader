@@ -76,6 +76,8 @@ SubShader {
 
 		#include "UniText_SDF-Mobile-Common.cginc"
 
+		float4 _MainTex_TexelSize; // Unity auto-provided: (1/width, 1/height, width, height)
+
 		struct pixel_t
 		{
 			UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -126,8 +128,9 @@ SubShader {
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 
-			half d = tex2D(_MainTex, input.uv).a * input.param.x;
-			half4 result = SDFLayer(d, input.param.y, input.faceColor);
+			half rawD = tex2D(_MainTex, input.uv).a;  // raw distance (unscaled), for UniTextFieldGate
+			half d = rawD * input.param.x;
+			half4 result = SDFLayer(d, input.param.y, input.faceColor) * UniTextFieldGate(rawD, _MainTex_TexelSize.w);
 
 			return ApplyClipping(result, input.mask);
 		}

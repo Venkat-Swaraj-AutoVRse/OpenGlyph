@@ -16,9 +16,4 @@ MonoBehaviour:
     items:
     - {fileID: 2100000, guid: 576afc17f1fccc544aef5b2388b8def2, type: 2}
   fontMaterials:
-    items:
-    - font: {fileID: 11400000, guid: 9f194bcdf6b582b4c8731cdfe455216c, type: 2}
-      materials:
-        items:
-        - {fileID: 2100000, guid: 2fe109d0df6f03246836c86eb7f6ca36, type: 2}
-        - {fileID: 2100000, guid: c787515284273dd4fb79cd7c0d20619b, type: 2}
+    items: []
