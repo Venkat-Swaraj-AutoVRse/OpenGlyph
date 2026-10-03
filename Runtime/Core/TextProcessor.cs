@@ -904,11 +904,13 @@ namespace LightSide
             float maxSize,
             float targetWidth,
             float targetHeight,
-            TextProcessSettings baseSettings)
+            TextProcessSettings baseSettings,
+            float step = 0f)
         {
             if (!hasValidFirstPassData) return minSize;
             if (targetWidth <= 0 || targetHeight <= 0) return minSize;
             if (buf.shapingFontSize <= 0) return minSize;
+            if (!(step > 0f) || float.IsInfinity(step)) step = 0f;
 
             var unwrappedWidth = GetUnwrappedWidth();
             var maxGlyphScale = maxSize / buf.shapingFontSize;
@@ -988,10 +990,14 @@ namespace LightSide
                 var heightLimitedSize = targetHeight / (rawHeightRatio - trimRatio);
 
                 var optimalSize = Math.Clamp(Math.Min(widthLimitedSize, heightLimitedSize), minSize, maxSize);
+                if (step > 0f) optimalSize = SnapFontSizeDown(optimalSize, minSize, maxSize, step);
                 hasValidLinesData = false;
                 hasValidPositionedGlyphs = false;
                 return optimalSize;
             }
+
+            if (step > 0f)
+                return FindOptimalSteppedFontSize(minSize, maxSize, targetWidth, targetHeight, baseSettings, step);
 
             const float tolerance = 0.5f;
             var lo = minSize;
@@ -1020,6 +1026,54 @@ namespace LightSide
                 GetHeightForFontSize(lo, targetWidth, baseSettings);
 
             return lo;
+        }
+
+        /// <summary>
+        /// Rounds a fitted size down to a multiple of <paramref name="step"/> (Auto Size fit steps). The
+        /// maximum is kept as is (it fits); a result below the minimum, or no multiple in range, gives the minimum.
+        /// </summary>
+        public static float SnapFontSizeDown(float size, float minSize, float maxSize, float step)
+        {
+            if (!(step > 0f)) return size;
+            if (size >= maxSize) return maxSize;
+            var snapped = (float)(Math.Floor(size / step + 1e-4) * step);
+            if (snapped > size) snapped = size;
+            return snapped < minSize - 1e-4f ? minSize : Math.Min(snapped, maxSize);
+        }
+
+        /// <summary>
+        /// Auto Size with fit steps: the largest multiple of <paramref name="step"/> in [min, max] whose
+        /// layout fits <paramref name="targetHeight"/> (binary search over the multiples). The maximum
+        /// is used when it fits; the minimum when no multiple fits. Leaves the lines broken at the result.
+        /// </summary>
+        private float FindOptimalSteppedFontSize(float minSize, float maxSize, float targetWidth,
+            float targetHeight, TextProcessSettings baseSettings, float step)
+        {
+            if (GetHeightForFontSize(maxSize, targetWidth, baseSettings) <= targetHeight)
+                return maxSize;
+
+            var nLo = (long)Math.Ceiling(minSize / step - 1e-4);
+            var nHi = (long)Math.Floor(maxSize / step + 1e-4);
+            if (nHi * step >= maxSize - 1e-4f) nHi--; // the maximum itself does not fit
+
+            float result = minSize;
+            if (nLo <= nHi && GetHeightForFontSize((float)(nLo * step), targetWidth, baseSettings) <= targetHeight)
+            {
+                // Invariant: nLo fits, nHi + 1 does not.
+                var lo = nLo;
+                var hi = nHi;
+                while (lo < hi)
+                {
+                    var mid = lo + (hi - lo + 1) / 2;
+                    if (GetHeightForFontSize((float)(mid * step), targetWidth, baseSettings) <= targetHeight) lo = mid;
+                    else hi = mid - 1;
+                }
+                result = (float)(lo * step);
+            }
+
+            if (Math.Abs(lastLinesFontSize - result) > 0.001f)
+                GetHeightForFontSize(result, targetWidth, baseSettings);
+            return result;
         }
 
 

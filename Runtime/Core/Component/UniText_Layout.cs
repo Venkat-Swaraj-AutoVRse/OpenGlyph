@@ -131,7 +131,7 @@ namespace LightSide
                 };
 
                 cachedEffectiveFontSize = textProcessor.FindOptimalFontSize(
-                    minFontSize, maxFontSize, rect.width, rect.height, settings);
+                    minFontSize, maxFontSize, rect.width, rect.height, settings, autoSizeStep);
                 textProcessor.EnsureLines(rect.width, cachedEffectiveFontSize, wordWrap, horizontalAlignment, UseTmpJustification);
             }
         }
@@ -158,7 +158,7 @@ namespace LightSide
             };
 
             return textProcessor.FindOptimalFontSize(
-                minFontSize, maxFontSize, width, height, settings);
+                minFontSize, maxFontSize, width, height, settings, autoSizeStep);
         }
 
         // TMP adds only POSITIVE margins to the preferred (rendered) size.
