@@ -17,6 +17,13 @@ namespace LightSide
     /// (0 ⇒ unbounded; unchanged behaviour) at array-creation time. This facet is ADDITIVE: the legacy
     /// per-font <c>atlasTextures</c> path remains the source of truth until the renderer is switched
     /// over, so publishing here changes no existing behaviour.
+    /// <para>
+    /// BUDGETS DISABLED: the budget read is currently forced to 0 (unbounded) regardless of the
+    /// <see cref="UniTextSettings"/> values — see <c>SafeBudget</c>/<c>SafeByteBudget</c>/
+    /// <c>SafeGlobalByteBudget</c> and Documentation/Design/MemoryBudgets.md. The runtime does not
+    /// reference-count glyphs or advance the LRU clock, so enforcing a budget could evict on-screen
+    /// glyphs. The eviction code is retained for when that wiring lands.
+    /// </para>
     /// </remarks>
     public static class SharedGlyphAtlas
     {
@@ -58,20 +65,69 @@ namespace LightSide
             return arr;
         }
 
+        // ──────────────────────────────────────────────────────────────────────────────────────
+        // Budgets are DISABLED in the runtime (see Documentation/Design/MemoryBudgets.md §"Status").
+        //
+        // The shared-atlas eviction machinery in GlyphAtlasArray only evicts cells whose refCount is
+        // 0 and uses an LRU clock advanced by BeginFrame(). But NOTHING in the runtime calls
+        // Acquire/Release (so every on-screen glyph has refCount 0) and NOTHING calls BeginFrame()
+        // (so the LRU clock never advances). A non-zero budget would therefore evict glyphs that are
+        // currently on screen and reuse their atlas space — making visible text draw the wrong
+        // glyphs. The per-font legacy atlases (where glyph memory actually goes by default) are not
+        // budgeted at all, and the global budget (EnforceGlobalByteBudget/ReleaseEmptyPages) has no
+        // runtime caller.
+        //
+        // Until Acquire/Release + BeginFrame are wired into the render path, these helpers IGNORE the
+        // serialized UniTextSettings budget values and always report 0 (unbounded), so no eviction
+        // can ever happen through the runtime. The eviction code and its unit tests are retained —
+        // tests set budgets directly on GlyphAtlasArray / via reflection on a settings instance, not
+        // through this path. The serialized fields are kept so existing assets load unchanged; a
+        // single warning (once per session) fires if a project has set a non-zero budget.
+        // ──────────────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>True once the "budgets are inactive" warning has been emitted, so it fires at most once per session.</summary>
+        private static bool loggedBudgetDisabled;
+
+        /// <summary>
+        /// Emits a single warning if the project configured any non-zero shared-atlas budget, because
+        /// those values are currently ignored (see the block comment above). Safe to call repeatedly.
+        /// </summary>
+        private static void WarnIfBudgetConfigured()
+        {
+            if (loggedBudgetDisabled || UniTextSettings.IsNull) return;
+            if (UniTextSettings.SharedAtlasPageBudget > 0 ||
+                UniTextSettings.SharedAtlasByteBudgetPerArray > 0 ||
+                UniTextSettings.SharedAtlasByteBudgetGlobal > 0)
+            {
+                loggedBudgetDisabled = true;
+                Debug.LogWarning(
+                    "[OpenGlyph] A shared glyph-atlas memory budget is set in UniTextSettings " +
+                    "(SharedAtlasPageBudget / SharedAtlasByteBudgetPerArray / SharedAtlasByteBudgetGlobal), " +
+                    "but these budgets are NOT ACTIVE yet and are being ignored. The runtime does not " +
+                    "reference-count or advance the atlas LRU clock, so enforcing a budget could evict " +
+                    "on-screen glyphs and draw wrong text. The atlas runs unbounded (no eviction) until " +
+                    "the budgets are properly wired. See Documentation/Design/MemoryBudgets.md.");
+            }
+        }
+
+        // Budgets disabled: always report 0 (unbounded) regardless of the serialized settings values,
+        // so the runtime atlas never evicts. Warn once if a project configured a non-zero budget.
         private static int SafeBudget()
         {
-            // Settings may be unavailable in some test contexts; default to unbounded (0).
-            return UniTextSettings.IsNull ? 0 : UniTextSettings.SharedAtlasPageBudget;
+            WarnIfBudgetConfigured();
+            return 0;
         }
 
         private static long SafeByteBudget()
         {
-            return UniTextSettings.IsNull ? 0 : UniTextSettings.SharedAtlasByteBudgetPerArray;
+            WarnIfBudgetConfigured();
+            return 0;
         }
 
         private static long SafeGlobalByteBudget()
         {
-            return UniTextSettings.IsNull ? 0 : UniTextSettings.SharedAtlasByteBudgetGlobal;
+            WarnIfBudgetConfigured();
+            return 0;
         }
 
         /// <summary>Propagates the current <see cref="UniTextSettings"/> budgets to every live array.</summary>
