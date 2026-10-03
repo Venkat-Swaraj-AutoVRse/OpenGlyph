@@ -130,7 +130,7 @@ Memory grows monotonically with the set of (glyph × variation) ever displayed.
 `Shaders/` contains a large matrix of per-mode, per-canvas, per-platform shader
 variants: `UniText_SDF*`, `UniText_MSDF*`, `UniText_Bitmap*`, each with
 `-Overlay` (Screen Space Overlay), `-SSD` (Screen Space Camera / World),
-`-Mobile`, `-Masking`, `-2-Pass`, `-Surface` forms. The shading model
+`-Mobile`, `-Masking`, `-2-Pass` forms (the `-Surface` variants were removed: URP does not support surface shaders). The shading model
 (`UniText_Properties.cginc`) is TMP-style: `_FaceColor/_FaceDilate`,
 `_OutlineColor/_OutlineWidth/_OutlineDilate/_OutlineSoftness`,
 `_UnderlayColor/_UnderlayOffset*/_UnderlayDilate/_UnderlaySoftness`,
