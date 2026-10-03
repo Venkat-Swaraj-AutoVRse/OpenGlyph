@@ -60,6 +60,13 @@ namespace LightSide
 
         private static ShapedGlyph[] OutputBuffer => outputBuffer ??= new ShapedGlyph[256];
 
+        /// <summary>
+        /// True when the loaded native library supports language-aware shaping
+        /// (<see cref="UniText.Language"/>, <c>&lt;lang&gt;</c>). With an older native library the language is
+        /// ignored for shaping; the CJK system face choice still uses it.
+        /// </summary>
+        public static bool SupportsLanguage => HB.SupportsLanguage;
+
         /// <summary>Gets the singleton shaper instance.</summary>
         public static Shaper Instance
         {
@@ -500,7 +507,8 @@ namespace LightSide
             uint[] variationTags = null,
             float[] variationCoords = null,
             HBFeature[] features = null,
-            int featureCount = 0)
+            int featureCount = 0,
+            byte[] language = null)
         {
             if (itemLength == 0)
                 return new ShapingResult(ReadOnlySpan<ShapedGlyph>.Empty, 0);
@@ -541,6 +549,9 @@ namespace LightSide
                 ? HB.DIRECTION_RTL
                 : HB.DIRECTION_LTR);
             HB.SetScript(buffer, MapScript(script));
+            // BCP 47 language (ASCII). Unset (null) keeps HarfBuzz's default language system, exactly as
+            // before; set, it selects the font's language system (locl and other language-specific lookups).
+            if (language != null) HB.SetLanguage(buffer, language);
             HB.SetFlags(buffer, HB.BUFFER_FLAG_REMOVE_DEFAULT_IGNORABLES);
             HB.AddCodepoints(buffer, context, itemOffset, itemLength);
 

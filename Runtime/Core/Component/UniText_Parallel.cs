@@ -187,7 +187,8 @@ namespace LightSide
             // Main thread: load system fallback fonts for uncovered scripts (file IO + asset creation)
             // before any worker runs, and log the once-per-script warning naming this component.
             if (UniTextSettings.UseSystemFontFallback)
-                SystemFontFallback.PrepareForText(sourceText.Span, fontProvider?.FontStackAsset, this);
+                SystemFontFallback.PrepareForText(sourceText.Span, fontProvider?.FontStackAsset, this,
+                    CollectCjkLanguages(sourceText.Span));
         }
         
 

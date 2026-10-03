@@ -176,6 +176,9 @@ namespace LightSide
         /// <summary>True when a real italic/oblique face was resolved, suppressing synthetic italic (Phase 2).</summary>
         public bool realItalic;
 
+        /// <summary>Index into the processor's language table (0 = the component language; see <see cref="TextProcessor.Language"/>).</summary>
+        public byte languageIndex;
+
         /// <summary>Gets the text direction derived from the BiDi level.</summary>
         public TextDirection Direction => (bidiLevel & 1) == 0
             ? TextDirection.LeftToRight

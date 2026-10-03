@@ -296,6 +296,56 @@ namespace LightSide
         }
 
         /// <summary>
+        /// Language-aware variant of <see cref="FindFontForCodepoint(int)"/>: for a CJK code point that no
+        /// font in the stack covers, the system fallback face is picked for <paramref name="language"/>
+        /// (Japanese, Korean, Simplified / Traditional / Hong Kong Chinese) instead of the project
+        /// default. Fonts in the stack always win, and non-CJK code points behave exactly as the
+        /// language-less overload.
+        /// </summary>
+        public int FindFontForCodepoint(int codepoint, CjkLanguage language)
+        {
+            if (language == CjkLanguage.Default || !SystemFontFallback.IsCjkCodepoint((uint)codepoint))
+                return FindFontForCodepoint(codepoint);
+
+            var key = (codepoint << 3) | (int)language;
+            if (languageFontCache.TryGetValue(key, out var cachedLang) &&
+                (cachedLang == mainFontId || fontAssets.ContainsKey(cachedLang)))
+                return cachedLang;
+
+            // The shared (codepoint, main font) cache holds the language-less answer. Reuse it when it is a
+            // font of the stack (the language cannot change that); a system fallback face is re-resolved.
+            if (SharedFontCache.TryGet(codepoint, mainFontId, out var shared) &&
+                (shared == mainFontId || fontAssets.ContainsKey(shared)) &&
+                !SystemFontFallback.IsFallbackFontId(shared))
+                return shared;
+
+            searchedFontAssets ??= new HashSet<int>();
+            searchedFontAssets.Clear();
+            var unicode = (uint)codepoint;
+            var foundFont = fontStackAsset?.FindFontForCodepoint(unicode, searchedFontAssets);
+            if (foundFont != null)
+            {
+                var stackId = GetFontId(foundFont);
+                if (!fontAssets.ContainsKey(stackId)) RegisterFontAsset(stackId, foundFont);
+                SharedFontCache.Set(codepoint, mainFontId, stackId);
+                return stackId;
+            }
+
+            if (!UniTextSettings.UseSystemFontFallback) return mainFontId;
+            foundFont = SystemFontFallback.Resolve(unicode, language);
+            if (foundFont == null) return mainFontId;
+
+            var fontId = GetFontId(foundFont);
+            if (!fontAssets.ContainsKey(fontId)) RegisterFontAsset(fontId, foundFont);
+            languageFontCache[key] = fontId;
+            return fontId;
+        }
+
+        // (codepoint << 3 | CjkLanguage) -> font id, for language-specific system CJK faces. Per provider
+        // (one component), so it is only touched by the thread running that component's first pass.
+        private readonly FastIntDictionary<int> languageFontCache = new();
+
+        /// <summary>
         /// Resolves the font id for a styled run (weight/width/style + <c>&lt;b&gt;</c>/<c>&lt;i&gt;</c>
         /// markup) via the stack's <see cref="UniTextFontStack.ResolveStyledFont"/>. Registers the
         /// resolved face so <see cref="GetFontAsset"/>/<see cref="GetMaterials"/> can find it, and

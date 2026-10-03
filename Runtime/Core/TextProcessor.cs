@@ -1175,6 +1175,8 @@ namespace LightSide
             var scrSpan = buf.scripts.data.AsSpan(0, cpCount);
             var fp = fontProvider;
 
+            PrepareLanguages(cpCount);
+
             if (fp == null)
             {
                 ItemizeWithoutFontLookup(cpCount, lvlSpan, scrSpan, 0);
@@ -1239,7 +1241,8 @@ namespace LightSide
                 var scriptIsReal = IsRealScript(script);
                 var scriptChanged = currentIsReal && scriptIsReal && currentScript != script;
 
-                if (level != currentLevel || scriptChanged || fontId != currentFontId)
+                if (level != currentLevel || scriptChanged || fontId != currentFontId ||
+                    (cpLanguage != null && cpLanguage[i] != cpLanguage[runStart]))
                 {
                     if (i > runStart)
                         AddRun(runStart, i - runStart, currentLevel, currentScript, currentFontId);
@@ -1323,19 +1326,19 @@ namespace LightSide
                 var cp = cpSpan[start];
 
                 if ((uint)cp < UnicodeData.EmojiRangeThreshold)
-                    return fp.FindFontForCodepoint(cp);
+                    return fp.FindFontForCodepoint(cp, CjkLanguageAt(start));
 
                 if (EmojiFont.IsAvailable && IsSingleCodepointEmoji(cp))
                     return EmojiFont.FontId;
 
-                return fp.FindFontForCodepoint(cp);
+                return fp.FindFontForCodepoint(cp, CjkLanguageAt(start));
             }
 
             var cluster = cpSpan.Slice(start, clusterLength);
             if (EmojiFont.IsAvailable && EmojiSequenceClassifier.IsEmojiCluster(cluster))
                 return EmojiFont.FontId;
 
-            return fp.FindFontForCodepoint(cpSpan[start]);
+            return fp.FindFontForCodepoint(cpSpan[start], CjkLanguageAt(start));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1391,7 +1394,8 @@ namespace LightSide
                 var scriptIsReal = IsRealScript(script);
                 var scriptChanged = currentIsReal && scriptIsReal && currentScript != script;
 
-                if (level != currentLevel || scriptChanged)
+                if (level != currentLevel || scriptChanged ||
+                    (cpLanguage != null && cpLanguage[i] != cpLanguage[runStart]))
                 {
                     if (i > runStart)
                         AddRun(runStart, i - runStart, currentLevel, currentScript, fontId);
@@ -1428,7 +1432,8 @@ namespace LightSide
                 styleSpec = styleActive ? SpecAt(start) : FontStyleSpec.Normal,
                 variationKey = VariationKey.None,
                 realBold = false,
-                realItalic = false
+                realItalic = false,
+                languageIndex = LanguageIndexAt(start)
             };
 
             if (styleActive && fontProvider != null)
@@ -1487,7 +1492,8 @@ namespace LightSide
                     vtags,
                     vcoords,
                     featureCount > 0 ? featureScratch : null,
-                    featureCount);
+                    featureCount,
+                    LanguageAsciiOf(run.languageIndex));
 
                 var glyphStart = buf.shapedGlyphs.count;
                 AddShapedGlyphs(result.Glyphs);

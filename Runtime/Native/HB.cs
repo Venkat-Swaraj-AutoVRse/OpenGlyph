@@ -136,6 +136,7 @@ namespace LightSide
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern hb_glyph_info_t* ut_hb_buffer_get_glyph_infos(IntPtr buffer, out uint length);
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern hb_glyph_position_t* ut_hb_buffer_get_glyph_positions(IntPtr buffer, out uint length);
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern void ut_hb_shape(IntPtr font, IntPtr buffer, IntPtr features, uint numFeatures);
+        [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern void ut_hb_buffer_set_language(IntPtr buffer, byte* tag, int len);
 
         #endregion
 
@@ -237,6 +238,50 @@ namespace LightSide
         {
             if (buffer == IntPtr.Zero) return;
             ut_hb_buffer_set_flags(buffer, flags);
+        }
+
+        // 0 = unknown, 1 = available, -1 = the loaded native library predates ut_hb_buffer_set_language.
+        private static volatile int languageSupport;
+
+        /// <summary>
+        /// True when the native library exports <c>ut_hb_buffer_set_language</c>. An older native binary
+        /// without it still loads; language-specific shaping (locl) is then skipped.
+        /// </summary>
+        public static bool SupportsLanguage
+        {
+            get
+            {
+                if (languageSupport == 0)
+                {
+                    var b = ut_hb_buffer_create();
+                    try { SetLanguageAscii(b, LanguageProbe); }
+                    catch (EntryPointNotFoundException) { languageSupport = -1; }
+                    finally { if (b != IntPtr.Zero) ut_hb_buffer_destroy(b); }
+                }
+                return languageSupport > 0;
+            }
+        }
+
+        private static readonly byte[] LanguageProbe = { (byte)'e', (byte)'n' };
+
+        private static void SetLanguageAscii(IntPtr buffer, byte[] ascii)
+        {
+            if (buffer == IntPtr.Zero) return;
+            fixed (byte* p = ascii)
+                ut_hb_buffer_set_language(buffer, p, ascii.Length);
+            languageSupport = 1;
+        }
+
+        /// <summary>
+        /// Sets the buffer's BCP 47 language (<c>hb_buffer_set_language</c>), given as ASCII bytes. A null
+        /// or empty tag leaves the buffer's language unset. No-op when the native library is too old.
+        /// </summary>
+        public static void SetLanguage(IntPtr buffer, byte[] ascii)
+        {
+            if (buffer == IntPtr.Zero || ascii == null || ascii.Length == 0) return;
+            if (languageSupport < 0) return;
+            try { SetLanguageAscii(buffer, ascii); }
+            catch (EntryPointNotFoundException) { languageSupport = -1; }
         }
 
         /// <summary>
