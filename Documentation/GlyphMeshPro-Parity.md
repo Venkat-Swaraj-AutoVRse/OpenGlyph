@@ -340,3 +340,27 @@ the legacy production AA by construction. `UnifiedRendererPixelEquivalenceTests`
 (sdf / msdf / colored-span) report `maxDelta=0`, `0.000 %` pixels differing — unified
 geometry/UVs still byte-match legacy. Brightness is near-white at both small (30 pt) and
 large (120 pt) sizes; outline / underlay / MSDF / SDF tests all pass.
+
+### Scope: opt-in, GlyphMeshPro only
+The 5% wrap tolerance and the word+character justification split are gated behind
+`LayoutSettings.tmpJustification` (carried in `TextProcessSettings`). Only the
+TMP-parity components set it (`GlyphMeshProUGUI` overrides `UseTmpJustification =>
+true`); plain `UniText` leaves it `false` and keeps the exact pre-Round-2.1
+Justified/Flush layout — tolerance 1.0, slack on inter-word whitespace only, no
+character spacing. `TextProcessor` captures the flag at the first pass and the live
+component passes it to `EnsureLines`; `CanReuseLines` re-breaks when it flips.
+Guarded by `PlainUniText_Justified_And_Flush_KeepLegacyWordGapOnly_Layout` (plain
+line breaks == Left, and no character advance inserted between visible glyphs).
+
+### Grapheme-cluster safety
+The character-spacing share is applied once per GRAPHEME CLUSTER — after the last glyph
+of each cluster (`CountJustifyTargets` counts distinct non-whitespace cluster ids, not
+glyphs) — so a base and its marks / conjunct parts are never pushed apart. On a line
+containing a cursive JOINING script (Arabic, Syriac, N'Ko, Mongolian, Arabic
+Presentation Forms, Mandaic) character spreading is skipped entirely and the whole slack
+goes to the inter-word spaces (with the 70% floor); RTL lines never justify on this path
+(base-direction guard). Guarded by `Gmp_Justified_Thai_KeepsEveryMarkOffsetRelativeToItsBase`
+and `Gmp_Justified_Khmer_KeepsEveryMarkOffsetRelativeToItsBase` — every multi-glyph
+cluster's intra-cluster glyph offsets are identical justified vs unjustified. (Devanagari
+is not a bundled fixture; Thai vowel/tone marks and Khmer subscript conjuncts exercise the
+same multi-glyph-cluster property.)
