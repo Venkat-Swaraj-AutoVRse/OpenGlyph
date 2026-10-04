@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Web: WebGPU and WebGL 2
+
+- **Web player builds link again** (WebGL 2 and WebGPU). The WebGL native archive shipped since the
+  phase 0 rebuild failed Unity's player link in two ways: it defined plain FreeType / libpng / zlib
+  symbols that Unity's own TextRenderingModule, `libpng.a` and `zlib.a` also define
+  (`wasm-ld: error: duplicate symbol: FT_Get_Advance`, ...), and it was compiled with emscripten 3.1.64,
+  whose objects need `__wasm_setjmp` / `__wasm_setjmp_test`, which Unity's emscripten 3.1.39 runtime does
+  not have. The archive is now built with emscripten 3.1.39 and every non-`ut_*` symbol is renamed to
+  `__ut_*` (`Tools~/wasm_prefix_symbols.py`); the CI `webgl` job checks both and link-tests against a host
+  that defines its own FreeType/HarfBuzz symbols. Tests: `WebNativeArchiveTests`.
+- **Web player scripts compile.** `FT.GetBitmapLeft/Top` and `FT.SetSdfSpread` were compiled out on
+  `UNITY_WEBGL` while the Smooth/Mono bitmap renderers call them, and the web-only SDF branch of
+  `UniTextFont` redeclared a local. Test: `WebPlatformTests.PlayerScripts_CompileForWeb`.
+- **WebGPU-aware build processor.** On Unity 2023.1+ the Web graphics API list is left as set (WebGPU
+  alone, or with a WebGL 2 fallback, in any order) and Auto Graphics API is no longer turned off.
+  Tests: `WebPlatformTests.BuildProcessor_*`; every package shader compiles for WebGPU and GLES3
+  (`WebPlatformTests.EveryPackageShader_CompilesForWeb`).
+- **System font fallback is off in Web players** (browsers expose no font files): bundle a font for
+  every script. See [Documentation/Web.md](Documentation/Web.md).
+
 ### World link feedback
 
 - **`WorldTextHighlighter`**: hover box and click flash for links and interactive ranges on world-space

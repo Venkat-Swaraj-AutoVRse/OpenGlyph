@@ -29,12 +29,14 @@ namespace LightSide.Tests
         }
 
 #if UNITY_2023_3_OR_NEWER
-        private static IEnumerable<GraphicsDeviceType[]> ExplicitApiLists()
+        private static IEnumerable<TestCaseData> ExplicitApiLists()
         {
-            yield return new[] { GraphicsDeviceType.WebGPU };
-            yield return new[] { GraphicsDeviceType.WebGPU, GraphicsDeviceType.OpenGLES3 };
-            yield return new[] { GraphicsDeviceType.OpenGLES3, GraphicsDeviceType.WebGPU };
-            yield return new[] { GraphicsDeviceType.OpenGLES3 };
+            // TestCaseData wraps each array so NUnit passes it as ONE argument (a bare single-element
+            // array would be spread into the parameter list).
+            yield return new TestCaseData((object)new[] { GraphicsDeviceType.WebGPU }).SetName("KeepsApis_WebGPU");
+            yield return new TestCaseData((object)new[] { GraphicsDeviceType.WebGPU, GraphicsDeviceType.OpenGLES3 }).SetName("KeepsApis_WebGPU_WebGL2");
+            yield return new TestCaseData((object)new[] { GraphicsDeviceType.OpenGLES3, GraphicsDeviceType.WebGPU }).SetName("KeepsApis_WebGL2_WebGPU");
+            yield return new TestCaseData((object)new[] { GraphicsDeviceType.OpenGLES3 }).SetName("KeepsApis_WebGL2");
         }
 
         [TestCaseSource(nameof(ExplicitApiLists))]

@@ -477,10 +477,17 @@ Native plugins shipped in [`Plugins/`](Plugins/):
 | Android (incl. Meta Quest) | ARMv7, ARM64, x86, x64 |
 | iOS | ARM64 (device), ARM64/x64 simulator |
 | tvOS | static library |
-| WebGL | static library |
+| Web: WebGL 2 | static wasm library (shared with WebGPU) |
+| Web: WebGPU | same library; Unity's WebGPU backend is experimental (Unity 6+) |
 
-Meta Quest 3S (Android ARM64, IL2CPP, Vulkan, OpenXR) is verified on device. Other platforms ship
+Meta Quest 3S (Android ARM64, IL2CPP, Vulkan, OpenXR) is verified on device. Web player builds
+(WebGPU only, and WebGL 2 only) are verified in Chrome with Unity 6000.3. Other platforms ship
 binaries but were not tested on device for this release.
+
+On the web, bundle a font for every script you use: a browser exposes no installed fonts, so the
+system font fallback is off, and the web player runs single-threaded ([details](Documentation/Web.md)).
+
+![OpenGlyph in a WebGPU Web player in Chrome: Latin, Arabic, Hebrew, Devanagari, effects, GlyphMeshProUGUI, an input field and a UniTextWorld label](.github/assets/features/webgpu.png)
 
 ## Documentation
 
@@ -494,6 +501,7 @@ binaries but were not tested on device for this release.
 - [World-space text: UniTextWorld, GlyphMeshPro](Documentation/WorldText.md)
 - [Input field: UniTextInputField, GlyphMeshProInputField, selectable text](Documentation/InputField.md)
 - [Built-in VR keyboard: UniTextKeyboard, layouts, placement](Documentation/VRKeyboard.md)
+- [Web (WebGL 2 and WebGPU)](Documentation/Web.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
 - [Changelog](CHANGELOG.md)
 
