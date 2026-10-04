@@ -446,6 +446,28 @@ uniText.RegisterModifier(new ModRegister
 });
 ```
 
+#### All common tags at once
+
+A component parses **no** tags until rules are registered: a fresh `UniText` / `UniTextWorld` shows
+`<b>A</b>` literally. `RegisterDefaultMarkup()` registers the common set in one call (it skips tags the
+component already parses, and returns the component):
+
+```csharp
+var label = go.AddComponent<UniTextWorld>().RegisterDefaultMarkup();
+label.Text = "Valve <b>A</b> · <color=#38BDF8>open</color>";
+```
+
+The set (`UniTextDefaultMarkup.Tags`): `b i u s color size cspace line-height line-spacing link sup sub
+gradient outline outline2 underlay glow innershadow dilate softness style mark smallcaps upper uppercase
+lowercase voffset align indent line-indent nobr noparse lang feature`. Not included: the animation tags
+(`TextAnimationModifier.RegisterAll`), `<obj>` (needs inline objects), `<font>`, `<ellipsis>`, and the
+Markdown / raw-URL rules. In the Inspector, the component's context menu has **Register Default Markup**.
+
+For a whole project, turn on **Default Markup On New Components** in `UniTextSettings` (default off). Then
+every component without rules of its own (empty Mod Registers, no Mod Register Config) parses the same set;
+the rules are added at runtime and never written into scenes or prefabs. `GlyphMeshProUGUI` /
+`GlyphMeshPro` are not affected: they register their own TMP tag set.
+
 Remove at runtime:
 
 ```csharp

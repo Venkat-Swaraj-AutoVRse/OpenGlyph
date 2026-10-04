@@ -21,6 +21,11 @@
             "name": "com.unity.inputsystem",
             "expression": "1.0.0",
             "define": "OPENGLYPH_INPUTSYSTEM"
+        },
+        {
+            "name": "com.unity.modules.vr",
+            "expression": "1.0.0",
+            "define": "OPENGLYPH_VR"
         }
     ],
     "noEngineReferences": false

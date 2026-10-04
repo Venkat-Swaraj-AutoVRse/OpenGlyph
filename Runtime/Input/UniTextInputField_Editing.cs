@@ -546,15 +546,23 @@ namespace LightSide
 
         private void OpenTouchKeyboard()
         {
-            if (m_HideSoftKeyboard || m_ReadOnly) return;
-            var tk = TouchKeyboard;
+            IInputFieldTouchKeyboard tk;
+            switch (ResolvedSoftKeyboard)
+            {
+                case InputFieldSoftKeyboard.System: tk = TouchKeyboard; break;
+                case InputFieldSoftKeyboard.BuiltIn: tk = builtInAdapter ??= new UniTextKeyboardTouchAdapter(this); break;
+                default: return;
+            }
             if (tk == null || !tk.IsSupported) return;
             tk.HideInput = m_HideMobileInput;
             var placeholderText = m_Placeholder is UniText pu ? pu.Text : string.Empty;
-            tk.Open(m_Text, m_KeyboardType, m_InputType == InputFieldInputType.AutoCorrect, MultiLine,
-                m_InputType == InputFieldInputType.Password, placeholderText, m_CharacterLimit);
+            openKeyboard = tk;
             touchOpen = true;
             touchLastText = m_Text;
+            tk.Open(m_Text, m_KeyboardType, m_InputType == InputFieldInputType.AutoCorrect, MultiLine,
+                m_InputType == InputFieldInputType.Password, placeholderText, m_CharacterLimit);
+            if (!touchOpen || openKeyboard != tk) return;
+            if (!tk.Active && tk == builtInAdapter) { touchOpen = false; openKeyboard = null; return; }
             PushTouchSelection();
         }
 
@@ -562,26 +570,28 @@ namespace LightSide
         {
             if (!touchOpen) return;
             touchOpen = false;
-            touchKeyboard?.Close();
+            var tk = openKeyboard;
+            openKeyboard = null;
+            tk?.Close();
         }
 
         private void PushTouchText()
         {
-            if (!touchOpen || touchKeyboard == null) return;
-            if (touchKeyboard.Text != m_Text) touchKeyboard.Text = m_Text;
+            if (!touchOpen || openKeyboard == null) return;
+            if (openKeyboard.Text != m_Text) openKeyboard.Text = m_Text;
             touchLastText = m_Text;
             PushTouchSelection();
         }
 
         private void PushTouchSelection()
         {
-            if (!touchOpen || touchKeyboard == null || !touchKeyboard.CanSetSelection) return;
-            touchKeyboard.Selection = new RangeInt(SelectionStart, SelectionEnd - SelectionStart);
+            if (!touchOpen || openKeyboard == null || !openKeyboard.CanSetSelection) return;
+            openKeyboard.Selection = new RangeInt(SelectionStart, SelectionEnd - SelectionStart);
         }
 
         private void PollTouchKeyboard()
         {
-            var tk = touchKeyboard;
+            var tk = openKeyboard;
             if (tk == null) { touchOpen = false; return; }
             var t = tk.Text ?? string.Empty;
             if (t != touchLastText) ApplyTouchText(t);
@@ -634,7 +644,7 @@ namespace LightSide
             }
             if (v != t)
             {
-                touchKeyboard.Text = v;
+                if (openKeyboard != null) openKeyboard.Text = v;
                 touchLastText = v;
             }
         }

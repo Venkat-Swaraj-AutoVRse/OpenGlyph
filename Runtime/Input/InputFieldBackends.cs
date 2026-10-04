@@ -371,9 +371,11 @@ namespace LightSide
     }
 
     /// <summary>
-    /// The on-screen keyboard of mobile platforms and Meta Quest (the system keyboard overlay), behind an
-    /// interface so it can be replaced (tests, a custom in-VR keyboard). The default wraps
-    /// <see cref="TouchScreenKeyboard"/>.
+    /// The on-screen keyboard of mobile platforms, behind an interface so it can be replaced (tests, a custom
+    /// in-VR keyboard, a wrapper around a vendor keyboard SDK). The default wraps <see cref="TouchScreenKeyboard"/>.
+    /// On Meta Quest under OpenXR, <see cref="TouchScreenKeyboard"/> reports itself visible but shows nothing
+    /// (the Meta system keyboard needs the Meta XR SDK's Virtual Keyboard); fields use the built-in
+    /// <see cref="UniTextKeyboard"/> there (<see cref="InputFieldSoftKeyboard.Auto"/>).
     /// </summary>
     public interface IInputFieldTouchKeyboard
     {
@@ -485,5 +487,40 @@ namespace LightSide
             Active = false;
             CloseCount++;
         }
+    }
+}
+
+namespace LightSide
+{
+    /// <summary>
+    /// Platform facts the input field uses to pick an on-screen keyboard (<see cref="InputFieldSoftKeyboard.Auto"/>).
+    /// </summary>
+    public static class InputFieldPlatform
+    {
+        /// <summary>Test / replay hook: when set, overrides <see cref="XRActive"/>.</summary>
+        public static Func<bool> XRActiveOverride;
+
+        /// <summary>Whether an XR display is running (OpenXR, Oculus, PC VR): <c>XRSettings.isDeviceActive</c>.</summary>
+        public static bool XRActive
+        {
+            get
+            {
+                if (XRActiveOverride != null) return XRActiveOverride();
+#if OPENGLYPH_VR
+                return UnityEngine.XR.XRSettings.isDeviceActive;
+#else
+                return false;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// Whether <paramref name="keyboard"/> can actually appear: it is supported, and it is not the default
+        /// <see cref="TouchScreenKeyboard"/> wrapper while an XR device is active (under OpenXR on Quest it
+        /// reports <c>visible</c> but draws nothing; PC VR has none). A custom implementation (e.g. a wrapper
+        /// around the Meta XR Virtual Keyboard) is trusted.
+        /// </summary>
+        public static bool SystemKeyboardUsable(IInputFieldTouchKeyboard keyboard) =>
+            keyboard != null && keyboard.IsSupported && !(keyboard is SystemTouchKeyboard && XRActive);
     }
 }
