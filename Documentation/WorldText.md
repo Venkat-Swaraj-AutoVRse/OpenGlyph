@@ -122,6 +122,19 @@ camera.gameObject.AddComponent<UnityEngine.EventSystems.PhysicsRaycaster>();
 var hit = label.HitTestRay(new Ray(controller.position, controller.forward));
 ```
 
+**Hover and click feedback.** World text uses `WorldTextHighlighter` by default (a Canvas uses
+`DefaultTextHighlighter`): a soft box behind the link under the pointer, and a flash that fades out when it
+is clicked. It is drawn by one MeshRenderer child sorted just below the glyphs, so it needs no Canvas and
+works with XR rays (the ray must send pointer-move events, as XRI's input module does).
+
+```csharp
+var hl = (WorldTextHighlighter)label.Highlighter;
+hl.HoverColor = new Color(0.22f, 0.74f, 0.97f, 0.22f);
+hl.ClickColor = new Color(0.22f, 0.74f, 0.97f, 0.55f);
+hl.FadeDuration = 0.3f;
+label.Highlighter = null;          // no visual feedback, events only
+```
+
 ## Cost
 
 Play Mode in the Editor (Windows, D3D12, Built-in pipeline, unified renderer, one font), labels
@@ -148,8 +161,8 @@ on a Quest.
 
 ## Limitations
 
-- The default hover/click highlighter draws UI Graphics, which need a Canvas: world text has no highlight
-  graphics (world components drop the default `DefaultTextHighlighter` in `Awake`). Use the range events.
+- Link feedback in world space is `WorldTextHighlighter` (a box behind the hovered link and a click flash).
+  It has no text selection highlight; use the input field or the range events for that.
 - `Mask` / `RectMask2D` do not apply (no Canvas). `Overflow = Clip` works with the unified renderer: a
   per-renderer `_ClipRect` in object space (that one renderer leaves the SRP Batcher). The legacy renderer
   does not clip in world space.

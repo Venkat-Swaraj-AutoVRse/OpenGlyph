@@ -78,7 +78,7 @@ namespace OpenGlyph
         {
             base.Awake();
             // The default highlighter draws UI Graphics, which need a Canvas.
-            if (Highlighter is DefaultTextHighlighter) Highlighter = null;
+            if (Highlighter is DefaultTextHighlighter) Highlighter = new WorldTextHighlighter();
         }
 
 #if UNITY_EDITOR
