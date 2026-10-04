@@ -1744,6 +1744,10 @@ namespace LightSide
             }
 
             var totalLineAdvances = 0f;
+            // TMP lineSpacing / paragraphSpacing (off for plain text): read once, not per line.
+            var tmpLineSpacing = LineSpacingEm;
+            var tmpParagraphSpacing = ParagraphSpacingEm;
+            var hasTmpSpacing = tmpLineSpacing != 0f || tmpParagraphSpacing != 0f;
 
             // Phase 1: Compute per-line effective heights (CSS line box model)
             for (var i = 0; i < lineCount; i++)
@@ -1790,12 +1794,12 @@ namespace LightSide
 
                 // TMP lineSpacing / paragraphSpacing (em/100 of the font size), added AFTER the minimum
                 // so negative values overlap lines exactly like TMP's lineOffset.
-                if (LineSpacingEm != 0f || ParagraphSpacingEm != 0f)
+                if (hasTmpSpacing)
                 {
                     var em = fontSize * 0.01f;
-                    advance += LineSpacingEm * em;
-                    if (ParagraphSpacingEm != 0f && LineEndsParagraph(in lines[i]))
-                        advance += ParagraphSpacingEm * em;
+                    advance += tmpLineSpacing * em;
+                    if (tmpParagraphSpacing != 0f && LineEndsParagraph(in lines[i]))
+                        advance += tmpParagraphSpacing * em;
                 }
 
                 advances[i] = advance;
