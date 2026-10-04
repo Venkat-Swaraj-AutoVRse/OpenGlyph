@@ -36,6 +36,9 @@ namespace LightSide
 
         [ThreadStatic] private static HBFeature[] featureScratch;
 
+        /// <summary>TEST INSTRUMENTATION: TMP-parity passes that did work (spacing, indent margins).</summary>
+        internal static long TmpParityPassCount;
+
         private float[] indentMarginScratch = Array.Empty<float>();
         private float[] indentJumpScratch = Array.Empty<float>();
         private float[] indentValueScratch = Array.Empty<float>();
@@ -53,6 +56,7 @@ namespace LightSide
         private void ApplyTmpSpacing()
         {
             if (CharacterSpacingEm == 0f && WordSpacingEm == 0f) return;
+            System.Threading.Interlocked.Increment(ref TmpParityPassCount);
 
             var em = buf.shapingFontSize * 0.01f;
             var cs = CharacterSpacingEm * em;
@@ -100,6 +104,7 @@ namespace LightSide
         private void BuildIndentMargins(int cpCount, float glyphScale, float layoutWidth,
             out Span<float> margins, out ReadOnlySpan<float> jumps)
         {
+            System.Threading.Interlocked.Increment(ref TmpParityPassCount);
             if (indentMarginScratch.Length < cpCount)
             {
                 var n = Math.Max(cpCount, indentMarginScratch.Length * 2);

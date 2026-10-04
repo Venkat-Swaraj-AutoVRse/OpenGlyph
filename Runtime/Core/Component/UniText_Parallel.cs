@@ -187,10 +187,43 @@ namespace LightSide
 
             // Main thread: load system fallback fonts for uncovered scripts (file IO + asset creation)
             // before any worker runs, and log the once-per-script warning naming this component.
-            if (UniTextSettings.UseSystemFontFallback)
-                SystemFontFallback.PrepareForText(sourceText.Span, fontProvider?.FontStackAsset, this,
-                    CollectCjkLanguages(sourceText.Span));
+            // Only needed before a first pass (itemization picks fonts); skipped when the first pass is
+            // still valid (layout / colour / mesh-only rebuilds, and the mesh pass of every rebuild) and
+            // when this exact text was already prepared against the same stack and language.
+            if (UniTextSettings.UseSystemFontFallback && (textProcessor == null || !textProcessor.HasValidFirstPassData))
+                PrepareSystemFontsForText();
         }
+
+        [NonSerialized] private char[] systemFontPreparedText;
+        [NonSerialized] private int systemFontPreparedLength = -1;
+        [NonSerialized] private UniTextFontStack systemFontPreparedStack;
+        [NonSerialized] private string systemFontPreparedLanguage;
+        [NonSerialized] private int systemFontPreparedGeneration;
+
+        private void PrepareSystemFontsForText()
+        {
+            var text = sourceText.Span;
+            var stack = fontProvider?.FontStackAsset;
+            var generation = SystemFontFallback.PrepareGeneration;
+            if (systemFontPreparedLength == text.Length && systemFontPreparedText != null &&
+                ReferenceEquals(systemFontPreparedStack, stack) && systemFontPreparedGeneration == generation &&
+                string.Equals(systemFontPreparedLanguage, language, StringComparison.Ordinal) &&
+                text.SequenceEqual(new ReadOnlySpan<char>(systemFontPreparedText, 0, text.Length)))
+                return;
+
+            SystemFontFallback.PrepareForText(text, stack, this, CollectCjkLanguages(text));
+
+            if (systemFontPreparedText == null || systemFontPreparedText.Length < text.Length)
+                systemFontPreparedText = new char[Math.Max(text.Length, 16)];
+            text.CopyTo(systemFontPreparedText);
+            systemFontPreparedLength = text.Length;
+            systemFontPreparedStack = stack;
+            systemFontPreparedLanguage = language;
+            systemFontPreparedGeneration = generation;
+        }
+
+        /// <summary>Forgets the system-font prepare memo (font stack / font configuration changed).</summary>
+        private void InvalidateSystemFontPrepare() => systemFontPreparedLength = -1;
         
 
         private void PrepareModifiersForParallel()

@@ -784,6 +784,7 @@ namespace LightSide
 
             if ((flags & DirtyFlags.Font) != 0)
             {
+                InvalidateSystemFontPrepare();
                 DeinitializeAllModifiers();
                 fontProvider = null;
                 meshGenerator?.Dispose();

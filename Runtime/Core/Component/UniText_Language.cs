@@ -41,9 +41,18 @@ namespace LightSide
             var i = 0;
             while (i < source.Length)
             {
-                var at = source.Slice(i).IndexOf(open.AsSpan(), StringComparison.OrdinalIgnoreCase);
-                if (at < 0) break;
-                var s = i + at + open.Length;
+                // Ordinal search for '<' (vectorised), then a case-insensitive match of the tag name:
+                // same matches as a case-insensitive IndexOf of "<lang=", without its per-char cost.
+                var lt = source.Slice(i).IndexOf('<');
+                if (lt < 0) break;
+                var at = i + lt;
+                if (at + open.Length > source.Length) break;
+                if (!source.Slice(at, open.Length).Equals(open.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    i = at + 1;
+                    continue;
+                }
+                var s = at + open.Length;
                 var e = s;
                 while (e < source.Length && source[e] != '>') e++;
                 var tag = source.Slice(s, e - s).Trim().Trim('"').Trim('\'').ToString();

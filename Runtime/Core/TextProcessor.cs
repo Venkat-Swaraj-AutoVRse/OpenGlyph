@@ -1380,19 +1380,19 @@ namespace LightSide
                 var cp = cpSpan[start];
 
                 if ((uint)cp < UnicodeData.EmojiRangeThreshold)
-                    return fp.FindFontForCodepoint(cp, CjkLanguageAt(start));
+                    return FindFontAt(fp, cp, start);
 
                 if (EmojiFont.IsAvailable && IsSingleCodepointEmoji(cp))
                     return EmojiFont.FontId;
 
-                return fp.FindFontForCodepoint(cp, CjkLanguageAt(start));
+                return FindFontAt(fp, cp, start);
             }
 
             var cluster = cpSpan.Slice(start, clusterLength);
             if (EmojiFont.IsAvailable && EmojiSequenceClassifier.IsEmojiCluster(cluster))
                 return EmojiFont.FontId;
 
-            return fp.FindFontForCodepoint(cpSpan[start], CjkLanguageAt(start));
+            return FindFontAt(fp, cpSpan[start], start);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
