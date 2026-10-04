@@ -61,5 +61,20 @@ namespace LightSide.Tests
             Assert.AreEqual(600f, b.size.x, 0.01f);
             Assert.AreEqual(80f, b.size.y, 0.01f);
         }
+        [Test]
+        public void WorldBackground_SortsBelowTextAndSelection()
+        {
+            root = new GameObject("root");
+            var field = UniTextInputField.Create(root.transform, world: true, size: new Vector2(400f, 60f));
+            field.TextComponent.WorldRenderer.sortingOrder = 7;
+            field.GetComponent<UniTextInputWorldBackground>().Rebuild();
+            var bg = field.transform.Find("Background").GetComponent<MeshRenderer>();
+            var text = field.TextComponent.WorldRenderer;
+            var ph = ((UniText)field.Placeholder).WorldRenderer;
+            Assert.Less(bg.sortingOrder, text.sortingOrder, "panel never draws over the text (distance sorting flipped it on device)");
+            Assert.Less(bg.sortingOrder, text.sortingOrder - 1, "panel also below the selection overlay (text - 1)");
+            Assert.LessOrEqual(bg.sortingOrder, ph.sortingOrder - 1, "panel below the placeholder");
+            Assert.AreEqual(text.sortingLayerID, bg.sortingLayerID);
+        }
     }
 }

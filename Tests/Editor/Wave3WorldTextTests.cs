@@ -438,6 +438,24 @@ namespace LightSide.Tests
             CollectionAssert.AreEqual(new[] { "beta" }, entered);
         }
 
+        [TestCase(true)]
+        [TestCase(false)]
+        public void World_RayHitWithoutRaycasterModule_ClicksTheLink(bool unified)
+        {
+            // A custom XR ray (no BaseRaycaster) reports the world hit with module == null, so
+            // RaycastResult.isValid is false. Found on Quest: links ignored such clicks.
+            var (t, _, clicked) = MakeLinkText(unified);
+            var esGo = new GameObject("ES", typeof(EventSystem)); _junk.Add(esGo);
+            var target = WorldPointOf(t, GlyphIn(t, "second").g);
+            var rr = new RaycastResult { gameObject = t.gameObject, worldPosition = target, worldNormal = -t.transform.forward, module = null };
+            Assert.IsFalse(rr.isValid);
+            var ed = new PointerEventData(esGo.GetComponent<EventSystem>()) { position = new Vector2(-1000f, -1000f) };
+            ed.pointerCurrentRaycast = rr;
+            ed.pointerPressRaycast = rr;
+            ExecuteEvents.Execute(t.gameObject, ed, ExecuteEvents.pointerClickHandler);
+            CollectionAssert.AreEqual(new[] { "beta" }, clicked, "the world hit point decides the link, not the screen position");
+        }
+
         [Test]
         public void World_Collider_OnlyWhenInteractive_ByDefault()
         {

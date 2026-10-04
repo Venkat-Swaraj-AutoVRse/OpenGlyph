@@ -76,6 +76,7 @@ namespace LightSide
 #endif
             field.ConfigureTextComponent();
             field.UpdateDisplay();
+            if (world) go.GetComponent<UniTextInputWorldBackground>()?.Rebuild();
             return field;
         }
 

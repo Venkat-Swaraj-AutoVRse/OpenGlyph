@@ -186,9 +186,12 @@ namespace LightSide
             if (eventData == null) return TextHitResult.None;
             if (RendersToMeshRenderer)
             {
+                // XR pointers (custom rays, some XRI setups) can report a world hit on this object
+                // without a raycaster module, which makes RaycastResult.isValid false; the world point
+                // is still exact, so use it whenever the raycast hit this object.
                 var rr = eventData.pointerCurrentRaycast;
-                if (!rr.isValid || rr.gameObject != gameObject) rr = eventData.pointerPressRaycast;
-                if (rr.isValid && rr.gameObject == gameObject &&
+                if (rr.gameObject != gameObject) rr = eventData.pointerPressRaycast;
+                if (rr.gameObject == gameObject &&
                     (rr.worldPosition != Vector3.zero || rr.worldNormal != Vector3.zero))
                     return HitTestWorld(rr.worldPosition);
                 var cam = eventData.enterEventCamera != null ? eventData.enterEventCamera
