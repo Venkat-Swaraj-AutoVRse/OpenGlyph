@@ -480,6 +480,7 @@ Native plugins shipped in [`Plugins/`](Plugins/):
 | tvOS | static library | |
 | Web: WebGL 2 | static wasm library | No system fonts on the web: bundle fonts for every script you show. Single-threaded |
 | Web: WebGPU | same wasm library as WebGL 2 | Experimental Unity backend (Unity 6+). No system fonts on the web: bundle fonts |
+| visionOS | — | **Coming soon** (fully immersive Metal apps first; PolySpatial/RealityKit mixed reality needs Shader Graph versions of the text shaders) |
 
 Meta Quest 3S (Android ARM64, IL2CPP, Vulkan, OpenXR) is verified on device. Web player builds
 (WebGPU only, and WebGL 2 only) are verified in Chrome with Unity 6000.3. Other platforms ship
