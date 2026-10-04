@@ -261,6 +261,7 @@ jobs:
           # -- every imported function vs the WACK SupportedAPIs list (when present on the runner)
           $imports = @(); $mod = $null
           foreach ($line in (& $dumpbin /imports $dll)) {
+            if ($line -match '^\s+Summary\s*$') { break }   # section-size table follows; not imports
             if ($line -match '^\s{4}(\S+\.dll)\s*$') { $mod = $Matches[1].ToLower(); continue }
             if ($mod -and $line -match '^\s+[0-9A-Fa-f]+\s+([A-Za-z_][A-Za-z0-9_@?$]*)\s*$') { $imports += "$mod!$($Matches[1])" }
           }
@@ -268,9 +269,9 @@ jobs:
           Write-Output ("imported functions: " + $imports.Count)
           $imports | ForEach-Object { "    $_" }
           $kit = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit"
-          $xmlArch = if ('${{ matrix.arch }}' -eq 'x64') { 'x64' } else { 'arm64' }
-          $xml = Get-ChildItem -Path $kit -Recurse -Filter "SupportedAPIs-*.xml" -ErrorAction SilentlyContinue |
-                 Where-Object { $_.Name -match "SupportedAPIs-$xmlArch\.xml$" } | Select-Object -First 1
+          # The kit ships SupportedAPIs-x64.xml / -x86.xml only. The UWP API surface (names + apiset
+          # modules) is the same on ARM64, so ARM64 imports are checked against the x64 list.
+          $xml = Get-ChildItem -Path $kit -Recurse -Filter "SupportedAPIs-x64.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $xml) {
             Write-Output "WACK SupportedAPIs-$xmlArch.xml not found under '$kit'; available:"
             Get-ChildItem -Path $kit -Recurse -Filter "*.xml" -ErrorAction SilentlyContinue | Select-Object -First 30 -Expand FullName
@@ -284,9 +285,14 @@ jobs:
             }
             Write-Output ("supported API entries: " + $ok.Count)
             if ($ok.Count -lt 1000) { Write-Output ($raw.Substring(0, [Math]::Min(2000, $raw.Length))); throw "could not parse SupportedAPIs list" }
-            $unsupported = $imports | Where-Object { -not $ok.Contains($_) }
+            # VCRUNTIME140*_APP.dll belong to the Microsoft.VCLibs framework package (a declared package
+            # dependency), not the OS API surface the list describes; WACK accepts them via the
+            # dependency, so they are listed but not looked up.
+            $osImports = $imports | Where-Object { $_ -notmatch '^(vcruntime140(_1)?_app|msvcp140(_\d+)?_app)\.dll!' }
+            Write-Output ("framework (VCLibs) imports, not looked up: " + ($imports.Count - $osImports.Count))
+            $unsupported = $osImports | Where-Object { -not $ok.Contains($_) }
             if ($unsupported) { $unsupported | ForEach-Object { "    !! $_" }; throw "imports not in the WACK supported-API list" }
-            Write-Output "OK: all $($imports.Count) imported functions are in the WACK supported-API list"
+            Write-Output "OK: all $($osImports.Count) OS imports are in the WACK supported-API list ($($xml.Name))"
           }
       - uses: actions/upload-artifact@v4
         with:
