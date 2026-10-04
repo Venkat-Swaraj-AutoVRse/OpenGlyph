@@ -6,6 +6,7 @@
         "LightSide.UniText.Editor",
         "UnityEngine.UI",
         "Unity.TextMeshPro",
+        "Unity.InputSystem",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
@@ -22,6 +23,12 @@
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.inputsystem",
+            "expression": "1.0.0",
+            "define": "OPENGLYPH_INPUTSYSTEM"
+        }
+    ],
     "noEngineReferences": false
 }

@@ -859,6 +859,7 @@ namespace LightSide
                     RefreshOverflowClip();
                     dirtyFlags = DirtyFlags.None;
                     OnAfterMeshApplied();
+                    LayoutApplied?.Invoke();
                     return;
                 }
             }
@@ -909,6 +910,7 @@ namespace LightSide
 
             dirtyFlags = DirtyFlags.None;
             OnAfterMeshApplied();
+            LayoutApplied?.Invoke();
         }
 
         #endregion

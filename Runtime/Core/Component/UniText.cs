@@ -1169,6 +1169,7 @@ namespace LightSide
             ReleaseSubMeshStencilMaterials();
             buffers?.EnsureReturnBuffers();
             UnregisterDirty(this);
+            LayoutApplied?.Invoke();
         }
 
         private void OnEmojiFontDisableChanged()
@@ -1443,6 +1444,20 @@ namespace LightSide
 
         /// <summary>Called on the main thread after this component's mesh was applied to its renderers.</summary>
         protected virtual void OnAfterMeshApplied() { }
+
+        /// <summary>
+        /// Raised on the main thread after a rebuild of this component applied its new layout and mesh, and
+        /// after its text was cleared. <see cref="ResultGlyphs"/> and <see cref="Buffers"/> describe the
+        /// current text at this point (an input field places its caret here).
+        /// </summary>
+        public event Action LayoutApplied;
+
+        /// <summary>The text area in local coordinates: the rect inset by padding (and margins on subclasses).
+        /// Glyph positions (<see cref="ResultGlyphs"/>) are relative to its top-left corner.</summary>
+        public Rect TextAreaRect => GetLayoutRect(rectTransform.rect);
+
+        /// <summary>Whether Left/Right alignment is physical (GlyphMeshPro) rather than paragraph-relative.</summary>
+        internal bool UsesPhysicalAlignmentForInput => UsePhysicalAlignment;
 
         #endregion
 

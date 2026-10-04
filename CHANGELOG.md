@@ -16,6 +16,38 @@ through phase 1c.
 - **Unified renderer is now the project default** (`UniTextSettings.useUnifiedRenderer = true`, shipped asset and runtime default). Opt out per component with `UnifiedRenderer = ForceOff` or project-wide in settings. Test runs: `UNITEXT_FORCE_UNIFIED=1` / `UNITEXT_FORCE_LEGACY=1` pin each mode.
 
 #### Added
+- **Wave 4: editable text (input field), Canvas and world space.**
+  - **`UniTextInputField`** (`Runtime/Input/`): a `Selectable` that edits a `UniText` (Canvas) or a `UniTextWorld` (world space, no Canvas).
+    - **Caret.** The caret map is built from the engine layout (`TextCaretMap`). The caret, selection and deletion work on grapheme clusters. The caret is a BiDi visual caret: (position, affinity), with Left/Right in visual order. Ligatures are split into equal caret stops.
+    - **Navigation.** UAX #29 word moves and word delete (`TextSegments`), line and document Home/End, Up/Down/PageUp/PageDown with column memory.
+    - **Pointer.** Click, Shift+click, double-click word, triple-click line, and drag selection. On a Canvas through the screen point; in world space through the EventSystem raycast hit point (PhysicsRaycaster, XRI TrackedDevicePhysicsRaycaster) or `SetCaretFromRay` / `SetCaretFromWorldPoint`.
+    - **Editing.** Insert, Backspace/Delete, cut/copy/paste through a replaceable `IInputFieldClipboard` (system or `InputFieldMemoryClipboard`). Paste is sanitised: control characters removed, newlines only in multi-line fields, `MaxPasteLength` and the character limit applied without splitting a grapheme. Undo/redo coalesces typing per word (`TextEditHistory`).
+    - **IME.** The composition is shown inline with an underline; commit and cancel are supported.
+    - **Content types.** Standard, Autocorrected, Integer, Decimal, Alphanumeric, Name, Email, Password, Pin and Custom, with uGUI/TMP semantics (`InputFieldValidation`). Line types SingleLine, MultiLineSubmit and MultiLineNewline. Read-only. Password masking is one character per grapheme.
+    - **Markup.** Shown literally by default (a NoParse wrapper or the GlyphMeshPro `richText` flag); with `RichText` on, the caret maps the visible text back to the source.
+    - **Caret look.** Bar, block or underline; blink rate, width and colour; a custom caret object.
+    - **Scrolling.** Single-line fields scroll horizontally and multi-line fields vertically. Clipping is a RectMask2D on a Canvas, and an object-space clip on world text (`UniText.SetInputClip`).
+    - **Events.** UnityEvents `onValueChanged`, `onEndEdit`, `onSubmit`, `onSelect`, `onDeselect`, `onTextSelection`, `onEndTextSelection`, and `onValidateInput`, plus C# events. Tab navigation, and EventSystem select/deselect/submit.
+    - **Allocation.** A focused, idle field allocates nothing per frame.
+  - **Input backends** (`InputFieldKeyboardSources`):
+    - Input System (`Keyboard.onTextInput`, `onIMECompositionChange`, key states). Compiled with `OPENGLYPH_INPUTSYSTEM`, an asmdef version define on `com.unity.inputsystem`, and used when the project's Active Input Handling includes it.
+    - The legacy Input Manager otherwise.
+    - Key repeat for held keys.
+    - The `IInputFieldKeyboardSource` seam for custom or in-VR keyboards.
+  - **Touch / system keyboard** (`IInputFieldTouchKeyboard`, default `SystemTouchKeyboard` over `TouchScreenKeyboard`):
+    - Opens on focus with the keyboard type, multiline, secure, placeholder and limit of the content type.
+    - Mirrors the keyboard's text and selection.
+    - Done submits, Cancel restores. `HideMobileInput`, `HideSoftKeyboard`.
+    - On Meta Quest this API shows the system keyboard overlay.
+    - `SimulatedTouchKeyboard` runs the flow in the Editor.
+  - **`OpenGlyph.GlyphMeshProInputField`**: the `TMP_InputField` API over `UniTextInputField`, with TMP member names, nested enums, character-index positions and `ProcessEvent(Event)`. Created with `CreateGlyphMeshPro`. Gaps are listed in `GlyphMeshPro-Parity.md`.
+  - **`UniTextSelectableText`**: read-only select and copy on any `UniText`, over its visible text.
+  - **`UniText` additions:**
+    - The `LayoutApplied` event, raised after each rebuild and when the text is cleared.
+    - `TextAreaRect`.
+    - An internal world input clip.
+  - **Factories and menus:** `UniTextInputField.Create(parent, world)`; **GameObject > UI > OpenGlyph > UniText - Input Field / GlyphMeshPro - Input Field** and **GameObject > 3D Object > OpenGlyph > UniText Input Field (World)**. The menus create an EventSystem with the Input System UI module when that is active.
+  - Docs: `Documentation/InputField.md`. Tests: `Tests/Editor/Wave4{Caret,Editing,Field,Backend}Tests.cs`.
 - **Wave 3: world-space text without a Canvas.**
   - **`UniTextWorld`** component (`Runtime/World/UniTextWorld.cs`): UniText drawn by the `MeshFilter` / `MeshRenderer` on its GameObject. Same engine, markup, modifiers, animations and Auto Size; output identical to UniText on a World Space Canvas (glyphs, vertices, pixels). Options `Lighting` (Unlit / Lit), `DepthWrite`, `DoubleSided`, `Collider`, `SortingLayerID` / `SortingOrder`, `WorldSize`; Scene-view rect gizmo; inspector = UniText inspector + World Rendering; **GameObject > 3D Object > OpenGlyph** menu items.
   - **`OpenGlyph.GlyphMeshPro`** (TMP `TextMeshPro` counterpart) is no longer a stub: it is the `GlyphMeshProUGUI` adapter drawn through a MeshRenderer, plus `sortingLayerID`, `sortingOrder`, `renderer`, `mesh`.

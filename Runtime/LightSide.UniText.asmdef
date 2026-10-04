@@ -1,7 +1,9 @@
 {
     "name": "LightSide.UniText",
     "rootNamespace": "LightSide",
-    "references": [],
+    "references": [
+        "Unity.InputSystem"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,
@@ -14,6 +16,11 @@
             "name": "com.unity.modules.physics",
             "expression": "1.0.0",
             "define": "OPENGLYPH_PHYSICS"
+        },
+        {
+            "name": "com.unity.inputsystem",
+            "expression": "1.0.0",
+            "define": "OPENGLYPH_INPUTSYSTEM"
         }
     ],
     "noEngineReferences": false

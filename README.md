@@ -48,6 +48,7 @@ and rendered as SDF/MSDF through Unity's Canvas — including in VR.
 | ✨ | **Glow, inner shadow, second outline** | SDF glow (colour, size, softness, intensity), inner shadow and a second stroke band, per span and for the whole text ([below](#glow-inner-shadow-second-outline)). |
 | 🎨 | **Radial and angular gradients** | `<gradient=name,radial>`, `<gradient=name,angular,deg>` and a whole-text `GradientFill`; both renderers ([below](#radial-and-angular-gradients)). |
 | 🌐 | **World-space text without a Canvas** | `UniTextWorld` and `GlyphMeshPro` (the TMP `TextMeshPro` API) draw through a MeshRenderer: same engine and output as Canvas text, one shared material for all labels, unlit or lit shader for URP and Built-in, links clickable through a `PhysicsRaycaster` ([below](#world-space-text)). |
+| ⌨️ | **Text input (Canvas, world space, VR)** | `UniTextInputField` and `GlyphMeshProInputField` (the `TMP_InputField` API): grapheme-cluster caret, BiDi visual caret, word and line navigation, selection by mouse, touch or XR ray, undo/redo, clipboard, IME composition, content types (number, e-mail, name, password, PIN), scrolling, and the Quest system keyboard through `TouchScreenKeyboard`; 0 GC per idle frame ([below](#text-input)). |
 
 ## Drop-in TextMesh Pro API — GlyphMeshProUGUI
 
@@ -231,6 +232,51 @@ rect is kept while the text is interactive), or from a ray with `HitTestRay`.
 
 ![The same labels as UniTextWorld and as UniText on a World Space Canvas, seen at an angle](.github/assets/features/world-text-vs-canvas.png)
 
+## Text input
+
+```csharp
+// Canvas field (or GameObject > UI > OpenGlyph > UniText - Input Field)
+var field = UniTextInputField.Create(canvas.transform, world: false, size: new Vector2(320, 48), placeholderText: "Trainee ID");
+field.ContentType = InputFieldContentType.Alphanumeric;
+field.CharacterLimit = 12;
+field.onSubmit.AddListener(id => StartSession(id));
+
+// World-space field for VR: no Canvas; XRI ray interactors and PhysicsRaycaster click into it.
+var answer = UniTextInputField.Create(panel, world: true, size: new Vector2(400, 60));
+answer.transform.localScale = Vector3.one * 0.001f;     // 40 cm wide
+answer.SetCaretFromRay(controllerRay);                   // custom pointers
+```
+
+`UniTextInputField` edits a UniText on a Canvas, or a UniTextWorld in world space, on the engine's own
+layout:
+
+- **Grapheme clusters.** The caret moves, and Backspace/Delete remove, whole grapheme clusters, so an
+  emoji ZWJ sequence, a flag or a base letter with combining marks is never split.
+- **BiDi visual caret.** Arrow keys move the way they point through mixed Hebrew/Arabic and Latin text.
+- **Navigation and selection.** Word moves follow UAX #29, Up/Down keep the column, and double- and
+  triple-click select a word and a line.
+- **Editing.** Undo groups typing by word. Paste is sanitised and capped. The IME composition is shown
+  inline with an underline.
+- **Content types.** Number, decimal, alphanumeric, name, e-mail, password and PIN. Passwords show one
+  mask per grapheme.
+- **Markup.** Tags the user types stay literal text unless `RichText` is on.
+
+Single-line fields scroll sideways and multi-line fields scroll vertically, clipped by a RectMask2D on a
+Canvas and in object space in world space. Input comes from the Input System or the legacy Input Manager,
+whichever the project uses. On Quest, focusing a field opens the Meta system keyboard through
+`TouchScreenKeyboard`; you can also feed `ProcessText` / `ProcessKey` from your own in-VR keyboard.
+
+`GlyphMeshProInputField` is the same field with the `TMP_InputField` API. A test drives it and a real
+TMP_InputField with the same 15 key events and checks that they match after each one.
+`UniTextSelectableText` makes any label selectable and copyable. A focused field allocates nothing while
+idle. [InputField.md](Documentation/InputField.md)
+
+![Input fields: caret, a selection, an IME composition underline, a placeholder and a password field](.github/assets/features/input-field.png)
+
+![A world-space input field seen at an angle, with a selected word](.github/assets/features/input-field-world.png)
+
+![Typing, selecting a word with Ctrl+Shift+Left and undoing, driven through the field's input seam](.github/assets/features/input-field.gif)
+
 ## Showcase
 
 | Rich text | Layout |
@@ -398,6 +444,7 @@ binaries but were not tested on device for this release.
 - [OpenType features](Documentation/OpenTypeFeatures.md) · [Language-aware shaping](Documentation/LanguageShaping.md) · [Content measurement](Documentation/ContentMeasurement.md) · [Padding](Documentation/Padding.md) · [Auto Size fit steps](Documentation/AutoSizeSteps.md) · [Unity Localization](Documentation/Localization.md)
 - [Text reveal](Documentation/TextReveal.md) · [Text animations](Documentation/TextAnimations.md) · [Glow, inner shadow, second outline](Documentation/GlowAndShadows.md) · [Radial and angular gradients](Documentation/Gradients.md)
 - [World-space text: UniTextWorld, GlyphMeshPro](Documentation/WorldText.md)
+- [Input field: UniTextInputField, GlyphMeshProInputField, selectable text](Documentation/InputField.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
 - [Changelog](CHANGELOG.md)
 
