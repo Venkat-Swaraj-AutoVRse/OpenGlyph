@@ -115,8 +115,9 @@ namespace LightSide
         protected override void Awake()
         {
             base.Awake();
-            // The default highlighter draws UI Graphics, which need a Canvas: world text uses the range events.
-            if (Highlighter is DefaultTextHighlighter) Highlighter = null;
+            // The default highlighter draws UI Graphics, which need a Canvas: world text gets the
+            // MeshRenderer-based WorldTextHighlighter (hover box + click flash on links) instead.
+            if (Highlighter is DefaultTextHighlighter) Highlighter = new WorldTextHighlighter();
         }
 
 #if UNITY_EDITOR
@@ -127,7 +128,7 @@ namespace LightSide
         }
 #endif
 
-        /// <summary>Defaults for a new world text object: 200 x 50 rect, no shadows, no hover highlight graphics.</summary>
+        /// <summary>Defaults for a new world text object: 200 x 50 rect, no shadows, the world link highlighter.</summary>
         internal static void ConfigureNewWorldText(UniText t, RectTransform rt, MeshRenderer mr)
         {
             if (rt != null && rt.sizeDelta == new Vector2(100, 100)) rt.sizeDelta = new Vector2(200, 50);
@@ -138,8 +139,8 @@ namespace LightSide
                 mr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
                 mr.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
             }
-            // The default highlighter draws UI Graphics, which need a Canvas.
-            t.Highlighter = null;
+            // The default highlighter draws UI Graphics, which need a Canvas: use the world one.
+            if (t.Highlighter == null || t.Highlighter is DefaultTextHighlighter) t.Highlighter = new WorldTextHighlighter();
         }
 
 #if UNITY_EDITOR
