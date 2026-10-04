@@ -56,6 +56,10 @@ namespace LightSide
             path = GetAndroidEmojiFont();
     #elif UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
             path = GetLinuxEmojiFont();
+    #elif UNITY_WSA
+            // Universal Windows Platform: the app container gives no guaranteed access to the installed
+            // Segoe UI Emoji file, so there is no system emoji font; bundle a color emoji font instead.
+            path = null;
     #endif
 
             if (path != null && !ValidateEmojiFont(path))
