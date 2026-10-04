@@ -29,7 +29,9 @@ UWP API set fails the link). The C# side loads them as `unitext_native` (a DLL, 
   `UwpPluginImportTests`.
 - **C runtime.** The UWP DLLs use the dynamic app CRT (`VCRUNTIME140_APP.dll` and the UCRT
   `api-ms-win-crt-*` API sets). MSVC has no static CRT for the app partition; the CRT comes from the
-  `Microsoft.VCLibs.140.00` framework package, which Unity's generated UWP project already depends on.
+  `Microsoft.VCLibs.140.00` framework package. Unity's own UWP `UnityPlayer.dll` imports the same
+  `VCRUNTIME140_APP.dll` / `VCRUNTIME140_1_APP.dll`, so the plugin adds no runtime dependency the app
+  does not already have.
   (Desktop Windows DLLs keep the static CRT.)
 - **App Certification Kit.** CI checks that each DLL is marked App Container, imports only the app CRT
   and `api-ms-win-*` API sets, and that every imported OS function is in the Windows App Certification
@@ -49,5 +51,8 @@ UWP API set fails the link). The C# side loads them as `unitext_native` (a DLL, 
 - **Building.** Switch to Universal Windows Platform (scripting backend IL2CPP), pick the architecture
   (x64 or ARM64) and build. Unity writes a Visual Studio solution; compiling, packaging and deploying it
   needs Visual Studio with the **Universal Windows Platform development** workload (and its C++ UWP
-  tools). Verified so far: the Unity player build (IL2CPP code generation, solution generation, plugin
-  selection) for x64 and ARM64. Not yet run on a device.
+  tools; Unity's own build step for the ARM64 architecture also needs the VS ARM64 C++ tools). Verified so
+  far, with Unity 6000.3.19f1: the Unity player build for x64 (IL2CPP code generation, solution
+  generation). The generated solution carries both `Plugins\X64\unitext_native.dll` and
+  `Plugins\ARM64\unitext_native.dll` (the WSA binaries, not the desktop ones) and copies the one for the
+  selected platform (`Plugins\$(PlatformShortName)`). Not yet compiled in Visual Studio or run on a device.

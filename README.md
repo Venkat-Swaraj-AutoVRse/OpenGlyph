@@ -481,8 +481,8 @@ Native plugins shipped in [`Plugins/`](Plugins/):
 | WebGL | static library | |
 
 Meta Quest 3S (Android ARM64, IL2CPP, Vulkan, OpenXR) is verified on device. Other platforms ship
-binaries but were not tested on device for this release. The UWP player build (IL2CPP, x64 and ARM64) is
-verified in the Editor; running it needs Visual Studio's UWP workload. Details: [Platforms](Documentation/Platforms.md).
+binaries but were not tested on device for this release. The UWP player build (IL2CPP, x64) is
+verified in the Editor; compiling and running the generated solution needs Visual Studio's UWP workload. Details: [Platforms](Documentation/Platforms.md).
 
 ## Documentation
 

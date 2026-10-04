@@ -39,7 +39,7 @@ cmake_minimum_required(VERSION 3.24)
 # (/MD -> VCRUNTIME140_APP.dll + the UCRT api-ms-win-crt-* apisets). MSVC ships no static CRT
 # for the Store/app partition (lib/<arch>/store holds only the msvcrt/vcruntime/msvcprt import
 # libraries), and a packaged UWP app always carries the Microsoft.VCLibs.140.00 framework
-# dependency (Unity's generated UWP project references it), so the app CRT is present on every
+# dependency (Unity's UWP UnityPlayer.dll imports the same VCRUNTIME140_APP.dll), so the app CRT is present on every
 # device. This is the configuration the Windows App Certification Kit expects.
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
