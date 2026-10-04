@@ -51,8 +51,34 @@ namespace LightSide
         private static readonly List<UniTextFont> loadedFonts = new(); // every loaded fallback font, load order
         private static readonly HashSet<int> warnedScripts = new();
         private static readonly HashSet<int> prepareSearched = new();
-        private static readonly HashSet<ulong> stackCovered = new();
+        private static readonly HashSet<ulong> stackCovered = new(); // supplementary-plane (stack, cp) pairs
         private const int MaxStackCoveredEntries = 1 << 16;
+        // Main-thread-only: per stack, a bitset of the BMP code points the stack is known to cover
+        // (8 KB per stack). Lets PrepareForText skip covered non-ASCII text with one bit test.
+        private static readonly Dictionary<uint, ulong[]> stackCoveredBmp = new();
+        private const int MaxStackCoveredBmpStacks = 64;
+        private static int prepareGeneration;
+
+        // Main-thread-only: BMP code points PrepareForText never prepares (not CJK, no real script:
+        // punctuation, symbols, combining marks). Depends only on the code point.
+        private static readonly ulong[] PrepareSkipBmp = new ulong[0x10000 / 64];
+        /// <summary>
+        /// Changes whenever the fallback state is reset, so a caller that memoised "this text was
+        /// already prepared" knows to prepare again. Main thread.
+        /// </summary>
+        internal static int PrepareGeneration => prepareGeneration;
+
+        /// <summary>TEST INSTRUMENTATION: number of <see cref="PrepareForText"/> scans (main thread).</summary>
+        internal static long PrepareForTextCalls;
+
+        private static ulong[] CoveredBmpFor(uint stackId)
+        {
+            if (stackCoveredBmp.TryGetValue(stackId, out var bits)) return bits;
+            if (stackCoveredBmp.Count >= MaxStackCoveredBmpStacks) stackCoveredBmp.Clear();
+            bits = new ulong[0x10000 / 64];
+            stackCoveredBmp[stackId] = bits;
+            return bits;
+        }
         private static readonly List<(string message, UnityEngine.Object context)> pendingWarnings = new();
         private static volatile int loadedCount;
 
@@ -217,10 +243,24 @@ namespace LightSide
             IReadOnlyList<CjkLanguage> languages = null)
         {
             if (!UniTextSettings.UseSystemFontFallback || text.IsEmpty) return;
+            PrepareForTextCalls++;
+            // Hoisted out of the per-character loop: the stack identity and its covered-BMP bitset.
+            var stackId = stack != null ? (uint)stack.GetInstanceID() : 0u;
+            var coveredBmp = stack != null ? CoveredBmpFor(stackId) : null;
             for (var i = 0; i < text.Length; i++)
             {
                 uint cp = text[i];
                 if (cp < 0x80) continue;
+                // Fast paths (main thread only), for non-surrogate BMP code points: one already known to be
+                // covered by this stack, or one that is never prepared, needs no script lookup, no lock
+                // and no stack search. Same outcome as the full path below.
+                if (cp <= 0xFFFF && (cp < 0xD800 || cp > 0xDFFF))
+                {
+                    var word = cp >> 6;
+                    var bit = 1UL << (int)(cp & 63);
+                    if (coveredBmp != null && (coveredBmp[word] & bit) != 0) continue;
+                    if ((PrepareSkipBmp[word] & bit) != 0) continue;
+                }
                 if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
                 {
                     cp = (uint)char.ConvertToUtf32(text[i], text[i + 1]);
@@ -228,7 +268,14 @@ namespace LightSide
                 }
                 var cjk = IsCjkCodepoint(cp);
                 var script = ScriptOf(cp);
-                if (!cjk && !IsRealScript(script)) continue;
+                if (!cjk && !IsRealScript(script))
+                {
+                    // Punctuation, symbols, marks: never prepared. A pure function of the code point, so
+                    // remember it (once the Unicode data is loaded) and skip it with one bit test next time.
+                    if (cp <= 0xFFFF && (cp < 0xD800 || cp > 0xDFFF) && UnicodeData.IsInitialized)
+                        PrepareSkipBmp[cp >> 6] |= 1UL << (int)(cp & 63);
+                    continue;
+                }
 
                 lock (gate)
                 {
@@ -240,13 +287,18 @@ namespace LightSide
                 {
                     // Main-thread-only cache of (stack, code point) pairs the stack covers, so covered
                     // non-ASCII text (Cyrillic, Arabic, accented Latin) is not re-searched every rebuild.
-                    var key = ((ulong)(uint)stack.GetInstanceID() << 32) | cp;
-                    if (stackCovered.Contains(key)) continue;
+                    var key = ((ulong)stackId << 32) | cp;
+                    var inBmpSet = cp <= 0xFFFF && (cp < 0xD800 || cp > 0xDFFF);
+                    if (!inBmpSet && stackCovered.Contains(key)) continue;
                     prepareSearched.Clear();
                     if (stack.FindFontForCodepoint(cp, prepareSearched) != null)
                     {
-                        if (stackCovered.Count >= MaxStackCoveredEntries) stackCovered.Clear();
-                        stackCovered.Add(key);
+                        if (inBmpSet) coveredBmp[cp >> 6] |= 1UL << (int)(cp & 63);
+                        else
+                        {
+                            if (stackCovered.Count >= MaxStackCoveredEntries) stackCovered.Clear();
+                            stackCovered.Add(key);
+                        }
                         continue;
                     }
                 }
@@ -534,6 +586,8 @@ namespace LightSide
                 warnedScripts.Clear();
                 pendingWarnings.Clear();
                 stackCovered.Clear();
+                stackCoveredBmp.Clear();
+                prepareGeneration++;
                 slots.Clear();
                 fallbackFontIds.Clear();
                 SystemFontFinder.Reset();

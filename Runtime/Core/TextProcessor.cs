@@ -1380,19 +1380,19 @@ namespace LightSide
                 var cp = cpSpan[start];
 
                 if ((uint)cp < UnicodeData.EmojiRangeThreshold)
-                    return fp.FindFontForCodepoint(cp, CjkLanguageAt(start));
+                    return FindFontAt(fp, cp, start);
 
                 if (EmojiFont.IsAvailable && IsSingleCodepointEmoji(cp))
                     return EmojiFont.FontId;
 
-                return fp.FindFontForCodepoint(cp, CjkLanguageAt(start));
+                return FindFontAt(fp, cp, start);
             }
 
             var cluster = cpSpan.Slice(start, clusterLength);
             if (EmojiFont.IsAvailable && EmojiSequenceClassifier.IsEmojiCluster(cluster))
                 return EmojiFont.FontId;
 
-            return fp.FindFontForCodepoint(cpSpan[start], CjkLanguageAt(start));
+            return FindFontAt(fp, cpSpan[start], start);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1744,6 +1744,10 @@ namespace LightSide
             }
 
             var totalLineAdvances = 0f;
+            // TMP lineSpacing / paragraphSpacing (off for plain text): read once, not per line.
+            var tmpLineSpacing = LineSpacingEm;
+            var tmpParagraphSpacing = ParagraphSpacingEm;
+            var hasTmpSpacing = tmpLineSpacing != 0f || tmpParagraphSpacing != 0f;
 
             // Phase 1: Compute per-line effective heights (CSS line box model)
             for (var i = 0; i < lineCount; i++)
@@ -1790,12 +1794,12 @@ namespace LightSide
 
                 // TMP lineSpacing / paragraphSpacing (em/100 of the font size), added AFTER the minimum
                 // so negative values overlap lines exactly like TMP's lineOffset.
-                if (LineSpacingEm != 0f || ParagraphSpacingEm != 0f)
+                if (hasTmpSpacing)
                 {
                     var em = fontSize * 0.01f;
-                    advance += LineSpacingEm * em;
-                    if (ParagraphSpacingEm != 0f && LineEndsParagraph(in lines[i]))
-                        advance += ParagraphSpacingEm * em;
+                    advance += tmpLineSpacing * em;
+                    if (tmpParagraphSpacing != 0f && LineEndsParagraph(in lines[i]))
+                        advance += tmpParagraphSpacing * em;
                 }
 
                 advances[i] = advance;

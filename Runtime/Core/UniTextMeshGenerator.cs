@@ -959,18 +959,23 @@ namespace LightSide
             Cat.MeowFormat("[GenerateMeshDataForFont] {0}: processing {1} glyphs, glyphLookup={2}, glyphTable={3}, atlas={4}",
                 font.CachedName, glyphCount, glyphLookup?.Count ?? 0, font.GlyphTableDiagCount, font.AtlasTexturesDiagCount);
 
+            // TMP maxVisibleCharacters/Words/Lines masks: fixed for the whole generation, read once.
+            var hidden = ClusterHidden;
+            var glyphHidden = GlyphHidden;
+            var anyHidden = hidden != null || glyphHidden != null;
+            // Base fill hook (whole-text gradient): subscribed on the main thread before generation.
+            var onGlyphBase = OnGlyphBase;
+
             for (var i = 0; i < glyphCount; i++)
             {
                 var glyphIndex = glyphIndices[i];
                 ref var glyph = ref positionedGlyphs[glyphIndex];
 
-                // TMP maxVisibleCharacters/Words/Lines: hidden clusters emit no geometry at all (no quad,
-                // no OnGlyph), so the typewriter effect is a mesh-only rebuild — no reshape, no relayout.
-                var hidden = ClusterHidden;
-                var glyphHidden = GlyphHidden;
-                if (glyphHidden != null
+                // Hidden clusters emit no geometry at all (no quad, no OnGlyph), so the typewriter effect
+                // is a mesh-only rebuild — no reshape, no relayout. Plain text (no mask): one branch.
+                if (anyHidden && (glyphHidden != null
                         ? (uint)glyphIndex < (uint)glyphHidden.Length && glyphHidden[glyphIndex] != 0
-                        : hidden != null && (uint)glyph.cluster < (uint)hidden.Length && hidden[glyph.cluster] != 0)
+                        : (uint)glyph.cluster < (uint)hidden.Length && hidden[glyph.cluster] != 0))
                 {
                     // The cache is marked valid after this pass; an entry skipped here must not keep
                     // stale data from a previous user of the pooled array.
@@ -1131,7 +1136,7 @@ namespace LightSide
                 triangleCount += 6;
                 currentGlyphVertexStart = i0;
 
-                OnGlyphBase?.Invoke();
+                onGlyphBase?.Invoke();
                 OnGlyph?.Invoke();
 
                 verts = vertices.data;

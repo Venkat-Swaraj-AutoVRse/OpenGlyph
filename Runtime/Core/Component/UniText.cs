@@ -784,6 +784,7 @@ namespace LightSide
 
             if ((flags & DirtyFlags.Font) != 0)
             {
+                InvalidateSystemFontPrepare();
                 DeinitializeAllModifiers();
                 fontProvider = null;
                 meshGenerator?.Dispose();
@@ -1319,6 +1320,8 @@ namespace LightSide
 
         private void OnConfigChanged()
         {
+            // The font stack (or a font in it) changed: texts prepared against it must be prepared again.
+            ForgetSharedSystemFontPrepare();
             SetDirty(DirtyFlags.All);
         }
         

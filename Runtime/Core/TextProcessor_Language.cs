@@ -26,6 +26,11 @@ namespace LightSide
         private readonly List<byte[]> languageAscii = new();
         private readonly List<CjkLanguage> languageCjk = new();
         private byte[] cpLanguage;
+        // True when some entry of the language table is a CJK language (font choice depends on it).
+        private bool anyCjkLanguage;
+
+        /// <summary>TEST INSTRUMENTATION: per-codepoint language tables built (only with &lt;lang&gt; spans).</summary>
+        internal static long LanguagePassCount;
 
         /// <summary>
         /// Default BCP 47 language of the text (e.g. "ja", "zh-Hant", "sr"), or null/empty for none. Passed to
@@ -68,12 +73,15 @@ namespace LightSide
             languageAscii.Clear();
             languageCjk.Clear();
             AddLanguageEntry(language);
+            anyCjkLanguage = languageCjk[0] != CjkLanguage.Default;
 
             if (languageSpans.Count == 0)
             {
                 cpLanguage = null;
                 return;
             }
+
+            System.Threading.Interlocked.Increment(ref LanguagePassCount);
 
             if (cpLanguage == null || cpLanguage.Length < cpCount)
                 cpLanguage = new byte[Math.Max(cpCount, 16)];
@@ -93,6 +101,8 @@ namespace LightSide
                 var e = Math.Min(s.end, cpCount);
                 for (var c = Math.Max(0, s.start); c < e; c++) cpLanguage[c] = (byte)idx;
             }
+            for (var i = 0; i < languageCjk.Count; i++)
+                if (languageCjk[i] != CjkLanguage.Default) { anyCjkLanguage = true; break; }
         }
 
         private int IndexOfLanguage(string tag)
@@ -120,6 +130,12 @@ namespace LightSide
             var li = LanguageIndexAt(cp);
             return li < languageCjk.Count ? languageCjk[li] : CjkLanguage.Default;
         }
+
+        /// <summary>Font for a code point at <paramref name="start"/>: the language-aware lookup only when a CJK
+        /// language is in play (otherwise it is the same as the language-less lookup).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int FindFontAt(UniTextFontProvider fp, int cp, int start) =>
+            anyCjkLanguage ? fp.FindFontForCodepoint(cp, CjkLanguageAt(start)) : fp.FindFontForCodepoint(cp);
 
         private byte[] LanguageAsciiOf(byte index) => index < languageAscii.Count ? languageAscii[index] : null;
     }

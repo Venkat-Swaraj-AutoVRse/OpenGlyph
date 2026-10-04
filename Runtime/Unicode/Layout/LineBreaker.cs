@@ -113,6 +113,65 @@ namespace LightSide
             var rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
             var effectiveMaxWidth = toleranceWidth - rawMargin;
 
+            if (!hasJumps && !hangTrailingSpaces)
+            {
+                // Plain text (no TMP indent jumps, no hanging spaces): the hot loop without those checks.
+                for (var cpIdx = firstCodepoint; cpIdx < cpCount; cpIdx++)
+                {
+                    lineWidth += cpWidths[cpIdx];
+
+                    var breakType = GetBreakTypeAfter(breakTypes, cpIdx);
+
+                    while (lineWidth > effectiveMaxWidth)
+                        if (lastBreakCp >= 0 && lastBreakCp >= lineStartCp)
+                        {
+                            CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, lastBreakCp, rawMargin);
+                            lineStartCp = lastBreakCp + 1;
+                            lineWidth -= widthAtLastBreak;
+                            lastBreakCp = -1;
+                            widthAtLastBreak = 0;
+                            rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
+                            effectiveMaxWidth = toleranceWidth - rawMargin;
+                        }
+                        else if (cpIdx > lineStartCp)
+                        {
+                            CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, cpIdx - 1, rawMargin);
+                            lineStartCp = cpIdx;
+                            lineWidth = cpWidths[cpIdx];
+                            lastBreakCp = -1;
+                            widthAtLastBreak = 0;
+                            rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
+                            effectiveMaxWidth = toleranceWidth - rawMargin;
+                        }
+                        else
+                        {
+                            break;
+                        }
+
+                    if (breakType == LineBreakType.Mandatory)
+                    {
+                        CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, cpIdx, rawMargin);
+                        lineStartCp = cpIdx + 1;
+                        lineWidth = 0;
+                        lastBreakCp = -1;
+                        widthAtLastBreak = 0;
+                        rawMargin = (uint)lineStartCp < (uint)startMargins.Length ? startMargins[lineStartCp] : 0f;
+                        effectiveMaxWidth = toleranceWidth - rawMargin;
+                        continue;
+                    }
+
+                    if (breakType == LineBreakType.Optional)
+                    {
+                        lastBreakCp = cpIdx;
+                        widthAtLastBreak = lineWidth;
+                    }
+                }
+
+                if (lineStartCp < cpCount)
+                    CreateLineFromCodepoints(runs, glyphs, cpWidths, lineStartCp, cpCount - 1, rawMargin);
+                return;
+            }
+
             for (var cpIdx = firstCodepoint; cpIdx < cpCount; cpIdx++)
             {
                 // TMP <indent> opened mid-line: the pen jumps to the absolute indent position (it may

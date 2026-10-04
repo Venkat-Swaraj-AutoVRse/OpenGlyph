@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.UI;
 using Debug = UnityEngine.Debug;
@@ -187,11 +188,125 @@ namespace LightSide
 
             // Main thread: load system fallback fonts for uncovered scripts (file IO + asset creation)
             // before any worker runs, and log the once-per-script warning naming this component.
-            if (UniTextSettings.UseSystemFontFallback)
-                SystemFontFallback.PrepareForText(sourceText.Span, fontProvider?.FontStackAsset, this,
-                    CollectCjkLanguages(sourceText.Span));
+            // Only needed before a first pass (itemization picks fonts); skipped when the first pass is
+            // still valid (layout / colour / mesh-only rebuilds, and the mesh pass of every rebuild) and
+            // when this exact text was already prepared against the same stack and language.
+            if (UniTextSettings.UseSystemFontFallback && (textProcessor == null || !textProcessor.HasValidFirstPassData))
+                PrepareSystemFontsForText();
         }
-        
+
+        // System-font prepare memo. A text is identified by its backing string slice (strings are
+        // immutable) or, when the text is not string-backed, by a private copy of its characters.
+        [NonSerialized] private string systemFontPreparedString;
+        [NonSerialized] private int systemFontPreparedStart;
+        [NonSerialized] private char[] systemFontPreparedCopy;
+        [NonSerialized] private int systemFontPreparedLength = -1;
+        [NonSerialized] private UniTextFontStack systemFontPreparedStack;
+        [NonSerialized] private string systemFontPreparedLanguage;
+        [NonSerialized] private int systemFontPreparedGeneration;
+
+        // Process-wide memo of the last prepared text (main thread). Preparing the same text against the
+        // same stack, language and fallback state again finds nothing new to load or report (every code
+        // point is covered or its script already resolved), so components showing the same text (lists,
+        // pooled labels, instantiated prefabs) scan it once.
+        private static string lastPreparedString;
+        private static int lastPreparedStart;
+        private static int lastPreparedLength = -1;
+        private static UniTextFontStack lastPreparedStack;
+        private static string lastPreparedLanguage;
+        private static int lastPreparedGeneration = -1;
+
+        private void PrepareSystemFontsForText()
+        {
+            var text = sourceText.Span;
+            var stack = fontProvider?.FontStackAsset;
+            var generation = SystemFontFallback.PrepareGeneration;
+            if (!MemoryMarshal.TryGetString(sourceText, out var str, out var strStart, out _)) str = null;
+
+            if (systemFontPreparedLength == text.Length &&
+                ReferenceEquals(systemFontPreparedStack, stack) && systemFontPreparedGeneration == generation &&
+                string.Equals(systemFontPreparedLanguage, language, StringComparison.Ordinal))
+            {
+                // Same slice of the same string: O(1). Otherwise compare the characters.
+                if (str != null && ReferenceEquals(str, systemFontPreparedString) && strStart == systemFontPreparedStart)
+                    return;
+                var prev = systemFontPreparedString != null
+                    ? systemFontPreparedString.AsSpan(systemFontPreparedStart, systemFontPreparedLength)
+                    : systemFontPreparedCopy != null ? new ReadOnlySpan<char>(systemFontPreparedCopy, 0, systemFontPreparedLength)
+                    : default;
+                if (prev.Length == text.Length && SameChars(text, prev))
+                {
+                    RememberPrepared(text, str, strStart, stack, generation);
+                    return;
+                }
+            }
+
+            if (lastPreparedString != null && text.Length == lastPreparedLength &&
+                ReferenceEquals(stack, lastPreparedStack) && lastPreparedGeneration == generation &&
+                string.Equals(lastPreparedLanguage, language, StringComparison.Ordinal) &&
+                ((str != null && ReferenceEquals(str, lastPreparedString) && strStart == lastPreparedStart) ||
+                 SameChars(text, lastPreparedString.AsSpan(lastPreparedStart, lastPreparedLength))))
+            {
+                RememberPrepared(text, str, strStart, stack, generation);
+                return;
+            }
+
+            SystemFontFallback.PrepareForText(text, stack, this, CollectCjkLanguages(text));
+            RememberPrepared(text, str, strStart, stack, generation);
+            if (str != null)
+            {
+                lastPreparedString = str;
+                lastPreparedStart = strStart;
+                lastPreparedLength = text.Length;
+                lastPreparedStack = stack;
+                lastPreparedLanguage = language;
+                lastPreparedGeneration = generation;
+            }
+        }
+
+        private void RememberPrepared(ReadOnlySpan<char> text, string str, int strStart, UniTextFontStack stack, int generation)
+        {
+            systemFontPreparedString = str;
+            systemFontPreparedStart = strStart;
+            if (str == null)
+            {
+                if (systemFontPreparedCopy == null || systemFontPreparedCopy.Length < text.Length)
+                    systemFontPreparedCopy = new char[Math.Max(text.Length, 16)];
+                text.CopyTo(systemFontPreparedCopy);
+            }
+            systemFontPreparedLength = text.Length;
+            systemFontPreparedStack = stack;
+            systemFontPreparedLanguage = language;
+            systemFontPreparedGeneration = generation;
+        }
+
+        /// <summary>Ordinal equality of two char spans, compared 4 chars at a time.</summary>
+        private static bool SameChars(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
+        {
+            if (a.Length != b.Length) return false;
+            var wa = MemoryMarshal.Cast<char, ulong>(a);
+            var wb = MemoryMarshal.Cast<char, ulong>(b);
+            for (var i = 0; i < wa.Length; i++)
+                if (wa[i] != wb[i]) return false;
+            for (var i = wa.Length * 4; i < a.Length; i++)
+                if (a[i] != b[i]) return false;
+            return true;
+        }
+
+        /// <summary>Forgets this component's system-font prepare memo (its font configuration changed).</summary>
+        private void InvalidateSystemFontPrepare()
+        {
+            systemFontPreparedLength = -1;
+            systemFontPreparedString = null;
+        }
+
+        /// <summary>Forgets the process-wide prepare memo (a font stack's content changed).</summary>
+        private static void ForgetSharedSystemFontPrepare()
+        {
+            lastPreparedString = null;
+            lastPreparedLength = -1;
+            lastPreparedStack = null;
+        }
 
         private void PrepareModifiersForParallel()
         {
