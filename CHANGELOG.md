@@ -16,6 +16,11 @@ through phase 1c.
 - **Unified renderer is now the project default** (`UniTextSettings.useUnifiedRenderer = true`, shipped asset and runtime default). Opt out per component with `UnifiedRenderer = ForceOff` or project-wide in settings. Test runs: `UNITEXT_FORCE_UNIFIED=1` / `UNITEXT_FORCE_LEGACY=1` pin each mode.
 
 #### Added
+- **Universal Windows Platform (UWP, Unity `WSAPlayer`) support, x64 and ARM64.**
+  - Native: `Plugins/WSA/x64/unitext_native.dll` and `Plugins/WSA/ARM64/unitext_native.dll` (118 `ut_*` exports), built by a new `uwp` CI job (`CMAKE_SYSTEM_NAME=WindowsStore`, `/APPCONTAINER`, `WindowsApp.lib` only, dynamic app CRT `VCRUNTIME140_APP.dll` from the VCLibs framework package; FreeType with `_WINRT_DLL`; Blend2D without JIT and futex probe; no editor DLL). CI gates: arch, export count, App Container bit, import-module allow-list, every OS import in the App Certification Kit supported-API list, and parity of the UWP x64 DLL against the desktop DLL.
+  - Import settings: the WSA DLLs are enabled for `WSAPlayer` only with their CPU; no other package plugin is enabled for `WSAPlayer`.
+  - `SystemFontFallback` is off in UWP players (`SystemFontFallback.IsSupportedOnThisPlatform`), with one warning per session; `SystemEmojiFont` returns no system font on UWP. Bundle fonts.
+  - Docs: new `Documentation/Platforms.md`; README platform table. Tests: `UwpPluginImportTests` (5), `SystemFontFallbackUnsupportedPlatformTests` (5).
 - **Wave 5: built-in on-screen keyboard for VR, and default markup.**
   - **`UniTextKeyboard`** (`Runtime/Keyboard/`): an on-screen keyboard made of OpenGlyph text, with `UniTextWorld` keys (one BoxCollider each) in world space or `UniText` keys on a Canvas. It types into the focused `UniTextInputField` through `ProcessText` / `ProcessKey`, and opens through the field's `IInputFieldTouchKeyboard` seam (`UniTextKeyboardTouchAdapter`).
     - **Layouts as data** (`UniTextKeyboardLayout`: ScriptableObject or JSON). Built in: QWERTY (Shift, caps lock, a numbers & symbols page), Email (`@ . .com _`), Numeric (Integer / Decimal / PIN fields), Hindi Devanagari InScript-lite, and Arabic. A globe key cycles the text layouts.
