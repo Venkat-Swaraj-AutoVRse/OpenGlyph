@@ -189,7 +189,12 @@ UT_API int ut_ft_render_sdf_glyph(FT_Face face, FT_UInt gid, int load_flags, int
      * The original shows a ~5-7 byte straddle-jump at the contour = EDT on a HARD mask; mono/thresh
      * reproduce that, bsdf/outline do not. */
     {
+#if defined(OPENGLYPH_UWP)
+        /* UWP: no process environment in an app container; always the default (bsdf). */
+        const char* mode = NULL;
+#else
         const char* mode = getenv("OPENGLYPH_SDF_MODE");
+#endif
         if (mode && mode[0]=='o') {                 /* outline */
             err = FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
         } else if (mode && mode[0]=='m') {          /* mono -> sdf */

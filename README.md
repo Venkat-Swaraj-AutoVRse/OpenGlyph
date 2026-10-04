@@ -469,18 +469,20 @@ Parallel processing is on by default (`UniText.UseParallel`).
 
 Native plugins shipped in [`Plugins/`](Plugins/):
 
-| Platform | Architectures |
-|---|---|
-| Windows | x64, ARM64 |
-| macOS | x64, Apple Silicon (universal) |
-| Linux | x64, ARM64 |
-| Android (incl. Meta Quest) | ARMv7, ARM64, x86, x64 |
-| iOS | ARM64 (device), ARM64/x64 simulator |
-| tvOS | static library |
-| WebGL | static library |
+| Platform | Architectures | Notes |
+|---|---|---|
+| Windows | x64, ARM64 | |
+| Universal Windows Platform (UWP) | x64, ARM64 | IL2CPP. No system font fallback (app container): bundle fonts for every script you show |
+| macOS | x64, Apple Silicon (universal) | |
+| Linux | x64, ARM64 | |
+| Android (incl. Meta Quest) | ARMv7, ARM64, x86, x64 | |
+| iOS | ARM64 (device), ARM64/x64 simulator | |
+| tvOS | static library | |
+| WebGL | static library | |
 
 Meta Quest 3S (Android ARM64, IL2CPP, Vulkan, OpenXR) is verified on device. Other platforms ship
-binaries but were not tested on device for this release.
+binaries but were not tested on device for this release. The UWP player build (IL2CPP, x64) is
+verified in the Editor; compiling and running the generated solution needs Visual Studio's UWP workload. Details: [Platforms](Documentation/Platforms.md).
 
 ## Documentation
 
@@ -495,6 +497,7 @@ binaries but were not tested on device for this release.
 - [Input field: UniTextInputField, GlyphMeshProInputField, selectable text](Documentation/InputField.md)
 - [Built-in VR keyboard: UniTextKeyboard, layouts, placement](Documentation/VRKeyboard.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
+- [Platforms (native plugins, UWP)](Documentation/Platforms.md)
 - [Changelog](CHANGELOG.md)
 
 ## Credits & License
