@@ -11,8 +11,9 @@ namespace LightSide
     /// no Canvas). Full Unicode editing on the engine's own layout: grapheme-cluster caret and deletion,
     /// BiDi visual caret, word and line navigation, mouse/touch/XR-ray selection, undo/redo, clipboard,
     /// IME composition, content types (number, e-mail, name, password, PIN, ...), character limit,
-    /// horizontal/vertical scrolling, and the platform touch keyboard (the Meta Quest system keyboard
-    /// overlay through <see cref="TouchScreenKeyboard"/>).
+    /// horizontal/vertical scrolling, and an on-screen keyboard: the platform touch keyboard
+    /// (<see cref="TouchScreenKeyboard"/>) on phones and tablets, the built-in <see cref="UniTextKeyboard"/> in
+    /// XR (see <see cref="SoftKeyboard"/>).
     /// </summary>
     /// <remarks>
     /// <para><b>Hierarchy</b> (built by <see cref="Create"/> or the GameObject menu): the field (this
@@ -95,8 +96,14 @@ namespace LightSide
         [SerializeField, Tooltip("Hide the platform's input line above the touch keyboard (iOS/Android).")]
         protected bool m_HideMobileInput;
 
-        [SerializeField, Tooltip("Never open the touch / system keyboard (for a custom in-app keyboard).")]
+        [SerializeField, Tooltip("Never open any on-screen keyboard (same as Soft Keyboard = None).")]
         protected bool m_HideSoftKeyboard;
+
+        [SerializeField, Tooltip("On-screen keyboard opened on focus. Auto: the system keyboard where it works (phones), the built-in OpenGlyph keyboard when an XR device is active (Quest/OpenXR, PC VR), none on desktop.")]
+        protected InputFieldSoftKeyboard m_SoftKeyboard = InputFieldSoftKeyboard.Auto;
+
+        [SerializeField, Tooltip("The built-in keyboard to use (empty: an enabled keyboard in the scene, or one created on demand).")]
+        protected UniTextKeyboard m_Keyboard;
 
         [SerializeField, Tooltip("Seconds between keystrokes that still belong to one undo step.")]
         protected float m_UndoGroupTimeout = 1f;
@@ -158,10 +165,14 @@ namespace LightSide
         private bool keyboardSourceAssigned;
         private bool keyboardBegun;
         private IInputFieldTouchKeyboard touchKeyboard;
+        private IInputFieldTouchKeyboard openKeyboard;
+        private UniTextKeyboardTouchAdapter builtInAdapter;
         private bool touchOpen;
         private string touchLastText;
         private IInputFieldClipboard clipboard;
         private UniText subscribedText;
+        private bool keepFocusReselect;
+        private bool reselecting;
 
         /// <summary>Clock used for caret blink, key repeat and undo grouping (default <see cref="Time.unscaledTime"/>). For replays and tests.</summary>
         public static Func<float> TimeSource;
@@ -402,7 +413,7 @@ namespace LightSide
             }
         }
 
-        /// <summary>The touch / system keyboard (default <see cref="SystemTouchKeyboard"/>).</summary>
+        /// <summary>The system / platform touch keyboard (default <see cref="SystemTouchKeyboard"/>), used when <see cref="SoftKeyboard"/> resolves to System.</summary>
         public IInputFieldTouchKeyboard TouchKeyboard
         {
             get => touchKeyboard ??= new SystemTouchKeyboard();
@@ -413,6 +424,58 @@ namespace LightSide
                 if (focused) OpenTouchKeyboard();
             }
         }
+
+        /// <summary>Which on-screen keyboard opens on focus (default <see cref="InputFieldSoftKeyboard.Auto"/>).</summary>
+        public InputFieldSoftKeyboard SoftKeyboard
+        {
+            get => m_SoftKeyboard;
+            set
+            {
+                if (m_SoftKeyboard == value) return;
+                m_SoftKeyboard = value;
+                if (touchOpen) CloseTouchKeyboard();
+                if (focused) OpenTouchKeyboard();
+            }
+        }
+
+        /// <summary>The built-in keyboard this field uses (null: any enabled one in the scene, or one created on demand; see <see cref="UniTextKeyboard.ForField"/>).</summary>
+        public UniTextKeyboard BuiltInKeyboard
+        {
+            get => m_Keyboard;
+            set
+            {
+                if (m_Keyboard == value) return;
+                var reopen = touchOpen && openKeyboard == builtInAdapter;
+                if (reopen) CloseTouchKeyboard();
+                m_Keyboard = value;
+                if (reopen && focused) OpenTouchKeyboard();
+            }
+        }
+
+        /// <summary>What <see cref="SoftKeyboard"/> resolves to now: System, BuiltIn or None (never Auto).</summary>
+        public InputFieldSoftKeyboard ResolvedSoftKeyboard
+        {
+            get
+            {
+                if (m_HideSoftKeyboard || m_ReadOnly) return InputFieldSoftKeyboard.None;
+                switch (m_SoftKeyboard)
+                {
+                    case InputFieldSoftKeyboard.System:
+                    case InputFieldSoftKeyboard.BuiltIn:
+                    case InputFieldSoftKeyboard.None:
+                        return m_SoftKeyboard;
+                    default:
+                        if (InputFieldPlatform.SystemKeyboardUsable(TouchKeyboard)) return InputFieldSoftKeyboard.System;
+                        return InputFieldPlatform.XRActive ? InputFieldSoftKeyboard.BuiltIn : InputFieldSoftKeyboard.None;
+                }
+            }
+        }
+
+        /// <summary>The on-screen keyboard open right now (the system one or the built-in adapter), or null.</summary>
+        public IInputFieldTouchKeyboard ActiveSoftKeyboard => touchOpen ? openKeyboard : null;
+
+        /// <summary>The built-in keyboard that is open for this field, or null.</summary>
+        public UniTextKeyboard OpenBuiltInKeyboard => touchOpen && openKeyboard == builtInAdapter ? builtInAdapter?.Keyboard : null;
 
         /// <summary>Clipboard for cut/copy/paste (default: the system clipboard).</summary>
         public IInputFieldClipboard Clipboard
@@ -635,6 +698,8 @@ namespace LightSide
         public override void OnSelect(BaseEventData eventData)
         {
             base.OnSelect(eventData);
+            // Re-selected after a press on an on-screen keyboard: still the same editing session.
+            if (reselecting) return;
             onSelect.Invoke(m_Text);
             Selected?.Invoke(m_Text);
             Activate(m_OnFocusSelectAll && !(eventData is PointerEventData));
@@ -642,10 +707,47 @@ namespace LightSide
 
         public override void OnDeselect(BaseEventData eventData)
         {
+            if (focused && PressKeepsFocus(eventData))
+            {
+                // A press on an on-screen keyboard (IInputFieldFocusKeeper): keep editing and select this
+                // field again once the EventSystem has finished changing the selection (LateUpdate).
+                keepFocusReselect = true;
+                base.OnDeselect(eventData);
+                return;
+            }
             DeactivateInputField();
             base.OnDeselect(eventData);
             onDeselect.Invoke(m_Text);
             Deselected?.Invoke(m_Text);
+        }
+
+        private bool PressKeepsFocus(BaseEventData eventData)
+        {
+            if (!(eventData is PointerEventData pe)) return false;
+            var go = pe.pointerCurrentRaycast.gameObject;
+            if (go == null) go = pe.pointerPressRaycast.gameObject;
+            if (go == null) go = pe.pointerEnter;
+            if (go == null) return false;
+            var keeper = go.GetComponentInParent<IInputFieldFocusKeeper>();
+            return keeper != null && keeper.KeepsFocus(this);
+        }
+
+        /// <summary>Selects this field again in the EventSystem after a focus-keeping press (see <see cref="IInputFieldFocusKeeper"/>).</summary>
+        private void ReselectAfterKeeper()
+        {
+            var es = EventSystem.current;
+            if (es == null) { keepFocusReselect = false; return; }
+            if (es.alreadySelecting) return;
+            keepFocusReselect = false;
+            if (!focused) return;
+            var cur = es.currentSelectedGameObject;
+            if (cur == null)
+            {
+                reselecting = true;
+                try { es.SetSelectedGameObject(gameObject); }
+                finally { reselecting = false; }
+            }
+            else if (cur != gameObject) DeactivateInputField();
         }
 
         /// <summary>Submit (Enter / gamepad) on the selected but not focused field activates it.</summary>
@@ -658,6 +760,7 @@ namespace LightSide
         /// <summary>Per-frame work while focused: keyboard polling, touch keyboard sync, caret blink. No allocation while idle.</summary>
         protected virtual void LateUpdate()
         {
+            if (keepFocusReselect) ReselectAfterKeeper();
             if (!focused) return;
             if (keyboardBegun && keyboardSource != null) keyboardSource.Poll(this);
             if (!focused) return;

@@ -180,14 +180,7 @@ namespace LightSide
             lastPushed = feed;
         }
 
-        private static bool HasMarkupRules(UniText t)
-        {
-            if (t.ModRegisters.Count > 0) return true;
-            var cfgs = t.ModRegisterConfigs;
-            for (var i = 0; i < cfgs.Count; i++)
-                if (cfgs[i] != null && cfgs[i].modRegisters is { Count: > 0 }) return true;
-            return false;
-        }
+        private static bool HasMarkupRules(UniText t) => t.HasAnyMarkupRules;
 
         private static void EnsureRawRule(UniText t)
         {

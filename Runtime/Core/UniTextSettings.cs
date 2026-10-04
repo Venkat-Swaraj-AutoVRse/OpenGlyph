@@ -182,6 +182,28 @@ namespace LightSide
         /// <summary>Project-wide switch for the lazy system CJK font fallback (default true).</summary>
         public static bool UseSystemFontFallback => Instance == null || Instance.useSystemFontFallback;
 
+        [SerializeField]
+        [Tooltip("OPT-IN (default OFF). When ON, every UniText / UniTextWorld that has no markup rules of its own " +
+                 "(empty Mod Registers, no Mod Register Config) parses the common tags (<b> <i> <u> <s> <color> " +
+                 "<size> <link> <outline> <gradient> <sup> <sub> <cspace> <line-height> <align> ...; see " +
+                 "UniTextDefaultMarkup.Tags) as if RegisterDefaultMarkup() had been called. The rules are added at " +
+                 "runtime only, never written into scenes or prefabs. OFF keeps the 1.0 behaviour: tags are " +
+                 "literal text until rules are registered per component. GlyphMeshPro components are not affected " +
+                 "(they register their own TMP tag set).")]
+        private bool defaultMarkupOnNewComponents = false;
+
+        /// <summary>
+        /// Opt-in (default false): components without markup rules of their own get the default tag set
+        /// (<see cref="UniTextDefaultMarkup"/>) when they initialise. Read once per component.
+        /// </summary>
+        public static bool DefaultMarkupOnNewComponents => Instance != null && Instance.defaultMarkupOnNewComponents;
+
+        /// <summary>TEST ONLY: toggles <see cref="DefaultMarkupOnNewComponents"/> on the current instance.</summary>
+        internal static void SetDefaultMarkupOnNewComponentsForTests(bool value)
+        {
+            if (Instance != null) Instance.defaultMarkupOnNewComponents = value;
+        }
+
         /// <summary>TEST ONLY: toggles the system font fallback on the current instance.</summary>
         internal static void SetUseSystemFontFallbackForTests(bool value)
         {
