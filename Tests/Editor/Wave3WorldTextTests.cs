@@ -24,7 +24,7 @@ namespace LightSide.Tests
         {
             var t = MakeWorld("Hello World", unified, width: 600, height: 120, fontSize: 60f);
             Assert.IsNull(t.GetComponentInParent<Canvas>(), "world text must not need a Canvas");
-            Assert.IsNull(t.Highlighter, "no Canvas-only highlight graphics on world text");
+            Assert.IsInstanceOf<WorldTextHighlighter>(t.Highlighter, "world text uses the MeshRenderer link highlighter, not Canvas graphics");
             var mesh = WorldMeshOf(t);
             Assert.IsNotNull(mesh, "MeshFilter.sharedMesh not assigned");
             var quads = QuadsOf(mesh);
@@ -373,6 +373,61 @@ namespace LightSide.Tests
             var local = new Vector3(rect.xMin + (g.left + g.right) * 0.5f, rect.yMax - (g.top + g.bottom) * 0.5f, 0f);
             return t.transform.TransformPoint(local);
         }
+        private static PointerEventData PointerAt(UniText t, Vector3 world, EventSystem es)
+        {
+            var rr = new RaycastResult { gameObject = t.gameObject, worldPosition = world, worldNormal = -t.transform.forward };
+            return new PointerEventData(es) { pointerCurrentRaycast = rr, pointerPressRaycast = rr };
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void World_LinkHover_DrawsBoxBehindTheLink_AndClears(bool unified)
+        {
+            var (t, _, _) = MakeLinkText(unified);
+            var hl = t.Highlighter as WorldTextHighlighter;
+            Assert.IsNotNull(hl, "world text gets a WorldTextHighlighter by default");
+            var esGo = new GameObject("ES", typeof(EventSystem)); _junk.Add(esGo);
+            var es = esGo.GetComponent<EventSystem>();
+
+            var (g, _, _) = GlyphIn(t, "second");
+            ExecuteEvents.Execute(t.gameObject, PointerAt(t, WorldPointOf(t, g), es), ExecuteEvents.pointerMoveHandler);
+            Assert.IsTrue(hl.IsHovering, "hovering the link");
+            Assert.Greater(hl.DrawnRects.Count, 0, "a box is drawn");
+            var box = hl.DrawnRects[0];
+            var rect = t.rectTransform.rect;
+            var gx = rect.xMin + (g.left + g.right) * 0.5f;
+            var gy = rect.yMax - (g.top + g.bottom) * 0.5f;
+            Assert.IsTrue(box.Contains(new Vector2(gx, gy)), $"box {box} covers the hovered glyph ({gx}, {gy})");
+            var (other, _, _) = GlyphIn(t, "first");
+            var ox = rect.xMin + (other.left + other.right) * 0.5f;
+            Assert.IsFalse(box.Contains(new Vector2(ox, gy)), "box covers only the hovered link");
+
+            var renderer = t.transform.Find("Link Highlight").GetComponent<MeshRenderer>();
+            Assert.IsTrue(renderer.enabled);
+            Assert.Less(renderer.sortingOrder, t.WorldRenderer.sortingOrder, "the box draws below the glyphs");
+
+            // Off the links (the word "or"), then out of the label.
+            var (orGlyph, _, _) = GlyphIn(t, "or");
+            ExecuteEvents.Execute(t.gameObject, PointerAt(t, WorldPointOf(t, orGlyph), es), ExecuteEvents.pointerMoveHandler);
+            Assert.IsFalse(hl.IsHovering, "leaving the link clears the hover");
+            Assert.AreEqual(0, hl.DrawnRects.Count);
+            Assert.IsFalse(renderer.enabled, "nothing drawn when idle");
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void World_LinkClick_FlashesTheLink(bool unified)
+        {
+            var (t, _, clicked) = MakeLinkText(unified);
+            var hl = (WorldTextHighlighter)t.Highlighter;
+            var esGo = new GameObject("ES", typeof(EventSystem)); _junk.Add(esGo);
+            var (g, _, _) = GlyphIn(t, "first");
+            ExecuteEvents.Execute(t.gameObject, PointerAt(t, WorldPointOf(t, g), esGo.GetComponent<EventSystem>()), ExecuteEvents.pointerClickHandler);
+            CollectionAssert.AreEqual(new[] { "alpha" }, clicked);
+            Assert.Greater(hl.DrawnRects.Count, 0, "click flash drawn over the clicked link");
+            Assert.IsTrue(t.transform.Find("Link Highlight").GetComponent<MeshRenderer>().enabled);
+        }
+
         [TestCase(true)]
         [TestCase(false)]
         public void World_HitTestWorldAndRay_FindTheLink(bool unified)

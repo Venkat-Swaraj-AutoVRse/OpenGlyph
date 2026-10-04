@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### World link feedback
+
+- **`WorldTextHighlighter`**: hover box and click flash for links and interactive ranges on world-space
+  text (`UniTextWorld`, world `GlyphMeshPro`), drawn by a MeshRenderer below the glyphs; the default for
+  world text (a Canvas keeps `DefaultTextHighlighter`). Tests: `Wave3WorldTextTests.World_LinkHover_*`,
+  `World_LinkClick_FlashesTheLink`.
+
 ### OpenGlyph 1.1.0-preview
 
 Open-source (MIT) clean-room fork of UniText 1.0. This preview integrates phase 0
