@@ -52,6 +52,8 @@ field.TextComponent.FontStack = fonts;
 
 You can also use **GameObject > 3D Object > OpenGlyph > UniText Input Field (World)**.
 
+A world field gets a `UniTextInputWorldBackground`: a dark rounded panel with a border behind the text (highlighted while the field is focused) and light text and placeholder colours, so it reads well in a headset against any scene. Change the colours, border width and corner radius on that component, or remove it to draw your own panel.
+
 A world field draws its text with `UniTextWorld`, and its caret and selection with small MeshRenderers. It
 keeps a `BoxCollider` sized to the field, so pointer events reach it through:
 
