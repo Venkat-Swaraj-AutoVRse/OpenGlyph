@@ -180,14 +180,7 @@ namespace LightSide
         private bool useSystemFontFallback = true;
 
         /// <summary>Project-wide switch for the lazy system CJK font fallback (default true).</summary>
-        /// <remarks>Always false in Web players (WebGL 2 and WebGPU): the browser sandbox exposes no
-        /// installed font files, so every script must come from a font in the font stack.</remarks>
-        public static bool UseSystemFontFallback =>
-#if UNITY_WEBGL && !UNITY_EDITOR
-            false;
-#else
-            Instance == null || Instance.useSystemFontFallback;
-#endif
+        public static bool UseSystemFontFallback => Instance == null || Instance.useSystemFontFallback;
 
         [SerializeField]
         [Tooltip("OPT-IN (default OFF). When ON, every UniText / UniTextWorld that has no markup rules of its own " +

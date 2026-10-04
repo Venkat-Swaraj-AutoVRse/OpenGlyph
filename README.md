@@ -469,23 +469,22 @@ Parallel processing is on by default (`UniText.UseParallel`).
 
 Native plugins shipped in [`Plugins/`](Plugins/):
 
-| Platform | Architectures |
-|---|---|
-| Windows | x64, ARM64 |
-| macOS | x64, Apple Silicon (universal) |
-| Linux | x64, ARM64 |
-| Android (incl. Meta Quest) | ARMv7, ARM64, x86, x64 |
-| iOS | ARM64 (device), ARM64/x64 simulator |
-| tvOS | static library |
-| Web: WebGL 2 | static wasm library (shared with WebGPU) |
-| Web: WebGPU | same library; Unity's WebGPU backend is experimental (Unity 6+) |
+| Platform | Architectures | Notes |
+|---|---|---|
+| Windows | x64, ARM64 | |
+| Universal Windows Platform (UWP) | x64, ARM64 | IL2CPP. No system font fallback (app container): bundle fonts for every script you show |
+| macOS | x64, Apple Silicon (universal) | |
+| Linux | x64, ARM64 | |
+| Android (incl. Meta Quest) | ARMv7, ARM64, x86, x64 | |
+| iOS | ARM64 (device), ARM64/x64 simulator | |
+| tvOS | static library | |
+| Web: WebGL 2 | static wasm library | No system fonts on the web: bundle fonts for every script you show. Single-threaded |
+| Web: WebGPU | same wasm library as WebGL 2 | Experimental Unity backend (Unity 6+). No system fonts on the web: bundle fonts |
 
 Meta Quest 3S (Android ARM64, IL2CPP, Vulkan, OpenXR) is verified on device. Web player builds
 (WebGPU only, and WebGL 2 only) are verified in Chrome with Unity 6000.3. Other platforms ship
-binaries but were not tested on device for this release.
-
-On the web, bundle a font for every script you use: a browser exposes no installed fonts, so the
-system font fallback is off, and the web player runs single-threaded ([details](Documentation/Web.md)).
+binaries but were not tested on device for this release. The UWP player build (IL2CPP, x64) is
+verified in the Editor; compiling and running the generated solution needs Visual Studio's UWP workload. Details: [Platforms](Documentation/Platforms.md), [Web](Documentation/Web.md).
 
 ![OpenGlyph in a WebGPU Web player in Chrome: Latin, Arabic, Hebrew, Devanagari, effects, GlyphMeshProUGUI, an input field and a UniTextWorld label](.github/assets/features/webgpu.png)
 
@@ -503,6 +502,7 @@ system font fallback is off, and the web player runs single-threaded ([details](
 - [Built-in VR keyboard: UniTextKeyboard, layouts, placement](Documentation/VRKeyboard.md)
 - [Web (WebGL 2 and WebGPU)](Documentation/Web.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
+- [Platforms (native plugins, UWP)](Documentation/Platforms.md)
 - [Changelog](CHANGELOG.md)
 
 ## Credits & License

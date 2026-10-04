@@ -179,6 +179,152 @@ jobs:
           name: winref-dump
           path: ${{ runner.temp }}/winref-dump/
 
+  # ---------------------------------------------------------------- UWP (WindowsStore) x64 / ARM64
+  # Universal Windows Platform (Unity WSAPlayer; HoloLens 2 / Windows on ARM = ARM64). Same sources
+  # and 118-symbol .def as desktop Windows, built for the app container:
+  #   * CMAKE_SYSTEM_NAME=WindowsStore -> WINAPI_FAMILY_APP, /APPCONTAINER, linked against
+  #     WindowsApp.lib ONLY, so any API outside the UWP surface fails the link.
+  #   * dynamic app CRT (/MD -> VCRUNTIME140_APP.dll + api-ms-win-crt-*), supplied on device by the
+  #     Microsoft.VCLibs.140.00 framework package (MSVC ships no static CRT for the app partition).
+  #   * Blend2D ON without JIT/futex (BLEND2D_NO_JIT, BLEND2D_NO_FUTEX); no editor DLL.
+  # Gates: arch + 118 ut_* exports, AppContainer bit, import modules on an allow-list (no desktop
+  # VC++ runtime, no KERNEL32/USER32/...), and every imported function checked against the
+  # Windows App Certification Kit's SupportedAPIs list when the runner has it.
+  uwp:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, ARM64]
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin CMake
+        uses: lukka/get-cmake@v3.31.6
+        with:
+          cmakeVersion: "${{ env.CMAKE_VERSION }}"
+      - name: Configure
+        run: >
+          cmake -S "NativeSource~" -B build -G "Visual Studio 17 2022"
+          -A ${{ matrix.arch }}
+          "-DCMAKE_SYSTEM_NAME=WindowsStore" "-DCMAKE_SYSTEM_VERSION=10.0"
+          -DOPENGLYPH_ENABLE_BLEND2D=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Stage outputs
+        shell: pwsh
+        run: |
+          $d = "WSA/${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force "out/$d" | Out-Null
+          Copy-Item build/Release/unitext_native.dll "out/$d/"
+          if (Test-Path build/Release/unitext_native_editor.dll) { throw "editor DLL must not be built for UWP" }
+      - name: Verify arch + ut_* symbol count + app-container compliance
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsroot  = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $dumpbin = Get-ChildItem -Path "$vsroot\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
+                     Where-Object { $_.FullName -match '\\Hostx64\\x64\\' } | Select-Object -First 1 -Expand FullName
+          Write-Output "dumpbin: $dumpbin"
+          $dll = "out/WSA/${{ matrix.arch }}/unitext_native.dll"
+          $expectArch = if ('${{ matrix.arch }}' -eq 'x64') { '8664 machine \(x64\)' } else { 'AA64 machine \(ARM64\)' }
+
+          # -- arch + AppContainer bit
+          $headers = & $dumpbin /headers $dll
+          $hdr = $headers | Select-String -Pattern 'machine \(' | Select-Object -First 1
+          Write-Output "arch: $hdr"
+          if ($hdr -notmatch $expectArch) { throw "arch mismatch: expected $expectArch in '$hdr'" }
+          if (-not ($headers | Select-String -SimpleMatch 'App Container')) {
+            $headers | Select-String -Pattern 'DLL characteristics' -Context 0,10 | Out-String | Write-Output
+            throw "DLL is not marked App Container (/APPCONTAINER)"
+          }
+          Write-Output "OK: DLL characteristics include 'App Container'"
+
+          # -- 118 ut_* exports (same parse as the desktop job)
+          $names = & $dumpbin /exports $dll |
+            Select-String -Pattern '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]{8}\s+(\S+)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+          $set = $names | Where-Object { $_ -match '^ut_[A-Za-z0-9_]+$' } | Sort-Object -Unique
+          Write-Output ("exported runtime symbols: " + $set.Count)
+          if ($set.Count -ne [int]$env:UT_RUNTIME_SYMS) { $set | ForEach-Object { "    $_" }; throw "symbol count mismatch" }
+
+          # -- import modules: app CRT + OS apisets only
+          $deps = & $dumpbin /dependents $dll | Select-String -Pattern '^\s+(\S+\.dll)\s*$' |
+                  ForEach-Object { $_.Matches[0].Groups[1].Value } | Sort-Object -Unique
+          Write-Output "dependents:"; $deps | ForEach-Object { "    $_" }
+          $allowed = '^(api-ms-win-.+|ext-ms-win-.+|vcruntime140(_1)?_app|msvcp140(_\d+)?_app)\.dll$'
+          $bad = $deps | Where-Object { $_ -notmatch $allowed }
+          if ($bad) { $bad | ForEach-Object { "    !! $_" }; throw "imports outside the UWP allow-list" }
+          if (-not ($deps | Where-Object { $_ -match '^vcruntime140_app\.dll$' })) { throw "expected the dynamic app CRT (VCRUNTIME140_APP.dll)" }
+          Write-Output "OK: only app CRT + api-ms-win-* apiset imports"
+
+          # -- every imported function vs the WACK SupportedAPIs list (when present on the runner)
+          $imports = @(); $mod = $null
+          foreach ($line in (& $dumpbin /imports $dll)) {
+            if ($line -match '^\s+Summary\s*$') { break }   # section-size table follows; not imports
+            if ($line -match '^\s{4}(\S+\.dll)\s*$') { $mod = $Matches[1].ToLower(); continue }
+            if ($mod -and $line -match '^\s+[0-9A-Fa-f]+\s+([A-Za-z_][A-Za-z0-9_@?$]*)\s*$') { $imports += "$mod!$($Matches[1])" }
+          }
+          $imports = $imports | Sort-Object -Unique
+          Write-Output ("imported functions: " + $imports.Count)
+          $imports | ForEach-Object { "    $_" }
+          $kit = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit"
+          # The kit ships SupportedAPIs-x64.xml / -x86.xml only. The UWP API surface (names + apiset
+          # modules) is the same on ARM64, so ARM64 imports are checked against the x64 list.
+          $xml = Get-ChildItem -Path $kit -Recurse -Filter "SupportedAPIs-x64.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $xml) {
+            Write-Output "WACK SupportedAPIs-$xmlArch.xml not found under '$kit'; available:"
+            Get-ChildItem -Path $kit -Recurse -Filter "*.xml" -ErrorAction SilentlyContinue | Select-Object -First 30 -Expand FullName
+            Write-Output "Skipping the per-function check (the WindowsApp.lib-only link already rejects non-UWP APIs)."
+          } else {
+            Write-Output "WACK list: $($xml.FullName)"
+            $raw = Get-Content $xml.FullName -Raw
+            $ok = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach ($m in [regex]::Matches($raw, '<API\s+Name="([^"]+)"\s+ModuleName="([^"]+)"', 'IgnoreCase')) {
+              [void]$ok.Add($m.Groups[2].Value.ToLower() + '!' + $m.Groups[1].Value)
+            }
+            Write-Output ("supported API entries: " + $ok.Count)
+            if ($ok.Count -lt 1000) { Write-Output ($raw.Substring(0, [Math]::Min(2000, $raw.Length))); throw "could not parse SupportedAPIs list" }
+            # VCRUNTIME140*_APP.dll belong to the Microsoft.VCLibs framework package (a declared package
+            # dependency), not the OS API surface the list describes; WACK accepts them via the
+            # dependency, so they are listed but not looked up.
+            $osImports = $imports | Where-Object { $_ -notmatch '^(vcruntime140(_1)?_app|msvcp140(_\d+)?_app)\.dll!' }
+            Write-Output ("framework (VCLibs) imports, not looked up: " + ($imports.Count - $osImports.Count))
+            $unsupported = $osImports | Where-Object { -not $ok.Contains($_) }
+            if ($unsupported) { $unsupported | ForEach-Object { "    !! $_" }; throw "imports not in the WACK supported-API list" }
+            Write-Output "OK: all $($osImports.Count) OS imports are in the WACK supported-API list ($($xml.Name))"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-uwp-${{ matrix.arch }}
+          path: out/
+      - name: Parity vs committed desktop DLL (x64 only)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          # Run the side-by-side parity harness in a normal desktop process: the committed desktop
+          # x64 DLL vs the UWP x64 DLL. The UWP DLL imports the app CRT (VCRUNTIME140_APP.dll),
+          # which is only in the Microsoft.VCLibs framework package, so take it from the SDK's
+          # VCLibs .appx and put it next to the DLL (NativeLibrary.Load resolves dependents there).
+          $appxDir = "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows Kits\10\ExtensionSDKs\Microsoft.VCLibs\14.0\Appx\Retail\x64"
+          $appx = Get-ChildItem $appxDir -Filter *.appx | Select-Object -First 1
+          if (-not $appx) { throw "VCLibs appx not found in $appxDir" }
+          Write-Output "VCLibs: $($appx.FullName)"
+          $x = "$env:RUNNER_TEMP/vclibs"
+          Copy-Item $appx.FullName "$env:RUNNER_TEMP/vclibs.zip"
+          Expand-Archive "$env:RUNNER_TEMP/vclibs.zip" $x -Force
+          $run = "$env:RUNNER_TEMP/uwpdll"
+          New-Item -ItemType Directory -Force $run | Out-Null
+          Copy-Item "out/WSA/x64/unitext_native.dll" $run
+          Get-ChildItem $x -Filter *_app.dll | ForEach-Object { Copy-Item $_.FullName $run; "  + $($_.Name)" }
+          Copy-Item "Plugins/Windows/x86_64/unitext_native.dll" "$env:RUNNER_TEMP/unitext_native_orig.dll"
+          dotnet build -c Release "NativeSource~/tests/parity/parity.csproj" -o "$env:RUNNER_TEMP/parity-bin"
+          dotnet "$env:RUNNER_TEMP/parity-bin/parity.dll" `
+            "$env:RUNNER_TEMP/unitext_native_orig.dll" `
+            "$run/unitext_native.dll" `
+            "Defaults" "NativeSource~/tests/fonts/RobotoFlex-VF.ttf"
+          if ($LASTEXITCODE -ne 0) { throw "parity failed (exit $LASTEXITCODE)" }
+
   # ---------------------------------------------------------------- Linux x64 / ARM64
   linux:
     strategy:
@@ -876,7 +1022,7 @@ jobs:
 
   # ---------------------------------------------------------------- Assemble Plugins/ tree
   assemble:
-    needs: [windows, linux, macos, android, apple_embedded, webgl]
+    needs: [windows, uwp, linux, macos, android, apple_embedded, webgl]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:

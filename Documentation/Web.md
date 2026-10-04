@@ -26,8 +26,9 @@ style-table fetches), `UniText/World/Uber`, and the legacy SDF, MSDF and bitmap 
 
 ## Differences from desktop and mobile
 
-- **No system fonts.** A browser exposes no installed font files, so the system font fallback
-  (`UniTextSettings.useSystemFontFallback`) is always off in Web players. Add a font for each script
+- **No system fonts.** A browser exposes no installed font files, so the system font fallback is off
+  in Web players (`SystemFontFallback.IsSupportedOnThisPlatform == false`, as on UWP; one warning per
+  session the first time a code point is uncovered). Add a font for each script
   you ship (for example Noto Sans Devanagari, a CJK font) to your `UniTextFontStack`. Characters with
   no font in the stack render as missing glyphs.
 - **Emoji** come from the browser's own emoji font, drawn through a Canvas 2D (`BrowserEmoji.jslib`),
