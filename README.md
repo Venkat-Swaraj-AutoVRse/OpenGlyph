@@ -30,7 +30,7 @@ and rendered as SDF/MSDF through Unity's Canvas — including in VR.
 | 🌐 | **Every script via HarfBuzz** | Arabic, Hebrew, Devanagari and other complex scripts are shaped by HarfBuzz. Thai, Lao, Khmer and Myanmar get dictionary word breaking (ICU-matched). Any script your font stack does not cover (CJK, Tamil, Bengali, Georgian, Ethiopic, Tibetan, ...) falls back to an installed system font at runtime, with one warning per script; bundle fonts for consistent results across devices ([details](Documentation/SystemFontFallback.md)). |
 | 🔄 | **Full UAX #9 BiDi** | Mixed LTR/RTL text with numbers and punctuation; 100 % of the Unicode 17.0 BiDi conformance data (861,948 cases). |
 | 😀 | **Color emoji** | COLRv1 color glyphs; ZWJ sequences (e.g. 👨‍👩‍👧‍👦) are a single grapheme cluster. |
-| 🏷️ | **Rich text & span styles** | `<b> <i> <u> <s> <color> <size> <gradient> <link> <cspace> <sup> <sub>` and more; per-span outline/underlay styles. |
+| 🏷️ | **Rich text & span styles** | `<b> <i> <u> <s> <color> <size> <gradient> <link> <cspace> <sup> <sub>` and more; per-span outline/underlay styles. Tags are opt-in per component: `RegisterDefaultMarkup()` adds the common set in one call (or turn on *Default Markup On New Components* in `UniTextSettings`). |
 | ✂️ | **Overflow modes** | Overflow, Truncate, Ellipsis (grapheme- and RTL-aware) and Clip; works with Mask and RectMask2D. |
 | 🧱 | **Unified renderer + legacy** | Default unified path: one Uber shader with a shared atlas array — SDF text is one draw group per component, never more than two when MSDF/emoji are mixed. The legacy per-material path remains selectable. |
 | 🥽 | **VR-ready** | All shaders declare single-pass-instanced stereo macros; verified on a Meta Quest 3S (OpenXR, Vulkan) in both eyes. |
@@ -48,7 +48,8 @@ and rendered as SDF/MSDF through Unity's Canvas — including in VR.
 | ✨ | **Glow, inner shadow, second outline** | SDF glow (colour, size, softness, intensity), inner shadow and a second stroke band, per span and for the whole text ([below](#glow-inner-shadow-second-outline)). |
 | 🎨 | **Radial and angular gradients** | `<gradient=name,radial>`, `<gradient=name,angular,deg>` and a whole-text `GradientFill`; both renderers ([below](#radial-and-angular-gradients)). |
 | 🌐 | **World-space text without a Canvas** | `UniTextWorld` and `GlyphMeshPro` (the TMP `TextMeshPro` API) draw through a MeshRenderer: same engine and output as Canvas text, one shared material for all labels, unlit or lit shader for URP and Built-in, links clickable through a `PhysicsRaycaster` ([below](#world-space-text)). |
-| ⌨️ | **Text input (Canvas, world space, VR)** | `UniTextInputField` and `GlyphMeshProInputField` (the `TMP_InputField` API): grapheme-cluster caret, BiDi visual caret, word and line navigation, selection by mouse, touch or XR ray, undo/redo, clipboard, IME composition, content types (number, e-mail, name, password, PIN), scrolling, and the Quest system keyboard through `TouchScreenKeyboard`; 0 GC per idle frame ([below](#text-input)). |
+| ⌨️ | **Text input (Canvas, world space, VR)** | `UniTextInputField` and `GlyphMeshProInputField` (the `TMP_InputField` API): grapheme-cluster caret, BiDi visual caret, word and line navigation, selection by mouse, touch or XR ray, undo/redo, clipboard, IME composition, content types (number, e-mail, name, password, PIN), scrolling; 0 GC per idle frame ([below](#text-input)). |
+| 🎹 | **Built-in VR keyboard** | `UniTextKeyboard`: an on-screen keyboard drawn with OpenGlyph text, world space or Canvas, for XR where the system keyboard does not appear (Quest under OpenXR). QWERTY + symbols, numeric pad, e-mail row, Hindi (Devanagari) and Arabic layouts, layouts as data; XRI ray/poke, mouse and touch; opens automatically when a field is focused in XR ([below](#built-in-keyboard-for-vr)). |
 
 ## Drop-in TextMesh Pro API — GlyphMeshProUGUI
 
@@ -181,13 +182,15 @@ from the right. [TextReveal.md](Documentation/TextReveal.md) · [TextAnimations.
 ### Glow, inner shadow, second outline
 
 ```csharp
+label.RegisterDefaultMarkup();                           // the common tags, incl. <glow> <innershadow> <outline2>
 label.Text = "<glow=#38BDF8,0.8,0.5,1.4>WARNING</glow> <glow=#000000,0.9,0.7>over a busy scene</glow> " +
              "<innershadow=#7A3500,0.35,-0.35,0,0.3>Pressure</innershadow> " +
              "<outline=#FFFFFF,0.15><outline2=#E11D48,0.25>STOP</outline2></outline>";
 ```
 
-Register `SpanStyleModifier` kinds `Glow` / `InnerShadow` / `Outline2` with `GlowParseRule`,
-`InnerShadowParseRule`, `Outline2ParseRule`; the same fields exist on the component `Style`. They come from
+`label.RegisterDefaultMarkup()` registers these span tags with the other common tags (`<outline>`,
+`<underlay>`, ...); to register only some, add `SpanStyleModifier` kinds `Glow` / `InnerShadow` / `Outline2`
+with `GlowParseRule`, `InnerShadowParseRule`, `Outline2ParseRule`. The same fields exist on the component `Style`. They come from
 the glyph's distance field in the same pass (no extra geometry). Span styles need the unified renderer;
 the legacy mobile SDF/MSDF shaders gained a `GLOW_ON` glow. [GlowAndShadows.md](Documentation/GlowAndShadows.md)
 
@@ -196,6 +199,7 @@ the legacy mobile SDF/MSDF shaders gained a `GLOW_ON` glow. [GlowAndShadows.md](
 ### Radial and angular gradients
 
 ```csharp
+label.RegisterDefaultMarkup();                           // registers <gradient> (and the other common tags)
 label.Text = "<gradient=ice,radial>RADIAL</gradient> <gradient=spectrum,angular,90>ANGULAR</gradient>";
 title.GradientFill = UniTextGradientFill.Radial(myGradient, new Vector2(0.5f, 0.5f));   // whole text
 ```
@@ -211,6 +215,7 @@ Vertex colours, so both renderers; `<color>` and `<gradient>` spans override the
 var go = new GameObject("Label", typeof(RectTransform));
 go.transform.localScale = Vector3.one * 0.005f;           // 200 local units = 1 m
 var label = go.AddComponent<UniTextWorld>();              // MeshFilter + MeshRenderer, no Canvas
+label.RegisterDefaultMarkup();                             // <b>, <link>, ...: a plain component parses no tags
 label.rectTransform.sizeDelta = new Vector2(400, 80);
 label.FontSize = 36;
 label.Text = "Valve <b>A</b>: <link=valveA>details</link>";
@@ -263,8 +268,11 @@ layout:
 
 Single-line fields scroll sideways and multi-line fields scroll vertically, clipped by a RectMask2D on a
 Canvas and in object space in world space. Input comes from the Input System or the legacy Input Manager,
-whichever the project uses. On Quest, focusing a field opens the Meta system keyboard through
-`TouchScreenKeyboard`; you can also feed `ProcessText` / `ProcessKey` from your own in-VR keyboard.
+whichever the project uses. On phones and tablets, focusing a field opens the system keyboard
+(`TouchScreenKeyboard`). In XR it opens the built-in OpenGlyph keyboard instead ([below](#built-in-keyboard-for-vr)):
+on Quest under OpenXR, `TouchScreenKeyboard` reports itself visible but shows nothing. Meta's own system
+keyboard needs the Meta XR SDK's Virtual Keyboard, which OpenGlyph does not include. `SoftKeyboard` forces
+System, BuiltIn or None.
 
 `GlyphMeshProInputField` is the same field with the `TMP_InputField` API. A test drives it and a real
 TMP_InputField with the same 15 key events and checks that they match after each one.
@@ -276,6 +284,46 @@ idle. [InputField.md](Documentation/InputField.md)
 ![A world-space input field seen at an angle, with a selected word](.github/assets/features/input-field-world.png)
 
 ![Typing, selecting a word with Ctrl+Shift+Left and undoing, driven through the field's input seam](.github/assets/features/input-field.gif)
+
+### Built-in keyboard for VR
+
+```csharp
+// Nothing to do in XR: a focused field (SoftKeyboard = Auto) opens the built-in keyboard below itself,
+// creating one if the scene has none. To set it up yourself:
+var keyboard = UniTextKeyboard.Create(null, world: true, fonts);   // 4.5 cm keys, hidden until a field is focused
+keyboard.Layouts.Add(UniTextKeyboardLayout.Qwerty);
+keyboard.Layouts.Add(UniTextKeyboardLayout.HindiInScript);         // the globe key cycles through the layouts
+keyboard.Placement = KeyboardPlacement.FollowHead;                 // BelowField (default) | Transform | FollowHead | Manual
+keyboard.onKeyPressed.AddListener(_ => clickSound.Play());         // audio / haptics
+answer.BuiltInKeyboard = keyboard;
+answer.SoftKeyboard = InputFieldSoftKeyboard.BuiltIn;              // force it (Auto | System | BuiltIn | None)
+```
+
+`UniTextKeyboard` is an on-screen keyboard made of OpenGlyph text: `UniTextWorld` keys with a collider each
+in world space, `UniText` keys on a Canvas. It types through the field's own input seam, so validation,
+the character limit, undo, multi-line and password masking all apply. Keys use standard EventSystem
+pointer events: XR Interaction Toolkit rays and pokes (`TrackedDevicePhysicsRaycaster`,
+`TrackedDeviceGraphicRaycaster`), mouse and touch. Pressing a key never takes focus from the field.
+
+- **Layouts:** QWERTY with Shift / caps lock and a numbers & symbols page; a numeric pad for Integer,
+  Decimal and PIN fields; an e-mail row (`@ . .com`) for e-mail fields; Hindi (Devanagari InScript-lite)
+  and Arabic. Layouts are data (`UniTextKeyboardLayout` assets or JSON), and each key types any Unicode
+  string.
+- **Keys:** Backspace repeats while held. Enter submits, or inserts a newline in multi-line fields. There are
+  also Space, ← → caret keys, Hide, and a layout key.
+- **Look:** hover and press change only vertex colours. A pressed letter shows a preview popup, except in
+  password fields.
+- **Cost:** all key labels share one material, and the backgrounds and icons are one mesh. It allocates 0 B
+  per idle frame. The full QWERTY page is 37 keys: 30 renderers, which draw as 4 extra draw calls with
+  Built-in dynamic batching in the Editor.
+
+[VRKeyboard.md](Documentation/VRKeyboard.md)
+
+![The built-in keyboard: QWERTY with a key preview, the Hindi (Devanagari) layout, the numeric pad and the Arabic layout, each typing into a field](.github/assets/features/vr-keyboard.png)
+
+![A world-space field with the built-in keyboard below it, seen at an angle](.github/assets/features/vr-keyboard-world.png)
+
+![Typing into a field by pressing keys of the built-in keyboard](.github/assets/features/vr-keyboard.gif)
 
 ## Showcase
 
@@ -445,6 +493,7 @@ binaries but were not tested on device for this release.
 - [Text reveal](Documentation/TextReveal.md) · [Text animations](Documentation/TextAnimations.md) · [Glow, inner shadow, second outline](Documentation/GlowAndShadows.md) · [Radial and angular gradients](Documentation/Gradients.md)
 - [World-space text: UniTextWorld, GlyphMeshPro](Documentation/WorldText.md)
 - [Input field: UniTextInputField, GlyphMeshProInputField, selectable text](Documentation/InputField.md)
+- [Built-in VR keyboard: UniTextKeyboard, layouts, placement](Documentation/VRKeyboard.md)
 - [Render architecture](Documentation/Design/RenderArchitecture.md) · [Memory budgets](Documentation/Design/MemoryBudgets.md) · [Font families](Documentation/Design/Phase2-FontFamilies.md)
 - [Changelog](CHANGELOG.md)
 

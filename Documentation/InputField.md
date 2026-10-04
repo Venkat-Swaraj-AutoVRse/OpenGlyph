@@ -23,6 +23,8 @@ renders:
 
 ![Typing, word selection with Shift+Ctrl+Left and undo, driven through the field's input seam](../.github/assets/features/input-field.gif)
 
+![A world-space field with the built-in OpenGlyph keyboard below it](../.github/assets/features/vr-keyboard-world.png)
+
 ## Quick start
 
 ### Canvas
@@ -64,15 +66,44 @@ field.SetCaretFromRay(controllerRay);               // or SetCaretFromWorldPoint
 field.SetCaretFromRay(controllerRay, extendSelection: true);   // drag
 ```
 
-On **Meta Quest**, focusing the field opens the Meta system keyboard overlay through Unity's
-`TouchScreenKeyboard`. That needs system keyboard support enabled in the Meta XR / OpenXR Meta settings
-("Requires System Keyboard"). The field mirrors the keyboard's text and selection. **Done** submits,
-**Cancel** restores the text, and closing the keyboard ends editing.
+## On-screen keyboard (phones, tablets, VR)
 
-For an in-app VR keyboard instead, do two things:
+`SoftKeyboard` picks the keyboard that opens when the field gets focus:
 
-1. Set `HideSoftKeyboard = true` and `KeyboardSource = null`.
-2. Call `ProcessText`, `ProcessKey(InputFieldKey.Backspace)` and the other input methods from your keys.
+| `SoftKeyboard` | Opens |
+|---|---|
+| `Auto` (default) | The system keyboard (`TouchScreenKeyboard`) where it works: phones and tablets. The built-in [`UniTextKeyboard`](VRKeyboard.md) when an XR device is active (`XRSettings.isDeviceActive`): Meta Quest under OpenXR, PC VR. Nothing on desktop. |
+| `System` | Always `TouchKeyboard` (default `SystemTouchKeyboard`, a `TouchScreenKeyboard` wrapper). |
+| `BuiltIn` | Always the built-in keyboard (`BuiltInKeyboard`, or an enabled one in the scene, or one created on demand). |
+| `None` | No on-screen keyboard. `HideSoftKeyboard = true` has the same effect. |
+
+`ResolvedSoftKeyboard` tells which one `Auto` picks right now. `OpenBuiltInKeyboard` is the built-in
+keyboard that is open for the field, if any.
+
+**Meta Quest.** Under OpenXR, `TouchScreenKeyboard.Open` returns a keyboard whose `visible` is true, but
+nothing appears on the headset. This happens even with `oculus.software.overlay_keyboard` in the Android
+manifest. So in XR, `Auto` treats the default `SystemTouchKeyboard` as unusable and opens the built-in
+keyboard. The Meta system keyboard overlay needs the **Meta XR SDK's Virtual Keyboard** (Meta XR Core SDK,
+`OVRVirtualKeyboard`), which OpenGlyph does not include or depend on. To use it anyway:
+
+1. Wrap it in an `IInputFieldTouchKeyboard`.
+2. Assign that wrapper to `TouchKeyboard`.
+
+`Auto` trusts any custom implementation whose `IsSupported` is true, also in XR.
+
+**System keyboard flow.** On phones the field mirrors the system keyboard's text and selection. **Done**
+submits, **Cancel** restores the text, and closing the keyboard ends editing.
+
+**Built-in keyboard flow.** It opens below the field (or where its `Placement` says), with the numeric pad
+for Integer / Decimal / PIN and the e-mail row for e-mail fields. Its keys type through `ProcessText` and
+`ProcessKey`. Pressing a key does not take focus from the field: the keyboard is an
+`IInputFieldFocusKeeper`. Submit, deselect and the Hide key all close it. Password fields get no key
+preview popup. See [VRKeyboard.md](VRKeyboard.md).
+
+**Your own keyboard.** Call `ProcessText`, `ProcessKey(InputFieldKey.Backspace)` and the other input
+methods from your keys. Then set `SoftKeyboard = None`, and `KeyboardSource = null` if a physical keyboard
+should not type. To keep the field focused when your keyboard is clicked, implement
+`IInputFieldFocusKeeper` on it.
 
 ## Hierarchy
 
@@ -108,7 +139,8 @@ The field sets two options on its text component:
 | `CaretBlinkRate`, `CaretWidth`, `CaretShape` (Bar / Block / Underline), `CaretColor` / `CustomCaretColor`, `CustomCaret` | Caret look. A blink rate of 0 gives a steady caret. `CustomCaret` moves your own object (a sprite, a 3D cursor) to the caret instead of drawing one. |
 | `SelectionColor` | Selection highlight colour. |
 | `OnFocusSelectAll`, `ResetOnDeActivation`, `RestoreOriginalTextOnEscape`, `TabNavigation` | Focus behaviour. Tab / Shift+Tab move focus to the next or previous `Selectable`. |
-| `HideMobileInput`, `HideSoftKeyboard` | Touch keyboard options. |
+| `HideMobileInput`, `HideSoftKeyboard` | Touch keyboard options. `HideSoftKeyboard` disables every on-screen keyboard. |
+| `SoftKeyboard`, `BuiltInKeyboard`, `ResolvedSoftKeyboard`, `OpenBuiltInKeyboard` | Which on-screen keyboard opens on focus. See [on-screen keyboard](#on-screen-keyboard-phones-tablets-vr). |
 | `UndoGroupTimeout` | Keystrokes closer together than this (seconds) undo as one step. |
 | `KeyboardSource`, `TouchKeyboard`, `Clipboard` | Replaceable input backends. See [input backends](#input-backends). |
 | `IsFocused`, `DisplayedText`, `CaretLocalRect`, `GetSelectionRects`, `ScrollOffset` | Read-only state, for custom visuals and tests. |
@@ -254,7 +286,8 @@ same 15 key events and compares text, caret and anchor after each one. The remai
 - **Edits.** An edit relays out the text component once, the same as setting `Text`. The caret map is
   rebuilt from the new layout in the component's `LayoutApplied` callback.
 - **Touch keyboard.** While the system keyboard is open, the field reads `TouchScreenKeyboard.text` every
-  frame. On Android and Quest that read allocates a string.
+  frame. On Android that read allocates a string. The built-in keyboard keeps no copy of the text, so it
+  allocates nothing per frame.
 
 ## Limitations
 
@@ -269,8 +302,11 @@ same 15 key events and compares text, caret and anchor after each one. The remai
   Tags that replace text (for example `<upper>`) give approximate caret positions.
 - **World clipping.** World-space text is clipped to the viewport only by the unified renderer. With the
   legacy renderer, text that scrolls past the field is not clipped (the caret and selection still are).
-- **Device checks.** Touch keyboard behaviour on device (Android/iOS, and the Quest system keyboard) and
-  XR ray input are exercised only through the test seams in the Editor. Verify them on device.
+- **Device checks.** On-device touch keyboard behaviour (Android/iOS), the built-in keyboard in a headset,
+  and XR ray input are exercised only through the test seams in the Editor. Verify them on device.
+- **Meta system keyboard.** It is not supported through `TouchScreenKeyboard` under OpenXR (see
+  [on-screen keyboard](#on-screen-keyboard-phones-tablets-vr)). It needs the Meta XR SDK's Virtual Keyboard
+  behind a custom `IInputFieldTouchKeyboard`.
 
 ## Tests
 
@@ -280,3 +316,4 @@ same 15 key events and compares text, caret and anchor after each one. The remai
 | `Tests/Editor/Wave4EditingTests.cs` | Typing, Backspace/Delete, selection replace, surrogate pairs typed as two units; Enter per line type; undo/redo coalescing (word groups, backspace runs, timeout, redo cleared); paste sanitising, character limit at grapheme boundaries, `MaxPasteLength`, copy/cut; each content type; password mask glyphs; placeholder; IME composition insert / commit / cancel / replace selection; events and Escape; read-only; literal markup by default, `RichText` mapping. |
 | `Tests/Editor/Wave4FieldTests.cs` | Horizontal and vertical scrolling keep the caret in the viewport; world field ray / XR-raycast caret placement at an angle; the touch keyboard flow (options per content type, validated sync, Done, Cancel, hidden); 0 GC allocations per idle focused frame (`GC.Alloc` recorder); GlyphMeshProInputField forwarding and the step-by-step comparison with a real `TMP_InputField`; `UniTextSelectableText`. |
 | `Tests/Editor/Wave4BackendTests.cs` | The backend chosen for the project's input handling; the Input System source driven by a virtual keyboard (text, keys, Ctrl+A, IME events); Tab / Shift+Tab focus navigation. |
+| `Tests/Editor/Wave5KeyboardTests.cs` | The built-in keyboard: `SoftKeyboard` Auto / System / BuiltIn / None with XR simulated; auto-show on focus and hide on submit / deselect / Hide; focus kept on key presses; layouts per content type. See [VRKeyboard.md](VRKeyboard.md#tests). |
