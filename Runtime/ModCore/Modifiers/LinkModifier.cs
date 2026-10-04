@@ -149,7 +149,7 @@ namespace LightSide
 
             LinkClicked?.Invoke(range.data);
 
-            if (autoOpenUrl && !string.IsNullOrEmpty(range.data))
+            if (autoOpenUrl && IsOpenableUrl(range.data))
                 Application.OpenURL(range.data);
         }
 
@@ -163,6 +163,27 @@ namespace LightSide
         protected override void HandleRangeExited(InteractiveRange range)
         {
             LinkExited?.Invoke();
+        }
+
+        /// <summary>
+        /// True when <paramref name="data"/> is a URL the OS can open: it has a scheme
+        /// (<c>https://…</c>, <c>mailto:</c>, <c>tel:</c>, any <c>scheme:</c> of two or more letters).
+        /// Plain ids such as <c>&lt;link=manual&gt;</c> are not opened (Android turned them into
+        /// <c>file:///manual</c> and threw); they only raise <see cref="LinkClicked"/>.
+        /// </summary>
+        public static bool IsOpenableUrl(string data)
+        {
+            if (string.IsNullOrEmpty(data)) return false;
+            var colon = data.IndexOf(':');
+            if (colon < 2) return false; // no scheme, or a Windows drive letter ("C:")
+            for (var i = 0; i < colon; i++)
+            {
+                var c = data[i];
+                var ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                         (i > 0 && ((c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.'));
+                if (!ok) return false;
+            }
+            return true;
         }
     }
 }

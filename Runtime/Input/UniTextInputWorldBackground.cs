@@ -83,8 +83,10 @@ namespace LightSide
 
         private void LateUpdate()
         {
+            if (field == null) field = GetComponent<UniTextInputField>();
             var f = field != null && field.IsFocused;
             if (f != focused) { focused = f; Rebuild(); }
+            else ApplySorting(); // follows the text's sorting if it is changed later
         }
 
         /// <summary>Rebuilds the panel mesh from the current rect and state.</summary>
@@ -111,6 +113,27 @@ namespace LightSide
             }
             else mesh.RoundedRect(r, radius, focused ? m_FocusedColor : m_Color);
             s.Apply(mesh);
+            ApplySorting();
+        }
+
+        /// <summary>
+        /// Draw below the text, placeholder and selection: transparent renderers are otherwise ordered by
+        /// distance, and the panel's centre differs from the text's, so at some head angles the panel was
+        /// drawn over the text (text "disappearing" on Quest).
+        /// </summary>
+        private void ApplySorting()
+        {
+            if (field == null) field = GetComponent<UniTextInputField>(); // added after this component by Create
+            var text = field != null ? field.TextComponent : null;
+            var tr = text != null ? text.WorldRenderer : null;
+            var r = surface != null ? surface.Renderer : null;
+            if (tr == null || r == null) return;
+            var order = tr.sortingOrder;
+            var ph = field.Placeholder as UniText;
+            var pr = ph != null ? ph.WorldRenderer : null;
+            if (pr != null) order = Mathf.Min(order, pr.sortingOrder);
+            r.sortingLayerID = tr.sortingLayerID;
+            r.sortingOrder = order - 2;
         }
     }
 }
