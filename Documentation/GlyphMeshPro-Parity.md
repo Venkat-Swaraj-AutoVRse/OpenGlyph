@@ -18,6 +18,7 @@ Every row is kept in sync with ACTUAL behaviour; a non-"applied" status is a rea
 | Tags `<nobr> <font> <align> <indent> <line-indent> <mark> <noparse>` | **done (R3)** | see tag table; `<sprite>` out of scope |
 | 3D GlyphMeshPro (world-space MeshRenderer) | **done (wave 3)** | `Wave3WorldTextTests::GlyphMeshPro_World_MatchesGlyphMeshProUGUI`; see the GlyphMeshPro section below and `WorldText.md` |
 | Overflow Page / Linked / ScrollRect | **done (R3)** | see overflow table |
+| `TMP_InputField` (editable field) | **done (wave 4)** | `OpenGlyph.GlyphMeshProInputField`. `Wave4FieldTests::GlyphMeshProInputField_MatchesTmpInputField_ForAScriptedSequence` feeds 15 key events to it and to a real TMP_InputField; text, caret and anchor are equal after each one. See [the input field section](#input-field-glyphmeshproinputfield--wave-4) and `InputField.md`. |
 
 Each "done" row: deterministic headless test + full suite BOTH modes (renderer-off 256 pass/0 fail; unified-on 272 pass/0 fail; 280 total) + GPU side-by-side PNG verified against real TextMeshPro.
 
@@ -71,6 +72,7 @@ Where TMP exposes a concept the engine lacks (overflow modes, justification,
 |-------------------------------|---------------------------------------|-------|
 | `TextMeshProUGUI`             | `OpenGlyph.GlyphMeshProUGUI`          | Canvas component. |
 | `TextMeshPro`                 | `OpenGlyph.GlyphMeshPro`              | World-space MeshRenderer (wave 3): the GlyphMeshProUGUI adapter drawn without a Canvas; adds `sortingLayerID`, `sortingOrder`, `renderer`, `mesh`. |
+| `TMP_InputField`              | `OpenGlyph.GlyphMeshProInputField`    | Editable field (wave 4) over `LightSide.UniTextInputField`, with TMP member names and nested enums. |
 | `TMP_FontAsset`               | `LightSide.UniTextFont`               | Font asset. |
 | `TMP_Text`                    | `GlyphMeshProUGUI` base surface       | Abstract base in TMP; folded into the component here. |
 | `FontStyles` (flags)          | `OpenGlyph.FontStyles` (flags)        | Mirror of TMP flag names. Every flag applies (SmallCaps and Highlight since R3). |
@@ -93,7 +95,7 @@ parity · **stub** = present with TMP signature, TODO body (documented) ·
 |------------|--------|-----------------|
 | `string text` | direct | → `UniText.Text`. |
 | `SetText(string)` | adapter | → `Text` (no re-parse flag needed). |
-| `SetText(string, bool syncTextInputBox)` | adapter | sync flag ignored (no input field in R1). |
+| `SetText(string, bool syncTextInputBox)` | adapter | The sync flag is ignored: a `GlyphMeshProInputField` owns its label's text and rewrites it from its own `text`. |
 | `SetText(char[])`, `SetText(char[],start,length)` | direct | → `UniText.SetText(char[],…)`. |
 | `SetText(StringBuilder)` | adapter | copies into pooled char buffer, no per-call string alloc. |
 | `SetText(string, float arg0 … arg7)` | new | **No-alloc** numeric formatting into a reused `char[]`; mirrors TMP's `{0}`–`{7}` placeholder overloads. |
@@ -265,8 +267,36 @@ same way `UniTextWorld` does it for `UniText` (the world output lives in `UniTex
 | `fontSharedMaterial` / material presets | different | One shared `UniText/World/Uber` material per render option set (`Options`: lit, depth write, double-sided, collider). |
 | Glyph scale | different | TMP scales world glyphs by 0.1 (font size 36 in a 20 x 5 rect). GlyphMeshPro uses local units like the UGUI component; the TMP look is localScale 0.1 with a 200 x 50 rect (what the **GameObject > 3D Object > OpenGlyph > GlyphMeshPro - Text** menu creates). |
 | `isOrthographic`, `isVolumetricText`, `renderMode` | not applicable | |
+## Input field (`GlyphMeshProInputField`) — wave 4
+
+`OpenGlyph.GlyphMeshProInputField : LightSide.UniTextInputField`. The engine field does the work: the
+grapheme- and BiDi-aware caret, undo, IME, the touch keyboard, scrolling, and world space. The adapter
+only renames members to TMP's names, the same pattern as `GlyphMeshProUGUI` over `UniText`. Its text
+component is a `GlyphMeshProUGUI`, or `GlyphMeshPro` in world space. Create one with
+`GlyphMeshProInputField.CreateGlyphMeshPro(parent, world)` or **GameObject > UI > OpenGlyph > GlyphMeshPro -
+Input Field**. Full documentation: `Documentation/InputField.md`.
+
+| TMP_InputField member | Status | Notes |
+|---|---|---|
+| `text`, `SetTextWithoutNotify` | direct | Setting the text applies validation, the line type and the character limit. |
+| `caretPosition`, `selectionAnchorPosition`, `selectionFocusPosition` | adapter | Character indices: a surrogate pair counts as one character, as in TMP. |
+| `stringPosition`, `selectionStringAnchorPosition`, `selectionStringFocusPosition` | direct | UTF-16 indices. Values inside a grapheme snap to its start, so the caret is never inside an emoji or a combining sequence (TMP can place it there). |
+| `characterLimit` | direct | Counted in UTF-16 units like TMP, but never splits a grapheme. |
+| `contentType`, `lineType`, `inputType`, `keyboardType`, `characterValidation` | adapter | Nested enums with TMP's names and order. Setting `contentType` sets the dependent options as TMP does; changing one of them makes it `Custom`. |
+| `CharacterValidation.Regex`, `TMP_InputValidator` assets | **gap** | Regex behaves as None. Use `onValidateInput`. |
+| `readOnly`, `richText`, `multiLine`, `isFocused` | direct | `richText` defaults to **off**: typed tags stay text. |
+| `placeholder`, `textComponent`, `textViewport`, `pointSize` | direct | `textComponent` is typed `UniText`, so it accepts a GlyphMeshProUGUI. |
+| `caretBlinkRate`, `caretWidth`, `caretColor`, `customCaretColor`, `selectionColor`, `asteriskChar` | direct | `caretWidth` is in local units. Masking is one character per grapheme. |
+| `onFocusSelectAll`, `resetOnDeActivation`, `restoreOriginalTextOnEscape`, `shouldHideMobileInput`, `shouldHideSoftKeyboard` | direct | |
+| `onValueChanged`, `onEndEdit`, `onSubmit`, `onSelect`, `onDeselect`, `onTextSelection`, `onEndTextSelection`, `onValidateInput` | direct | Inherited fields with the same names. `onValidateInput` takes a `LightSide.InputFieldValidateInput` delegate with the same signature. |
+| `ActivateInputField`, `DeactivateInputField(bool)` | direct | Activation is immediate. TMP activates on its next `LateUpdate`. |
+| `MoveTextStart/End(bool)`, `MoveToStartOfLine/EndOfLine(bool, bool)`, `ForceLabelUpdate`, `ProcessEvent(Event)` | direct | `ProcessEvent` applies an IMGUI key event. The comparison test feeds the same events to both fields. |
+| `fontAsset`, `verticalScrollbar`, `scrollSensitivity`, `lineLimit`, `inputValidator`, `onTouchScreenKeyboardStatusChanged`, `keepTextSelectionVisible`, `isRichTextEditingAllowed`, `caretRectTrans` | **gap** | Not implemented. Set fonts on the text component. Scrolling follows the caret, but there is no scrollbar binding. |
+| Selection and caret graphics | different | Drawn by two helper objects next to the text (`UniTextInputOverlay` on a Canvas, a MeshRenderer in world space). TMP uses one caret `Graphic`. |
+
 ## Open gaps (tracked)
 
+- Input field: TMP `Regex` validation, `TMP_InputValidator` assets, scrollbar binding and `lineLimit` (see the input field section).
 - Wrapping **PreserveWhitespace / PreserveWhitespaceNoWrap**.
 - `<sprite>` (separate task), `<pos>` / `<rotate>` / `<page>` tags.
 - `GetTextInfo(string)` full fidelity (sprite/link/word info arrays).
