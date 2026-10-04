@@ -11,6 +11,11 @@
 #   cmake -S NativeSource~ -B build -G "Visual Studio 17 2022" -A x64
 #   cmake --build build --config Release
 #
+# UWP (Universal Windows Platform / Unity WSAPlayer) x64 or ARM64 build (needs the VS
+# "Universal Windows Platform development" workload):
+#   cmake -S NativeSource~ -B build -G "Visual Studio 17 2022" -A ARM64 #     -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0 -DOPENGLYPH_ENABLE_BLEND2D=ON
+#   cmake --build build --config Release
+#
 cmake_minimum_required(VERSION 3.24)
 
 # ---- Static CRT on MSVC (no VC++ redistributable dependency) ------------------
@@ -29,10 +34,24 @@ cmake_minimum_required(VERSION 3.24)
 # mismatches. A CACHE+FORCE write makes it win over any default a dependency's own CMakeLists
 # might set (see the Blend2D guard further down). Non-MSVC platforms are untouched: the policy
 # and variable have no effect off MSVC.
+#
+# EXCEPTION — UWP (CMAKE_SYSTEM_NAME=WindowsStore): app-container DLLs use the DYNAMIC app CRT
+# (/MD -> VCRUNTIME140_APP.dll + the UCRT api-ms-win-crt-* apisets). MSVC ships no static CRT
+# for the Store/app partition (lib/<arch>/store holds only the msvcrt/vcruntime/msvcprt import
+# libraries), and a packaged UWP app always carries the Microsoft.VCLibs.140.00 framework
+# dependency (Unity's generated UWP project references it), so the app CRT is present on every
+# device. This is the configuration the Windows App Certification Kit expects.
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING
-    "Static MSVC CRT (/MT, /MTd) so the DLLs carry no VC++ runtime import" FORCE)
+if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+  set(OPENGLYPH_UWP ON)
+  set(OPENGLYPH_MSVC_RUNTIME "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+else()
+  set(OPENGLYPH_UWP OFF)
+  set(OPENGLYPH_MSVC_RUNTIME "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+set(CMAKE_MSVC_RUNTIME_LIBRARY "${OPENGLYPH_MSVC_RUNTIME}" CACHE STRING
+    "MSVC CRT: static (/MT) on desktop Windows, dynamic app CRT (/MD) on UWP" FORCE)
 
 project(openglyph_native LANGUAGES C CXX)
 
@@ -175,11 +194,27 @@ FetchContent_Declare(harfbuzz
   GIT_TAG        ${OPENGLYPH_HARFBUZZ_TAG}
   GIT_SHALLOW    TRUE)
 set(HB_HAVE_FREETYPE   ON  CACHE BOOL "" FORCE)
-set(HB_BUILD_SUBSET    ON  CACHE BOOL "" FORCE)
+# harfbuzz-subset is only linked by the editor DLL, which is not built for UWP.
+if(OPENGLYPH_UWP)
+  set(HB_BUILD_SUBSET  OFF CACHE BOOL "" FORCE)
+else()
+  set(HB_BUILD_SUBSET  ON  CACHE BOOL "" FORCE)
+endif()
 set(HB_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
 set(HB_BUILD_UTILS     OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(freetype harfbuzz)
+
+# ---- UWP (app container) ------------------------------------------------------
+# FreeType's builds/windows/ftsystem.c switches to the app-container file API (CreateFile2,
+# CreateFileMappingFromApp, MapViewOfFileFromApp) only when _WINRT_DLL is defined; MSBuild sets
+# that macro for C++/CX component DLLs only, so define it for the (static) freetype target.
+# HarfBuzz detects the app partition itself (WINAPI_FAMILY_PARTITION; CreateFile2, HB_NO_GETENV).
+# CMake links WindowsStore targets against WindowsApp.lib only, so any API outside the UWP
+# surface is an unresolved external at link time; CI additionally audits the import table.
+if(OPENGLYPH_UWP AND TARGET freetype)
+  target_compile_definitions(freetype PRIVATE _WINRT_DLL)
+endif()
 
 # ---- Build-order wiring for FreeType's zlib/png dependencies -------------------
 # FreeType enables zlib + libpng support and #includes png.h, which in turn includes the
@@ -236,9 +271,19 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   # on a Blend2D version that reads its own switch instead of CMAKE_MSVC_RUNTIME_LIBRARY, the
   # static CRT is still selected. All MSVC-only; no effect on other toolchains.
   set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
-  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "${OPENGLYPH_MSVC_RUNTIME}" CACHE STRING "" FORCE)
   set(ASMJIT_NO_CUSTOM_FLAGS   TRUE CACHE BOOL "" FORCE)
-  set(BLEND2D_STATIC_RUNTIME   ON   CACHE BOOL "" FORCE)
+  if(OPENGLYPH_UWP)
+    set(BLEND2D_STATIC_RUNTIME OFF  CACHE BOOL "" FORCE)
+    # UWP: no JIT (executable memory needs VirtualAlloc/VirtualProtect outside the app API set and
+    # the codeGeneration capability; Blend2D then uses its portable static pipelines) and no futex
+    # probe (it calls GetModuleHandleA, which is not in the app API set; Blend2D falls back to
+    # SRW locks + condition variables).
+    set(BLEND2D_NO_JIT   TRUE CACHE BOOL "" FORCE)
+    set(BLEND2D_NO_FUTEX TRUE CACHE BOOL "" FORCE)
+  else()
+    set(BLEND2D_STATIC_RUNTIME ON   CACHE BOOL "" FORCE)
+  endif()
   FetchContent_Declare(blend2d
     GIT_REPOSITORY https://github.com/blend2d/blend2d.git
     GIT_TAG        ${OPENGLYPH_BLEND2D_TAG})
@@ -253,6 +298,11 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   # target's include path unconditionally so the asmjit umbrella headers always resolve.
   if(TARGET blend2d AND EXISTS "${asmjit_SOURCE_DIR}/src")
     target_include_directories(blend2d BEFORE PRIVATE "${asmjit_SOURCE_DIR}/src")
+  endif()
+  # Blend2D's own UWP switch (CreateFile2 / CreateFileMappingFromApp in filesystem.cpp). It
+  # self-detects only when _WIN32_WINNT is not yet defined, so set it explicitly.
+  if(OPENGLYPH_UWP AND TARGET blend2d)
+    target_compile_definitions(blend2d PRIVATE BL_PLATFORM_UWP)
   endif()
 endif()
 
@@ -314,6 +364,9 @@ if(OPENGLYPH_ENABLE_BLEND2D)
   target_compile_definitions(unitext_native PRIVATE OPENGLYPH_HAVE_BLEND2D=1)
 endif()
 target_include_directories(unitext_native PRIVATE include)
+if(OPENGLYPH_UWP)
+  target_compile_definitions(unitext_native PRIVATE OPENGLYPH_UWP=1)
+endif()
 # Output name to match Plugins/<platform>/: Windows 'unitext_native.dll'; ELF/Mach-O get the
 # 'lib' prefix (libunitext_native.so/.dylib/.a) which CMake adds by default on those platforms.
 if(WIN32)
@@ -335,7 +388,9 @@ endif()
 # ---- Editor library: unitext_native_editor (desktop only: Win/Linux/macOS) --------
 # Not shipped for Android/iOS/tvOS/WebGL (no editor tooling there). dialog_win32.c has a
 # non-Windows stub for the two dialog exports so subset+shape still build everywhere.
-if(WIN32 OR (UNIX AND NOT ANDROID AND NOT IOS AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS"))
+if(OPENGLYPH_UWP)
+  set(OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT OFF)   # UWP players never load the editor DLL
+elseif(WIN32 OR (UNIX AND NOT ANDROID AND NOT IOS AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS"))
   set(OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT ON)
 else()
   set(OPENGLYPH_BUILD_EDITOR_DLL_DEFAULT OFF)
