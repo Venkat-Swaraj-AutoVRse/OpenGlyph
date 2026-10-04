@@ -168,6 +168,15 @@ namespace LightSide.Tests
             var c = SystemFontFallback.PrepareForTextCalls;
             for (var i = 0; i < 5; i++) Make(shared);
             Assert.AreEqual(c + 1, SystemFontFallback.PrepareForTextCalls, "one string, one stack: scanned once for all components");
+
+            // Equal text in distinct string instances (e.g. instantiated prefabs): still scanned once.
+            var c2 = SystemFontFallback.PrepareForTextCalls;
+            for (var i = 0; i < 5; i++) Make(new string(shared.ToCharArray()));
+            Assert.AreEqual(c2, SystemFontFallback.PrepareForTextCalls, "equal text in new string instances is not rescanned");
+
+            // Different text: scanned.
+            Make(shared + "!");
+            Assert.AreEqual(c2 + 1, SystemFontFallback.PrepareForTextCalls, "different text is scanned");
         }
 
         [Test]

@@ -207,7 +207,8 @@ namespace LightSide
 
         // Process-wide memo of the last prepared text (main thread). Preparing the same text against the
         // same stack, language and fallback state again finds nothing new to load or report (every code
-        // point is covered or its script already resolved), so components sharing one string scan it once.
+        // point is covered or its script already resolved), so components showing the same text (lists,
+        // pooled labels, instantiated prefabs) scan it once.
         private static string lastPreparedString;
         private static int lastPreparedStart;
         private static int lastPreparedLength = -1;
@@ -240,9 +241,11 @@ namespace LightSide
                 }
             }
 
-            if (str != null && ReferenceEquals(str, lastPreparedString) && strStart == lastPreparedStart &&
-                text.Length == lastPreparedLength && ReferenceEquals(stack, lastPreparedStack) &&
-                lastPreparedGeneration == generation && string.Equals(lastPreparedLanguage, language, StringComparison.Ordinal))
+            if (lastPreparedString != null && text.Length == lastPreparedLength &&
+                ReferenceEquals(stack, lastPreparedStack) && lastPreparedGeneration == generation &&
+                string.Equals(lastPreparedLanguage, language, StringComparison.Ordinal) &&
+                ((str != null && ReferenceEquals(str, lastPreparedString) && strStart == lastPreparedStart) ||
+                 SameChars(text, lastPreparedString.AsSpan(lastPreparedStart, lastPreparedLength))))
             {
                 RememberPrepared(text, str, strStart, stack, generation);
                 return;
