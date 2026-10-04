@@ -1382,11 +1382,12 @@ namespace LightSide
             return sdfFacePool.RenderSdfBatch(batch.filteredGlyphs, batch.pointSize,
                 FT.LOAD_DEFAULT | FT.LOAD_NO_BITMAP, batch.spread);
 #else
-            var face = EnsureFTFace();
-            if (face == IntPtr.Zero) return null;
+            // Web: no worker threads, so render sequentially on the shared face.
+            var sdfFace = EnsureFTFace();
+            if (sdfFace == IntPtr.Zero) return null;
             var rendered = new SdfRenderedGlyph[batch.filteredGlyphs.Count];
             for (int i = 0; i < batch.filteredGlyphs.Count; i++)
-                SdfGlyphRenderer.TryRender(face, batch.filteredGlyphs[i], batch.pointSize,
+                SdfGlyphRenderer.TryRender(sdfFace, batch.filteredGlyphs[i], batch.pointSize,
                     FT.LOAD_DEFAULT | FT.LOAD_NO_BITMAP, batch.spread, out rendered[i]);
             return rendered;
 #endif
