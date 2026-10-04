@@ -279,6 +279,22 @@ namespace LightSide
             }
         }
 
+        private bool inputClipOn;
+        private Rect inputClipRect;
+
+        /// <summary>
+        /// Clips world text to <paramref name="localRect"/> (this object's local space) regardless of
+        /// <see cref="Overflow"/>; used by an input field to clip scrolled text to its viewport. Unified
+        /// renderer only, like Overflow Clip.
+        /// </summary>
+        internal void SetInputClip(bool on, Rect localRect)
+        {
+            if (on == inputClipOn && (!on || ClipApproximatelyEqual(localRect, inputClipRect))) return;
+            inputClipOn = on;
+            inputClipRect = localRect;
+            if (RendersToMeshRenderer) ApplyWorldClip();
+        }
+
         /// <summary>
         /// Overflow <see cref="TextOverflow.Clip"/> for world text: the world shader clips to <c>_ClipRect</c>
         /// in object space, set on this renderer only (a per-renderer block, so only clipped labels leave
@@ -288,11 +304,11 @@ namespace LightSide
         {
             var r = worldRenderer;
             if (r == null) return;
-            var want = overflow == TextOverflow.Clip && worldMeshPopulated;
+            var want = (overflow == TextOverflow.Clip || inputClipOn) && worldMeshPopulated;
             if (want)
             {
-                var local = rectTransform.rect;
-                var pad = padding;
+                var local = inputClipOn ? inputClipRect : rectTransform.rect;
+                var pad = inputClipOn ? Vector4.zero : padding;
                 if (pad != Vector4.zero)
                     local = Rect.MinMaxRect(local.xMin + pad.x, local.yMin + pad.w,
                         Mathf.Max(local.xMin + pad.x, local.xMax - pad.z), Mathf.Max(local.yMin + pad.w, local.yMax - pad.y));
