@@ -1307,6 +1307,8 @@ namespace LightSide
 
         private void OnConfigChanged()
         {
+            // The font stack (or a font in it) changed: texts prepared against it must be prepared again.
+            ForgetSharedSystemFontPrepare();
             SetDirty(DirtyFlags.All);
         }
         

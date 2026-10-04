@@ -162,6 +162,15 @@ namespace LightSide.Tests
         }
 
         [Test]
+        public void ComponentsSharingOneString_ScanItOnce()
+        {
+            var shared = new string(Text.ToCharArray()) + " shared";
+            var c = SystemFontFallback.PrepareForTextCalls;
+            for (var i = 0; i < 5; i++) Make(shared);
+            Assert.AreEqual(c + 1, SystemFontFallback.PrepareForTextCalls, "one string, one stack: scanned once for all components");
+        }
+
+        [Test]
         public void FontStackChange_RescansSameText()
         {
             var t = Make(Text);

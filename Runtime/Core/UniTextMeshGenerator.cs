@@ -963,6 +963,8 @@ namespace LightSide
             var hidden = ClusterHidden;
             var glyphHidden = GlyphHidden;
             var anyHidden = hidden != null || glyphHidden != null;
+            // Base fill hook (whole-text gradient): subscribed on the main thread before generation.
+            var onGlyphBase = OnGlyphBase;
 
             for (var i = 0; i < glyphCount; i++)
             {
@@ -1134,7 +1136,7 @@ namespace LightSide
                 triangleCount += 6;
                 currentGlyphVertexStart = i0;
 
-                OnGlyphBase?.Invoke();
+                onGlyphBase?.Invoke();
                 OnGlyph?.Invoke();
 
                 verts = vertices.data;
