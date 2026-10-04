@@ -86,7 +86,8 @@ namespace LightSide
         // absolute-path reads of installed font files (C:\Windows\Fonts, the per-user font folder) are not
         // part of the app's guaranteed file-system access (and HoloLens ships a different font set), so
         // the fallback is off there and logs one warning the first time a code point is uncovered.
-#if UNITY_WSA && !UNITY_EDITOR
+        // Web players (WebGL 2 and WebGPU) likewise: the browser sandbox exposes no installed font files.
+#if (UNITY_WSA || UNITY_WEBGL) && !UNITY_EDITOR
         private const bool PlatformSupportedDefault = false;
 #else
         private const bool PlatformSupportedDefault = true;
@@ -99,7 +100,7 @@ namespace LightSide
 
         /// <summary>
         /// False on platforms whose apps cannot read installed system fonts (Universal Windows Platform
-        /// players). There <see cref="Resolve(uint, bool)"/> always returns null and logs one warning per
+        /// and Web players). There <see cref="Resolve(uint, bool)"/> always returns null and logs one warning per
         /// session; bundle a font for every script the app shows in the font stack.
         /// </summary>
         public static bool IsSupportedOnThisPlatform => PlatformSupportedOverride ?? PlatformSupportedDefault;
@@ -107,7 +108,7 @@ namespace LightSide
         /// <summary>Text of the one-time warning logged where the fallback is unavailable.</summary>
         internal const string UnsupportedPlatformWarning =
             "[OpenGlyph] System font fallback is not available on this platform (Universal Windows Platform apps " +
-            "run in an app container and cannot rely on reading installed font files). Code points that no font in the font stack covers render as missing glyphs; " +
+            "run in an app container and Web players in a browser sandbox; neither can rely on reading installed font files). Code points that no font in the font stack covers render as missing glyphs; " +
             "bundle a font for every script the app shows in the font stack.";
 
         private static void WarnUnsupportedOnce(uint cp, UnityEngine.Object context)

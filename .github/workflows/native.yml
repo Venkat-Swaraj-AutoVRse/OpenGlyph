@@ -738,6 +738,16 @@ jobs:
   # Same self-contained requirement as the Apple static targets: merge every dependency .a
   # (FreeType + HarfBuzz + libpng + zlib) with the ut_* objects into ONE archive via emar.
   # Blend2D is OFF on wasm, so there is no blend2d/asmjit archive to exclude.
+  #
+  # Two constraints come from Unity's Web player link (WebGL 2 and WebGPU share it):
+  #  * Toolchain: emsdk MUST match the emscripten Unity links with (Unity 2023.2 / 6000.x ship
+  #    3.1.39, LLVM 17). Objects from a newer emsdk (3.1.64 here before) lower setjmp/longjmp to
+  #    __wasm_setjmp / __wasm_setjmp_test, which Unity's 3.1.39 runtime does not provide, so the
+  #    player link fails with "undefined symbol: __wasm_setjmp" (FreeType's rasterizer uses setjmp).
+  #  * Symbols: Unity's own TextRenderingModule / libpng.a / zlib.a define FreeType, libpng and zlib
+  #    symbols, so a plain merged archive fails with "wasm-ld: error: duplicate symbol: FT_*".
+  #    Tools~/wasm_prefix_symbols.py renames every symbol the archive defines to __ut_<name>
+  #    except the public ut_* entry points (as the original UniText archive did).
   webgl:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -747,10 +757,10 @@ jobs:
         uses: lukka/get-cmake@v3.31.6
         with:
           cmakeVersion: "${{ env.CMAKE_VERSION }}"
-      - name: Setup emsdk (pinned)
+      - name: Setup emsdk (pinned to Unity 6's emscripten)
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: "3.1.64"
+          version: "3.1.39"
       - name: Configure + build (static .a)
         run: |
           emcmake cmake -S "NativeSource~" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -771,6 +781,42 @@ jobs:
           emar -M < "$MRI"
           emranlib "$RUNNER_TEMP/libunitext_native.a" || true
           ls -l "$RUNNER_TEMP/libunitext_native.a"
+      - name: Prefix bundled-library symbols (__ut_)
+        run: |
+          set -euo pipefail
+          emcc --version | head -1
+          python3 "Tools~/wasm_prefix_symbols.py" "$(command -v emar)" \
+            "$RUNNER_TEMP/libunitext_native.a" "$RUNNER_TEMP/libunitext_native.prefixed.a"
+          mv "$RUNNER_TEMP/libunitext_native.prefixed.a" "$RUNNER_TEMP/libunitext_native.a"
+          emranlib "$RUNNER_TEMP/libunitext_native.a" || true
+          ls -l "$RUNNER_TEMP/libunitext_native.a"
+      - name: Verify no unprefixed global symbol (Unity link clash guard)
+        run: |
+          set -u
+          f="$RUNNER_TEMP/libunitext_native.a"
+          rm -rf "$RUNNER_TEMP/pfx"; mkdir -p "$RUNNER_TEMP/pfx"
+          ( cd "$RUNNER_TEMP/pfx" && emar x "$f" )
+          NMTOOL=""
+          for cand in emnm llvm-nm; do if command -v "$cand" >/dev/null 2>&1; then NMTOOL="$cand"; break; fi; done
+          : > "$RUNNER_TEMP/pfx.txt"
+          for o in "$RUNNER_TEMP/pfx"/*.o; do
+            "$NMTOOL" --defined-only --extern-only "$o" 2>/dev/null >> "$RUNNER_TEMP/pfx.txt" || true
+          done
+          total="$(awk 'NF>=2 {print $NF}' "$RUNNER_TEMP/pfx.txt" | sort -u | wc -l | tr -d ' ')"
+          bad="$(awk 'NF>=2 {print $NF}' "$RUNNER_TEMP/pfx.txt" | sort -u | grep -vE '^(ut_|__ut_)' || true)"
+          echo "defined global symbols: $total"
+          if [ "$total" -lt 1000 ]; then echo "PREFIX FAIL: nm listed too few symbols ($total)"; exit 1; fi
+          if [ -n "$bad" ]; then
+            echo "PREFIX FAIL: global symbols that would clash with Unity's FreeType/HarfBuzz/libpng/zlib:"
+            echo "$bad" | head -50; exit 1
+          fi
+          echo "  OK: every global symbol is ut_* (public) or __ut_* (bundled, renamed)"
+          # Unity's emscripten 3.1.39 runtime has no __wasm_setjmp*; objects built by a newer emsdk
+          # reference it and fail the player link.
+          if cat "$RUNNER_TEMP/pfx"/*.o | grep -aq '__wasm_setjmp'; then
+            echo "TOOLCHAIN FAIL: objects reference __wasm_setjmp (built by an emsdk newer than Unity's)"; exit 1
+          fi
+          echo "  OK: no __wasm_setjmp references"
       - name: Stage outputs
         run: |
           mkdir -p out/WebGL
@@ -805,6 +851,32 @@ jobs:
             echo "LINK SMOKE FAIL (webgl): undefined symbols"; cat "$RUNNER_TEMP/smoke.err"; exit 1
           fi
           echo "  OK (webgl)"
+          # Clash test: a host that defines its OWN FreeType/HarfBuzz symbols (as Unity's web
+          # runtime does) must link with the archive without "duplicate symbol" errors.
+          cat > "$RUNNER_TEMP/clash.c" <<'EOF'
+          int FT_Init_FreeType(void *p) { (void)p; return 0; }
+          int FT_Get_Advance(void *f, unsigned g, int l, long *a) { (void)f; (void)g; (void)l; *a = 0; return 0; }
+          int FT_Outline_Decompose(void *o, const void *f, void *u) { (void)o; (void)f; (void)u; return 0; }
+          void *hb_buffer_create(void) { return 0; }
+          void *hb_font_create(void *face) { (void)face; return 0; }
+          extern void *ut_ft_init(void);
+          extern void *ut_hb_buffer_create(void);
+          extern int   ut_ft_get_outline_data(void);
+          extern int   ut_hb_shape(void);
+          int main(void) {
+            volatile void *a = (void*)&ut_ft_init;
+            volatile void *b = (void*)&ut_hb_buffer_create;
+            volatile void *c = (void*)&ut_ft_get_outline_data;
+            volatile void *d = (void*)&ut_hb_shape;
+            return (a && b && c && d) ? 0 : 1;
+          }
+          EOF
+          emcc "$RUNNER_TEMP/clash.c" -o "$RUNNER_TEMP/clash.js" "$RUNNER_TEMP/libunitext_native.a" \
+            2> "$RUNNER_TEMP/clash.err" || { echo "CLASH SMOKE FAIL (webgl):"; cat "$RUNNER_TEMP/clash.err"; exit 1; }
+          if grep -qiE 'duplicate symbol|undefined symbol' "$RUNNER_TEMP/clash.err"; then
+            echo "CLASH SMOKE FAIL (webgl)"; cat "$RUNNER_TEMP/clash.err"; exit 1
+          fi
+          echo "  OK (webgl clash test: host FreeType/HarfBuzz symbols do not collide)"
       - name: Verify arch + ut_* symbol count
         run: |
           # NOTE: no `set -o pipefail` here. `llvm-nm`/`emar` over an ar archive can return

@@ -55,17 +55,16 @@ and each one is checked by reading only its `cmap` table (every face of a `.ttc`
 4. All other font files in those directories, up to 400 probed files per script. Only the table
    directory and `cmap` of each file are read.
 
-WebGL has no file system and is not supported by this fallback.
-
-**Universal Windows Platform (UWP) players** run in an app container and cannot rely on reading installed font
-files, so the fallback is off there (`SystemFontFallback.IsSupportedOnThisPlatform` is `false`): an uncovered
+**Web players (WebGL 2 and WebGPU)** run in a browser sandbox with no installed font files, and **Universal
+Windows Platform (UWP) players** run in an app container and cannot rely on reading installed font
+files, so the fallback is off on both (`SystemFontFallback.IsSupportedOnThisPlatform` is `false`): an uncovered
 code point renders as a missing glyph and one warning is logged per session:
 
 ```
-[OpenGlyph] System font fallback is not available on this platform (Universal Windows Platform apps run in an app container and cannot rely on reading installed font files). Code points that no font in the font stack covers render as missing glyphs; bundle a font for every script the app shows in the font stack. (first uncovered: U+0BA4)
+[OpenGlyph] System font fallback is not available on this platform (Universal Windows Platform apps run in an app container and Web players in a browser sandbox; neither can rely on reading installed font files). Code points that no font in the font stack covers render as missing glyphs; bundle a font for every script the app shows in the font stack. (first uncovered: U+0BA4)
 ```
 
-There is no system emoji font on UWP either; bundle a color emoji font. See [Platforms](Platforms.md).
+There is no system emoji font on UWP either; bundle a color emoji font. See [Platforms](Platforms.md). On the web, emoji are drawn by the browser ([Web](Web.md)).
 
 ## CJK
 

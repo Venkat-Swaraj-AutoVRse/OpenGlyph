@@ -14,7 +14,7 @@ same 118 `ut_*` functions; provenance, sizes and SHA-256 hashes are in
 | Android (incl. Meta Quest) | `Android/<abi>/libunitext_native.so` | ARMv7, ARM64, x86, x64 | Quest 3S verified on device. |
 | iOS | `iOS/libunitext_native.xcframework` | ARM64 device, ARM64/x64 simulator | Static, linked as `__Internal`. Blend2D off. |
 | tvOS | `tvOS/libunitext_native.a` | ARM64 | Static, `__Internal`. Blend2D off. |
-| WebGL | `WebGL/libunitext_native.a` | wasm | Static, `__Internal`. Single-threaded; emoji drawn by the browser. |
+| Web: WebGL 2 and WebGPU (`WebGL`) | `WebGL/libunitext_native.a` | wasm | Static, `__Internal`, emscripten 3.1.39, bundled symbols prefixed `__ut_`. Single-threaded; emoji drawn by the browser; no system font fallback. WebGPU is an experimental Unity backend. See [Web](Web.md). |
 
 ## Universal Windows Platform (UWP)
 

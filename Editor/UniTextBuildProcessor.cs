@@ -128,8 +128,21 @@ namespace LightSide
             Cat.Meow($"[UniText] Added {shaderName} to Always-Included Shaders for the build.");
         }
 
-        private static void ValidateWebGLSettings()
+        // The Web build target ("WebGL" in the BuildTarget enum) covers both web graphics APIs:
+        // WebGL 2 (GraphicsDeviceType.OpenGLES3) and, on Unity 6+, WebGPU (GraphicsDeviceType.WebGPU,
+        // experimental). Both run the same wasm player, so UNITY_WEBGL is defined for either and the
+        // same native static library (Plugins/WebGL/libunitext_native.a) is linked.
+        //
+        // The only fix-up OpenGlyph ever needed here is removing WebGL 1 (OpenGLES2), which cannot
+        // render a Linear-colour-space project. WebGL 1 no longer exists in Unity 2023.1+, so there the
+        // graphics API list is left exactly as the user set it: in particular "Auto Graphics API" stays
+        // on, and WebGPU (alone, or ahead of / behind WebGL 2 as a fallback) is never reordered or removed.
+        internal static void ValidateWebGLSettings()
         {
+#if UNITY_2023_1_OR_NEWER
+            Cat.Meow($"[UniText] ValidateWebGLSettings: autoAPI={PlayerSettings.GetUseDefaultGraphicsAPIs(BuildTarget.WebGL)}, " +
+                     $"APIs=[{string.Join(", ", PlayerSettings.GetGraphicsAPIs(BuildTarget.WebGL))}] (WebGL 2 and WebGPU both supported; nothing to change)");
+#else
             var colorSpace = PlayerSettings.colorSpace;
             var isAutoAPI = PlayerSettings.GetUseDefaultGraphicsAPIs(BuildTarget.WebGL);
             var graphicsAPIs = isAutoAPI ? System.Array.Empty<GraphicsDeviceType>() : PlayerSettings.GetGraphicsAPIs(BuildTarget.WebGL);
@@ -161,6 +174,7 @@ namespace LightSide
 
             Cat.Meow($"[UniText] Switching to WebGL 2.0: [{string.Join(", ", newAPIs)}]");
             PlayerSettings.SetGraphicsAPIs(BuildTarget.WebGL, newAPIs);
+#endif
         }
     }
 

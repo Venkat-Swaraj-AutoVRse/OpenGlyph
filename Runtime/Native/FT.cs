@@ -417,11 +417,9 @@ namespace LightSide
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern void ut_ft_get_glyph_metrics(IntPtr face, out int width, out int height, out int bearingX, out int bearingY, out int advanceX, out int advanceY);
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern void ut_ft_get_bitmap_info(IntPtr face, out int width, out int height, out int pitch, out int pixelMode, out IntPtr buffer);
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern IntPtr ut_ft_get_glyph_slot(IntPtr face);
-    #if !UNITY_WEBGL || UNITY_EDITOR
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern int ut_ft_get_bitmap_top(IntPtr face);
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern int ut_ft_get_bitmap_left(IntPtr face);
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern int ut_ft_set_sdf_spread(IntPtr library, int spread);
-    #endif
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern int ut_ft_render_sdf_glyph(IntPtr face, uint glyphIndex, int loadFlags, int spread, out SdfGlyphResult result);
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern void ut_ft_free_sdf_buffer(IntPtr buffer);
         [DllImport(LibraryName, CallingConvention = Cdecl)] private static extern int ut_debug_sbix_graphic_type(IntPtr face, byte[] outGraphicType, out int outNumStrikes);
@@ -535,7 +533,6 @@ namespace LightSide
             return initialized;
         }
 
-    #if !UNITY_WEBGL || UNITY_EDITOR
         /// <summary>
         /// Sets the SDF spread (max distance in pixels) for both "sdf" and "bsdf" FreeType modules.
         /// Must be called after Initialize(). Default FreeType spread is 8.
@@ -547,7 +544,6 @@ namespace LightSide
             if (!initialized || library == IntPtr.Zero) return false;
             return ut_ft_set_sdf_spread(library, spread) == 0;
         }
-    #endif
 
     #if UNITY_EDITOR
         static FT()
@@ -839,7 +835,6 @@ namespace LightSide
             };
         }
 
-    #if !UNITY_WEBGL || UNITY_EDITOR
         /// <summary>
         /// Gets bitmap_top from the glyph slot after rendering.
         /// For sbix glyphs, this includes the glyf bbox.yMin correction that
@@ -860,7 +855,6 @@ namespace LightSide
             if (!initialized || face == IntPtr.Zero) return 0;
             return ut_ft_get_bitmap_left(face);
         }
-    #endif
 
         public static BitmapData GetBitmapData(IntPtr face)
         {
