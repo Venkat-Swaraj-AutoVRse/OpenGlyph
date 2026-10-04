@@ -13,7 +13,7 @@
 #
 # UWP (Universal Windows Platform / Unity WSAPlayer) x64 or ARM64 build (needs the VS
 # "Universal Windows Platform development" workload):
-#   cmake -S NativeSource~ -B build -G "Visual Studio 17 2022" -A ARM64 #     -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0 -DOPENGLYPH_ENABLE_BLEND2D=ON
+#   cmake -S NativeSource~ -B build -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0 -DOPENGLYPH_ENABLE_BLEND2D=ON
 #   cmake --build build --config Release
 #
 cmake_minimum_required(VERSION 3.24)
