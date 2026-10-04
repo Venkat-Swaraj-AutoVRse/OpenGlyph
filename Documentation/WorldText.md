@@ -35,6 +35,7 @@ var go = new GameObject("Label", typeof(RectTransform));
 go.transform.SetPositionAndRotation(new Vector3(0, 1.6f, 2f), Quaternion.identity);
 go.transform.localScale = Vector3.one * 0.005f;          // 200 local units = 1 m
 var label = go.AddComponent<UniTextWorld>();             // adds MeshFilter + MeshRenderer
+label.RegisterDefaultMarkup();                            // <b>, <color>, ... (a plain component parses no tags)
 label.rectTransform.sizeDelta = new Vector2(400, 80);     // text area, local units
 label.FontSize = 36;                                      // 36 local units = 18 cm per em here
 label.Text = "Valve <b>A</b> · <color=#38BDF8>open</color>";

@@ -857,7 +857,7 @@ namespace LightSide
                 SetDirty(DirtyFlags.Text);
             }
 
-            if (modRegisters.Count == 0 && !HasAnyModRegisterConfigs())
+            if (modRegisters.Count == 0 && !HasAnyModRegisterConfigs() && implicitMarkup is not { Count: > 0 })
             {
                 DestroyAttributeParser();
             }
@@ -865,7 +865,7 @@ namespace LightSide
             return true;
         }
 
-        /// <summary>Removes all registered modifiers.</summary>
+        /// <summary>Removes all registered modifiers (also the project-default markup).</summary>
         public void ClearModifiers()
         {
             for (var i = 0; i < modRegisters.Count; i++)
@@ -873,6 +873,11 @@ namespace LightSide
                 modRegisters[i].Unregister(attributeParser);
             }
             modRegisters.Clear();
+            if (implicitMarkup != null)
+            {
+                for (var i = 0; i < implicitMarkup.Count; i++) implicitMarkup[i].Unregister(attributeParser);
+                implicitMarkup = null;
+            }
             DestroyAttributeParser();
         }
 
@@ -907,6 +912,8 @@ namespace LightSide
             {
                 modRegisters[i].DeinitializeModifier();
             }
+            if (implicitMarkup != null)
+                for (var i = 0; i < implicitMarkup.Count; i++) implicitMarkup[i].DeinitializeModifier();
             for (var i = 0; i < runtimeConfigCopies.Count; i++)
             {
                 var config = runtimeConfigCopies[i];
@@ -924,6 +931,8 @@ namespace LightSide
             {
                 modRegisters[i].ResetState();
             }
+            if (implicitMarkup != null)
+                for (var i = 0; i < implicitMarkup.Count; i++) implicitMarkup[i].ResetState();
             for (var i = 0; i < runtimeConfigCopies.Count; i++)
             {
                 var config = runtimeConfigCopies[i];
@@ -938,13 +947,17 @@ namespace LightSide
         {
             if (attributeParser != null) return;
             if (textProcessor == null) return;
+            ResolveImplicitMarkup();
 
-            if (modRegisters is { Count: > 0 } || HasAnyModRegisterConfigs())
+            if (modRegisters is { Count: > 0 } || HasAnyModRegisterConfigs() || implicitMarkup is { Count: > 0 })
             {
                 EnsureRuntimeConfigCopiesCreated();
 
                 attributeParser = new AttributeParser();
                 RegisterModsWithParser(modRegisters);
+                if (implicitMarkup != null)
+                    for (var i = 0; i < implicitMarkup.Count; i++)
+                        if (implicitMarkup[i] is { IsValid: true }) implicitMarkup[i].Register(this, attributeParser);
                 for (var i = 0; i < runtimeConfigCopies.Count; i++)
                 {
                     RegisterModsWithParser(runtimeConfigCopies[i].modRegisters);

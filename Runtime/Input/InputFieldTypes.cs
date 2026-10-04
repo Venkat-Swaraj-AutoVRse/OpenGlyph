@@ -134,4 +134,32 @@ namespace LightSide
     {
         public string Text { get; set; } = string.Empty;
     }
+
+    /// <summary>Which on-screen keyboard a <see cref="UniTextInputField"/> opens when it gets focus.</summary>
+    public enum InputFieldSoftKeyboard
+    {
+        /// <summary>
+        /// The system keyboard where it works (phones, tablets: <see cref="TouchScreenKeyboard"/>), the built-in
+        /// <see cref="UniTextKeyboard"/> when an XR device is active (Meta Quest under OpenXR, PC VR: the
+        /// system keyboard does not appear there), otherwise none (desktop, physical keyboard). Default.
+        /// </summary>
+        Auto = 0,
+        /// <summary>Always the system / platform keyboard (<see cref="UniTextInputField.TouchKeyboard"/>).</summary>
+        System = 1,
+        /// <summary>Always the built-in <see cref="UniTextKeyboard"/>.</summary>
+        BuiltIn = 2,
+        /// <summary>No on-screen keyboard.</summary>
+        None = 3,
+    }
+
+    /// <summary>
+    /// Implemented by UI that types into a field (an on-screen keyboard): a pointer press on it does not take
+    /// focus from the field. When the EventSystem deselects a field because of a press on such an object,
+    /// the field stays focused and selects itself again.
+    /// </summary>
+    public interface IInputFieldFocusKeeper
+    {
+        /// <summary>Whether a press on this object keeps <paramref name="field"/> focused.</summary>
+        bool KeepsFocus(UniTextInputField field);
+    }
 }

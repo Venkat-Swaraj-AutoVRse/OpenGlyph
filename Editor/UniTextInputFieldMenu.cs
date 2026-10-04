@@ -28,6 +28,25 @@ namespace LightSide
             Place(f.gameObject, "Create UniText Input Field (World)");
         }
 
+        [MenuItem("GameObject/3D Object/OpenGlyph/UniText Keyboard (World)", false, 2103)]
+        private static void CreateWorldKeyboard(MenuCommand cmd)
+        {
+            // 4.5 cm keys; fields with Soft Keyboard = Auto/BuiltIn use it (it is hidden until one is focused in Play Mode).
+            var parent = (cmd.context as GameObject)?.transform;
+            var k = UniTextKeyboard.Create(parent, true);
+            k.Show();
+            EnsureEventSystem();
+            Place(k.gameObject, "Create UniText Keyboard (World)");
+        }
+
+        [MenuItem("GameObject/UI/OpenGlyph/UniText - Keyboard", false, 2003)]
+        private static void CreateCanvasKeyboard(MenuCommand cmd)
+        {
+            var k = UniTextKeyboard.Create(CanvasParent(cmd), false);
+            k.Show();
+            Place(k.gameObject, "Create UniText Keyboard");
+        }
+
         private static void Place(GameObject go, string undo)
         {
             Undo.RegisterCreatedObjectUndo(go, undo);
