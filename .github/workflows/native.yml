@@ -207,7 +207,7 @@ jobs:
         run: >
           cmake -S "NativeSource~" -B build -G "Visual Studio 17 2022"
           -A ${{ matrix.arch }}
-          -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0
+          "-DCMAKE_SYSTEM_NAME=WindowsStore" "-DCMAKE_SYSTEM_VERSION=10.0"
           -DOPENGLYPH_ENABLE_BLEND2D=ON
       - name: Build
         run: cmake --build build --config Release
