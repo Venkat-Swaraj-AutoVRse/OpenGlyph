@@ -7,7 +7,8 @@ namespace LightSide
     public partial class UniTextInputField
     {
         /// <summary>
-        /// Builds a field: the field object (with a background Image on a Canvas, a BoxCollider in world space
+        /// Builds a field: the field object (with a background Image on a Canvas; in world space a
+        /// <see cref="UniTextInputWorldBackground"/> panel with light text, and a BoxCollider
         /// for PhysicsRaycaster / XRI ray pointers), a "Text Area" viewport (RectMask2D on a Canvas) and
         /// "Placeholder" + "Text" children (<see cref="UniText"/>, or <see cref="UniTextWorld"/> when
         /// <paramref name="world"/>). Sizes are in the parent's local units; for world space scale the
@@ -43,9 +44,20 @@ namespace LightSide
             var fontSize = Mathf.Clamp(sz.y * 0.5f, 8f, 64f);
             var placeholder = MakeText(art, "Placeholder", textType, fontSize);
             placeholder.Text = placeholderText ?? string.Empty;
-            placeholder.color = new Color(0.196f, 0.196f, 0.196f, 0.5f);
             var text = MakeText(art, "Text", textType, fontSize);
-            text.color = new Color(0.196f, 0.196f, 0.196f, 1f);
+            if (world)
+            {
+                // World fields have no Canvas Image: a dark rounded panel with light text reads well in a
+                // headset against any scene (dark text on nothing was unreadable on device).
+                go.AddComponent<UniTextInputWorldBackground>();
+                placeholder.color = new Color(0.545f, 0.576f, 0.655f, 0.85f);
+                text.color = new Color(0.91f, 0.925f, 0.957f, 1f);
+            }
+            else
+            {
+                placeholder.color = new Color(0.196f, 0.196f, 0.196f, 0.5f);
+                text.color = new Color(0.196f, 0.196f, 0.196f, 1f);
+            }
 
             var field = (UniTextInputField)go.AddComponent(fieldType);
             field.targetGraphic = background;
